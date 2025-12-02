@@ -1,6 +1,6 @@
 # FreeSpace 2 Open - Vulkan Rendering Pipeline Port
 
-**Version:** 2.0
+**Version:** 2.2
 **Status:** Ready for Implementation (pending open question resolution)
 
 ---
@@ -25,7 +25,7 @@ Port the FreeSpace 2 Open (FSO) rendering backend from OpenGL to Vulkan, achievi
 ### 1.2 Scope
 
 **In Scope:**
-- Vulkan 1.1 rendering backend as alternative to OpenGL
+- Vulkan 1.4 rendering backend as alternative to OpenGL
 - Feature parity with current OpenGL implementation
 - Perceptually identical visual output
 - Windows and Linux platform support
@@ -36,16 +36,18 @@ Port the FreeSpace 2 Open (FSO) rendering backend from OpenGL to Vulkan, achievi
 - Ray tracing extensions
 - Mobile platforms
 - Performance optimization beyond parity
+- Legacy hardware support (use OpenGL fallback)
 
 ### 1.3 Constraints
 
-| Constraint | Value | Source |
-|------------|-------|--------|
-| Minimum Vulkan Version | 1.1 | `VulkanRenderer.cpp:26` |
-| API Version | VK_API_VERSION_1_1 | `VulkanRenderer.cpp:410` |
+| Constraint | Value | Rationale |
+|------------|-------|-----------|
+| Minimum Vulkan Version | 1.4 | Modern API, dynamic rendering, sync2 |
+| API Version | VK_API_VERSION_1_4 | Released 2024, wide driver support |
 | Minimum SDL Version | 2.0.6 | `VulkanRenderer.h:9` |
 | Memory Allocator | VMA 3.0+ | Design decision |
-| Shader Format | SPIR-V | Vulkan requirement |
+| Shader Format | SPIR-V 1.6 | Vulkan 1.4 requirement |
+| Fallback | OpenGL | Users with older hardware use existing OpenGL backend |
 
 ### 1.4 Current State
 
@@ -172,9 +174,10 @@ Port the FreeSpace 2 Open (FSO) rendering backend from OpenGL to Vulkan, achievi
 | NFR-010 | Reliability | Validation clean | Zero errors after 1000 frames |
 | NFR-011 | Reliability | Crash free | No crashes in standard gameplay |
 | NFR-012 | Reliability | Device lost recovery | Recovers from GPU reset |
-| NFR-020 | Compatibility | NVIDIA support | GTX 600 series+ |
-| NFR-021 | Compatibility | AMD support | GCN 1.0+ |
-| NFR-022 | Compatibility | Intel support | HD 4000+ |
+| NFR-020 | Compatibility | NVIDIA support | GTX 900 series+ (Maxwell Gen2+) |
+| NFR-021 | Compatibility | AMD support | RX 400 series+ (Polaris/GCN 4.0+) |
+| NFR-022 | Compatibility | Intel support | HD 500 series+ (Skylake Gen9+) |
+| NFR-023 | Compatibility | Older hardware | Use OpenGL backend (automatic fallback) |
 
 ---
 
@@ -630,7 +633,6 @@ VkPrimitiveTopology mapPrimitiveType(primitive_type type) {
 | Q-001 | Shader compilation: build-time or runtime? | Build/Runtime | Build-time base, runtime variants |
 | Q-002 | Pipeline stall handling? | Sync/Async/Precompile | Sync initially |
 | Q-003 | Descriptor set strategy? | Per-draw/Per-frame/Bindless | Per-frame with reset |
-| Q-005 | Geometry shader fallback? | Fail/Fallback/Disable | Disable thick outlines |
 | Q-010 | Visual parity approval? | Screenshot/Human/Both | Human with screenshot aid |
 | Q-011 | Milestone approval authority? | Developer/Reviewer | At least one reviewer |
 | Q-012 | Vulkan-specific bugs? | Fix/Track | Track in issue tracker |
@@ -641,13 +643,13 @@ VkPrimitiveTopology mapPrimitiveType(primitive_type type) {
 | ID | Assumption | Impact if Wrong |
 |----|------------|-----------------|
 | A-001 | VMA handles memory adequately | Must implement custom allocator |
-| A-002 | Vulkan 1.1 has all needed features | Must require 1.2 or extensions |
-| A-003 | Shader preprocessor outputs GLSL 4.50 | Must modify shader system |
+| A-002 | Vulkan 1.4 drivers available on target hardware | User falls back to OpenGL |
+| A-003 | Shader preprocessor outputs GLSL 4.60 | Must modify shader system |
 | A-004 | SDL2 Vulkan support sufficient | Must use platform-specific code |
 | A-005 | Single graphics queue sufficient | Must implement multi-queue |
-| A-006 | Pipeline stalls acceptable | Must implement async compilation |
-| A-007 | All hardware supports BC compression | Must implement fallback |
-| A-008 | Geometry shaders available | Must disable thick outlines |
+| A-006 | Dynamic rendering simplifies code | N/A - core in Vulkan 1.4 |
+| A-007 | All Vulkan 1.4 hardware supports BC compression | True - mandatory in spec |
+| A-008 | Geometry shaders available | True - mandatory in Vulkan 1.4 |
 
 ### 6.3 Risk Register
 
@@ -1784,6 +1786,7 @@ For scenarios that cannot be automated:
 | 1.0 | - | Initial comprehensive plan |
 | 2.0 | - | Consolidated from multiple documents; added requirements, design decisions, critical review feedback |
 | 2.1 | - | Added comprehensive testing strategy: unit tests, integration tests, visual regression infrastructure, CI workflow |
+| 2.2 | - | Updated to Vulkan 1.4 (from 1.1); older hardware uses OpenGL fallback; removed geometry shader concern |
 
 ---
 
