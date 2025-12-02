@@ -1,6 +1,6 @@
 # FreeSpace 2 Open - Vulkan Rendering Pipeline Port
 
-**Version:** 2.2
+**Version:** 2.3
 **Status:** Ready for Implementation (pending open question resolution)
 
 ---
@@ -56,6 +56,8 @@ Port the FreeSpace 2 Open (FSO) rendering backend from OpenGL to Vulkan, achievi
 - `RenderFrame.cpp`: Frame synchronization with semaphores/fences
 - `gr_vulkan.cpp`: Initialization entry point
 - `vulkan_stubs.cpp` (396 lines): 70+ stub function implementations
+
+**⚠️ Refactoring Required:** Existing code targets Vulkan 1.1 and uses `VkRenderPass`. Must be refactored to use Vulkan 1.4 dynamic rendering (`VK_KHR_dynamic_rendering`). This eliminates render pass and framebuffer boilerplate.
 
 **Existing OpenGL Reference:**
 - ~4,800 lines across 8 implementation files
@@ -238,7 +240,8 @@ struct PipelineKey {
     gr_alpha_blend blendMode;
     gr_zbuffer_type depthMode;
     int cullMode;
-    VkRenderPass renderPass;
+    VkFormat colorFormat;      // For dynamic rendering
+    VkFormat depthFormat;      // For dynamic rendering
 };
 
 SCP_unordered_map<PipelineKey, VkPipeline> g_pipelineCache;
@@ -254,14 +257,46 @@ Two-stage compilation for `.sdr` files:
 
 Compile on-demand, cache results. Defer async compilation until proven necessary.
 
-#### 3.2.4 Descriptor Set Strategy
+#### 3.2.4 Dynamic Rendering (Vulkan 1.4)
+
+Use `VK_KHR_dynamic_rendering` (core in 1.3+) instead of `VkRenderPass`:
+
+```cpp
+// Begin rendering directly to swapchain image
+VkRenderingAttachmentInfo colorAttachment{};
+colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+colorAttachment.imageView = swapchainImageView;
+colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+colorAttachment.clearValue.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+
+VkRenderingInfo renderInfo{};
+renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+renderInfo.renderArea = {{0, 0}, swapchainExtent};
+renderInfo.layerCount = 1;
+renderInfo.colorAttachmentCount = 1;
+renderInfo.pColorAttachments = &colorAttachment;
+renderInfo.pDepthAttachment = &depthAttachment;
+
+vkCmdBeginRendering(cmd, &renderInfo);
+// Draw commands...
+vkCmdEndRendering(cmd);
+```
+
+**Benefits:**
+- No `VkRenderPass` or `VkFramebuffer` objects to manage
+- Simpler render target switching
+- Pipelines specify formats directly via `VkPipelineRenderingCreateInfo`
+
+#### 3.2.5 Descriptor Set Strategy
 
 Per-frame allocation with pool reset:
 - Allocate from pool during frame
 - Reset entire pool at frame start
 - Simple, avoids complex bookkeeping
 
-#### 3.2.5 Resource Management
+#### 3.2.6 Resource Management
 
 Simple handle-to-resource maps:
 
@@ -688,7 +723,7 @@ add_executable(vulkan_tests
     test_texture_creation.cpp
     test_shader_loading.cpp
     test_descriptor_sets.cpp
-    test_render_pass.cpp
+    test_dynamic_rendering.cpp
     test_swapchain.cpp
 )
 target_link_libraries(vulkan_tests PRIVATE gtest gtest_main code)
@@ -823,24 +858,24 @@ protected:
 
 // Pipeline key hashing
 TEST_F(PipelineCacheTest, IdenticalKeys_ProduceSameHash) {
-    vulkan::PipelineKey key1{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
-    vulkan::PipelineKey key2{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+    vulkan::PipelineKey key1{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
+    vulkan::PipelineKey key2{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
 
     EXPECT_EQ(std::hash<vulkan::PipelineKey>{}(key1),
               std::hash<vulkan::PipelineKey>{}(key2));
 }
 
 TEST_F(PipelineCacheTest, DifferentShaderFlags_ProduceDifferentHash) {
-    vulkan::PipelineKey key1{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
-    vulkan::PipelineKey key2{SDR_TYPE_MODEL, SDR_FLAG_DIFFUSE, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+    vulkan::PipelineKey key1{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
+    vulkan::PipelineKey key2{SDR_TYPE_MODEL, SDR_FLAG_DIFFUSE, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
 
     EXPECT_NE(std::hash<vulkan::PipelineKey>{}(key1),
               std::hash<vulkan::PipelineKey>{}(key2));
 }
 
 TEST_F(PipelineCacheTest, DifferentBlendMode_ProduceDifferentHash) {
-    vulkan::PipelineKey key1{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
-    vulkan::PipelineKey key2{SDR_TYPE_MODEL, 0, ALPHA_BLEND_ADDITIVE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+    vulkan::PipelineKey key1{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
+    vulkan::PipelineKey key2{SDR_TYPE_MODEL, 0, ALPHA_BLEND_ADDITIVE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
 
     EXPECT_NE(std::hash<vulkan::PipelineKey>{}(key1),
               std::hash<vulkan::PipelineKey>{}(key2));
@@ -848,13 +883,13 @@ TEST_F(PipelineCacheTest, DifferentBlendMode_ProduceDifferentHash) {
 
 // Cache behavior
 TEST_F(PipelineCacheTest, GetOrCreate_ReturnsNullForMissingPipeline) {
-    vulkan::PipelineKey key{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+    vulkan::PipelineKey key{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
 
     EXPECT_EQ(VK_NULL_HANDLE, cache.get(key));
 }
 
 TEST_F(PipelineCacheTest, Insert_ThenGet_ReturnsSamePipeline) {
-    vulkan::PipelineKey key{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+    vulkan::PipelineKey key{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
     VkPipeline mockPipeline = reinterpret_cast<VkPipeline>(0x12345678);
 
     cache.insert(key, mockPipeline);
@@ -862,7 +897,7 @@ TEST_F(PipelineCacheTest, Insert_ThenGet_ReturnsSamePipeline) {
 }
 
 TEST_F(PipelineCacheTest, Clear_RemovesAllEntries) {
-    vulkan::PipelineKey key{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+    vulkan::PipelineKey key{SDR_TYPE_MODEL, 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
     VkPipeline mockPipeline = reinterpret_cast<VkPipeline>(0x12345678);
 
     cache.insert(key, mockPipeline);
@@ -874,7 +909,7 @@ TEST_F(PipelineCacheTest, Clear_RemovesAllEntries) {
 TEST_F(PipelineCacheTest, AllShaderTypes_ProduceUniqueKeys) {
     std::unordered_set<size_t> hashes;
     for (int i = 0; i < SDR_TYPE_MAX; i++) {
-        vulkan::PipelineKey key{static_cast<shader_type>(i), 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_NULL_HANDLE};
+        vulkan::PipelineKey key{static_cast<shader_type>(i), 0, ALPHA_BLEND_NONE, ZBUFFER_TYPE_FULL, 1, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_D32_SFLOAT};
         hashes.insert(std::hash<vulkan::PipelineKey>{}(key));
     }
     EXPECT_EQ(SDR_TYPE_MAX, hashes.size());
@@ -1787,6 +1822,7 @@ For scenarios that cannot be automated:
 | 2.0 | - | Consolidated from multiple documents; added requirements, design decisions, critical review feedback |
 | 2.1 | - | Added comprehensive testing strategy: unit tests, integration tests, visual regression infrastructure, CI workflow |
 | 2.2 | - | Updated to Vulkan 1.4 (from 1.1); older hardware uses OpenGL fallback; removed geometry shader concern |
+| 2.3 | - | Added dynamic rendering design; removed VkRenderPass from pipeline key; noted existing code refactoring requirement |
 
 ---
 
