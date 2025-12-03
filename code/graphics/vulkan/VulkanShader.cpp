@@ -531,6 +531,8 @@ SCP_string VulkanShaderManager::generateShaderHeader(shader_type type, uint32_t 
 
 	// Vulkan-specific extensions
 	header << "#extension GL_ARB_separate_shader_objects : enable\n";
+	// Needed so LAYOUT_SET_BINDING macros in legacy .sdr shaders emit descriptor sets instead of defaulting to set 0
+	header << "#extension GL_KHR_vulkan_glsl : enable\n";
 
 	// Lighting model
 	if (Detail.lighting < 3) {
