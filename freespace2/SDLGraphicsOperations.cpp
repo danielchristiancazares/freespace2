@@ -3,6 +3,8 @@
 
 #include "SDLGraphicsOperations.h"
 
+#include <cstdio>
+
 #include "cmdline/cmdline.h"
 #include "graphics/2d.h"
 
@@ -164,9 +166,28 @@ class SDLOpenGLContext: public os::OpenGLContext {
 class SDLWindowViewPort: public os::Viewport {
 	SDL_Window* _window;
 	os::ViewPortProperties _props;
+#ifdef _WIN32
+	HWND _hwnd;
+#endif
  public:
-	SDLWindowViewPort(SDL_Window* window, const os::ViewPortProperties& props) : _window(window), _props(props) {
+	SDLWindowViewPort(SDL_Window* window, const os::ViewPortProperties& props)
+		: _window(window), _props(props)
+#ifdef _WIN32
+		, _hwnd(nullptr)
+#endif
+	{
 		Assertion(window != nullptr, "Invalid window specified");
+
+#ifdef _WIN32
+		SDL_SysWMinfo wmInfo;
+		SDL_VERSION(&wmInfo.version);
+		if (SDL_GetWindowWMInfo(window, &wmInfo)) {
+			_hwnd = wmInfo.info.win.window;
+		} else {
+			mprintf(("SDL: Failed to query HWND for viewport (%s)\n", SDL_GetError()));
+			fflush(nullptr);
+		}
+#endif
 	}
 	~SDLWindowViewPort() override {
 		SDL_DestroyWindow(_window);
@@ -185,6 +206,11 @@ class SDLWindowViewPort: public os::Viewport {
 
 		return std::make_pair(width, height);
 	}
+#ifdef _WIN32
+	HWND getHWND() const override {
+		return _hwnd;
+	}
+#endif
 	void swapBuffers() override {
 		SDL_GL_SwapWindow(_window);
 	}

@@ -3,8 +3,8 @@ in vec4 fragTexCoord;
 
 out vec4 fragOut0;
 
-uniform sampler2D scene;
-uniform sampler2D cockpit;
+layout(set = 1, binding = 0) uniform sampler2D scene;
+layout(set = 1, binding = 1) uniform sampler2D cockpit;
 
 layout (std140) uniform genericData {
 	vec2 sun_pos;

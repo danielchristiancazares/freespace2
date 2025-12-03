@@ -1,7 +1,7 @@
 //!#version 150
 #include "gamma.sdr" //! #include "gamma.sdr"
 #define PI 3.1415926535897932384626433832795
-uniform samplerCube envmap;
+layout(set = 1, binding = 0) uniform samplerCube envmap;
 
 layout (std140) uniform genericData {
 	int face;

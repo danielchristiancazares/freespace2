@@ -6,6 +6,7 @@
 
 #include "VulkanRenderer.h"
 #include "VulkanBuffer.h"
+#include "VulkanDebug.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanDescriptorManager.h"
 #include "VulkanTexture.h"
@@ -297,8 +298,22 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 
 	// Helper to bind a texture slot (overrides placeholder if texture exists)
 	auto bindTextureSlot = [&](int textureHandle, uint32_t binding, const char* name) {
+		// These bindings are sampler2DArray in shaders
+		const bool needsArray = (binding == 0 || binding == 1 || binding == 2 || binding == 3 ||
+		                         binding == 9 || binding == 10);
+
 		if (textureHandle < 0) {
-			return; // Texture not used - placeholder already bound
+			// Texture not used - swap to array placeholder if needed
+			if (needsArray) {
+				if (auto* arrPlaceholder = g_vulkanTextureManager->getPlaceholderArrayTexture()) {
+					descriptorManager->updateCombinedImageSampler(descriptorSet,
+					                                               binding,
+					                                               arrPlaceholder->getImageView(),
+					                                               defaultSampler,
+					                                               vk::ImageLayout::eShaderReadOnlyOptimal);
+				}
+			}
+			return;
 		}
 
 		// Check if texture already exists in our manager
@@ -378,9 +393,17 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 			return;
 		}
 
+		auto* imageSource = texture;
+		// If the shader expects an array and the texture isn't an array, use the placeholder array view
+		if (needsArray && texture->getArrayLayers() <= 1) {
+			if (auto* arrPlaceholder = g_vulkanTextureManager->getPlaceholderArrayTexture()) {
+				imageSource = arrPlaceholder;
+			}
+		}
+
 		descriptorManager->updateCombinedImageSampler(descriptorSet,
 		                                               binding,
-		                                               texture->getImageView(),
+		                                               imageSource->getImageView(),
 		                                               sampler,
 		                                               vk::ImageLayout::eShaderReadOnlyOptimal);
 	};
@@ -471,7 +494,9 @@ void gr_vulkan_setup_frame()
 void gr_vulkan_scene_texture_begin()
 {
 	if (renderer_instance) {
+		renderer_instance->logRenderState("gr_vulkan_scene_texture_begin (before beginScenePass)");
 		renderer_instance->beginScenePass();
+		renderer_instance->logRenderState("gr_vulkan_scene_texture_begin (after beginScenePass)");
 	}
 }
 
@@ -715,12 +740,29 @@ void gr_vulkan_render_primitives(material* material_info,
 		return;
 	}
 
+	auto preCmd = renderer_instance->getCurrentCommandBuffer();
+	vk_debugf("render_primitives entry scenePass=%d directPass=%d auxPass=%d cmd=%p frame=%u",
+		renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+		renderer_instance->getCurrentAuxPassActive() ? 1 : 0,
+		static_cast<void*>(preCmd),
+		renderer_instance->getCurrentFrameIndex());
+
 	// Update uniform buffers before drawing
 	gr_matrix_set_uniforms();
 	vulkan_set_generic_uniforms(material_info);
 
-	// Ensure a render pass is active (auto-starts direct pass for menus)
-	renderer_instance->ensureRenderPassActive();
+	// Ensure a render pass is active (auto-starts direct pass for menus).
+	// If no pass is active, force a scene pass to make sure we have a depth target and scene formats.
+	if (!renderer_instance->getCurrentCommandBuffer()) {
+		vk_debugf("render_primitives forcing beginScenePass (no active cmd)");
+		renderer_instance->beginScenePass();
+	}
+	if (!renderer_instance->getCurrentCommandBuffer()) {
+		// Fallback to the existing direct-pass path
+		vk_debugf("render_primitives falling back to ensureRenderPassActive (still no cmd)");
+		renderer_instance->ensureRenderPassActive();
+	}
 	
 	auto cmdBuffer = renderer_instance->getCurrentCommandBuffer();
 	if (!cmdBuffer) {
@@ -731,6 +773,12 @@ void gr_vulkan_render_primitives(material* material_info,
 	// Get current rendering formats for pipeline creation
 	vk::Format colorFormat = renderer_instance->getCurrentColorFormat();
 	vk::Format depthFormat = renderer_instance->getCurrentDepthFormat();
+	vk_debugf("render_primitives cmd=%p colorFormat=%d depthFormat=%d scenePass=%d directPass=%d",
+		static_cast<void*>(cmdBuffer),
+		static_cast<int>(colorFormat),
+		static_cast<int>(depthFormat),
+		renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		renderer_instance->getCurrentDirectPassActive() ? 1 : 0);
 	if (colorFormat == vk::Format::eUndefined) {
 		return;  // No active rendering
 	}
@@ -775,6 +823,8 @@ void gr_vulkan_render_primitives_particle(particle_material* material_info,
     int n_verts,
     gr_buffer_handle buffer_handle)
 {
+	vk_debugf("render_primitives_particle entry n_verts=%d offset=%d", n_verts, offset);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -823,6 +873,8 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
     int n_verts,
     gr_buffer_handle buffer_handle)
 {
+	vk_debugf("render_primitives_batched entry n_verts=%d offset=%d", n_verts, offset);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -871,6 +923,8 @@ void gr_vulkan_render_primitives_distortion(distortion_material* material_info,
     int n_verts,
     gr_buffer_handle buffer_handle)
 {
+	vk_debugf("render_primitives_distortion entry n_verts=%d offset=%d", n_verts, offset);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -919,6 +973,8 @@ void gr_vulkan_render_movie(movie_material* material_info,
     gr_buffer_handle buffer,
     size_t buffer_offset)
 {
+	vk_debugf("render_movie entry n_verts=%d", n_verts);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -967,6 +1023,8 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
     int n_verts,
     gr_buffer_handle buffer_handle)
 {
+	vk_debugf("render_nanovg entry n_verts=%d offset=%d", n_verts, offset);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -1016,6 +1074,8 @@ void gr_vulkan_render_decals(decal_material* material_info,
     const gr_buffer_handle& instance_buffer,
     int num_instances)
 {
+	vk_debugf("render_decals entry num_elements=%d num_instances=%d", num_elements, num_instances);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -1071,6 +1131,8 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
     gr_buffer_handle vertex_buffer,
     gr_buffer_handle index_buffer)
 {
+	vk_debugf("render_rocket_primitives entry n_indices=%d", n_indices);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}
@@ -1118,6 +1180,8 @@ void gr_vulkan_render_model(model_material* material_info,
     vertex_buffer* bufferp,
     size_t texi)
 {
+	vk_debugf("render_model entry texi=%zu", texi);
+
 	if (!renderer_instance || !material_info || !vert_source || !bufferp) {
 		return;
 	}
@@ -1191,6 +1255,8 @@ void gr_vulkan_render_shield_impact(shield_material* material_info,
     gr_buffer_handle buffer_handle,
     int n_verts)
 {
+	vk_debugf("render_shield_impact entry n_verts=%d", n_verts);
+
 	if (!renderer_instance || !material_info || !layout) {
 		return;
 	}

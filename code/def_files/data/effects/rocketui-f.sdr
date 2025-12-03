@@ -5,7 +5,7 @@ in vec2 fragScreenPosition;
 
 out vec4 fragOut0;
 
-uniform sampler2DArray baseMap;
+layout(set = 1, binding = 0) uniform sampler2DArray baseMap;
 
 layout (std140) uniform genericData {
 	mat4 projMatrix;

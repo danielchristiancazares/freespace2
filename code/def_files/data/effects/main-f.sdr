@@ -24,7 +24,7 @@ struct model_light {
 
 };
 
-layout (std140) uniform modelData {
+layout (set = 0, binding = 1, std140) uniform modelData {
 	mat4 modelViewMatrix;
 	mat4 modelMatrix;
 	mat4 viewMatrix;
@@ -94,7 +94,7 @@ layout (std140) uniform modelData {
 	int flags;
 };
 
-in VertexOutput {
+layout(location = 0) in VertexOutput {
 	mat3 tangentMatrix;
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_FOG
@@ -112,35 +112,35 @@ in VertexOutput {
 } vertIn;
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_DIFFUSE
-uniform sampler2DArray sBasemap;
+layout(set = 1, binding = 0) uniform sampler2DArray sBasemap;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_DIFFUSE
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_GLOW
-uniform sampler2DArray sGlowmap;
+layout(set = 1, binding = 1) uniform sampler2DArray sGlowmap;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_GLOW
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_SPEC
-uniform sampler2DArray sSpecmap;
+layout(set = 1, binding = 3) uniform sampler2DArray sSpecmap;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_SPEC
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_NORMAL
-uniform sampler2DArray sNormalmap;
+layout(set = 1, binding = 2) uniform sampler2DArray sNormalmap;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_NORMAL
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_AMBIENT
-uniform sampler2DArray sAmbientmap;
+layout(set = 1, binding = 9) uniform sampler2DArray sAmbientmap;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_AMBIENT
-uniform sampler2D sFramebuffer;
+layout(set = 1, binding = 11) uniform sampler2D sFramebuffer;
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_MISC
-uniform sampler2DArray sMiscmap;
+layout(set = 1, binding = 10) uniform sampler2DArray sMiscmap;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_MISC
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_SHADOWS
-uniform sampler2DArray shadow_map;
+layout(set = 1, binding = 8) uniform sampler2DArray shadow_map;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_SHADOWS
 
-out vec4 fragOut0;
+layout(location = 0) out vec4 fragOut0;
 
 #ifndef MODEL_SDR_FLAG_SHADOW_MAP
-out vec4 fragOut1;
-out vec4 fragOut2;
-out vec4 fragOut3;
-out vec4 fragOut4;
+layout(location = 1) out vec4 fragOut1;
+layout(location = 2) out vec4 fragOut2;
+layout(location = 3) out vec4 fragOut3;
+layout(location = 4) out vec4 fragOut4;
 #endif
 
 vec3 FresnelLazarovEnv(vec3 specColor, vec3 view, vec3 normal, float gloss)

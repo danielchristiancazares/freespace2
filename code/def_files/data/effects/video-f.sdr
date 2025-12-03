@@ -1,8 +1,8 @@
 in vec4 fragTexCoord;
 out vec4 fragOut0;
-uniform sampler2DArray ytex;
-uniform sampler2DArray utex;
-uniform sampler2DArray vtex;
+layout(set = 1, binding = 0) uniform sampler2DArray ytex;
+layout(set = 1, binding = 1) uniform sampler2DArray utex;
+layout(set = 1, binding = 2) uniform sampler2DArray vtex;
 layout (std140) uniform movieData {
 	float alpha;
 	float pad[3];

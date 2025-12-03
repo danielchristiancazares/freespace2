@@ -1332,9 +1332,9 @@ void VulkanRenderer::createPresentSyncObjects()
 }
 void VulkanRenderer::acquireNextSwapChainImage()
 {
-	vk_debug("acquireNextSwapChainImage() entry - waiting for frame fence");
+	vk_debugf("acquireNextSwapChainImage entry frame=%u", m_currentFrame);
 	m_frames[m_currentFrame]->waitForFinish();
-	vk_debug("acquireNextSwapChainImage() fence signaled");
+	vk_debugf("acquireNextSwapChainImage fence signaled frame=%u", m_currentFrame);
 
 	// Safe to process deferred deletions - GPU is done with this frame's work
 	if (m_bufferManager) {
@@ -1343,7 +1343,7 @@ void VulkanRenderer::acquireNextSwapChainImage()
 	if (m_textureManager) {
 		m_textureManager->beginFrame(m_currentFrame);
 	}
-	vk_debug("acquireNextSwapChainImage() managers updated");
+	vk_debugf("acquireNextSwapChainImage managers updated frame=%u", m_currentFrame);
 
 	// Update absolute frame counter for descriptor tracking
 	m_absoluteFrameCounter++;
@@ -1497,9 +1497,18 @@ void VulkanRenderer::drawScene(vk::Framebuffer /*destinationFb*/, vk::CommandBuf
 }
 void VulkanRenderer::beginScenePass()
 {
+	logRenderState("beginScenePass entry");
+
 	if (m_scenePassActive) {
 		vk_logf("VulkanRenderer",
 			"beginScenePass called while scene pass already active (frame=%u)",
+			m_currentFrame);
+		return;
+	}
+
+	if (!m_swapChain) {
+		vk_logf("VulkanRenderer",
+			"beginScenePass abort - no swapchain (frame=%u)",
 			m_currentFrame);
 		return;
 	}
@@ -1567,9 +1576,23 @@ void VulkanRenderer::beginScenePass()
 	vk::ImageView depthView = targetFramebuffer->getDepthImageView();
 	vk::Format colorFormat = targetFramebuffer->getColorFormat(0);
 	vk::Format depthFormat = targetFramebuffer->getDepthFormat();
+	vk::Image colorImage = targetFramebuffer->getColorImage(0);
+	vk::Image depthImage = targetFramebuffer->getDepthImage();
+
+	vk_logf("VulkanRenderer",
+		"beginScenePass target framebuffer=%p colorView=%p colorImage=%p depthView=%p depthImage=%p extent=%ux%u activeRT=%d textureRT=%d",
+		static_cast<void*>(targetFramebuffer),
+		reinterpret_cast<void*>(static_cast<VkImageView>(colorView)),
+		reinterpret_cast<void*>(static_cast<VkImage>(colorImage)),
+		reinterpret_cast<void*>(static_cast<VkImageView>(depthView)),
+		reinterpret_cast<void*>(static_cast<VkImage>(depthImage)),
+		targetExtent.width,
+		targetExtent.height,
+		usingActiveRenderTarget ? 1 : 0,
+		usingTextureManagerRT ? 1 : 0);
 
 	// Transition color attachment to COLOR_ATTACHMENT_OPTIMAL
-	if (colorView) {
+	if (colorView && colorImage) {
 		vk::ImageMemoryBarrier2 colorBarrier;
 		colorBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
 		colorBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
@@ -1577,7 +1600,7 @@ void VulkanRenderer::beginScenePass()
 		colorBarrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
 		colorBarrier.oldLayout = vk::ImageLayout::eUndefined;
 		colorBarrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		colorBarrier.image = targetFramebuffer->getColorImage(0);
+		colorBarrier.image = colorImage;
 		colorBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
 		colorBarrier.subresourceRange.baseMipLevel = 0;
 		colorBarrier.subresourceRange.levelCount = 1;
@@ -1588,10 +1611,15 @@ void VulkanRenderer::beginScenePass()
 		depInfo.imageMemoryBarrierCount = 1;
 		depInfo.pImageMemoryBarriers = &colorBarrier;
 		m_sceneCommandBuffer.pipelineBarrier2(depInfo);
+	} else if (colorView && !colorImage) {
+		vk_logf("VulkanRenderer",
+			"beginScenePass: skipping color barrier (color image missing) view=%p framebuffer=%p",
+			reinterpret_cast<void*>(static_cast<VkImageView>(colorView)),
+			static_cast<void*>(targetFramebuffer));
 	}
 
 	// Transition depth attachment to DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-	if (depthView && targetFramebuffer->getDepthImage()) {
+	if (depthView && depthImage) {
 		vk::ImageMemoryBarrier2 depthBarrier;
 		depthBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
 		depthBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
@@ -1600,7 +1628,7 @@ void VulkanRenderer::beginScenePass()
 		                              vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
 		depthBarrier.oldLayout = vk::ImageLayout::eUndefined;
 		depthBarrier.newLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
-		depthBarrier.image = targetFramebuffer->getDepthImage();
+		depthBarrier.image = depthImage;
 		depthBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
 		depthBarrier.subresourceRange.baseMipLevel = 0;
 		depthBarrier.subresourceRange.levelCount = 1;
@@ -1611,6 +1639,11 @@ void VulkanRenderer::beginScenePass()
 		depInfo.imageMemoryBarrierCount = 1;
 		depInfo.pImageMemoryBarriers = &depthBarrier;
 		m_sceneCommandBuffer.pipelineBarrier2(depInfo);
+	} else if (depthView && !depthImage) {
+		vk_logf("VulkanRenderer",
+			"beginScenePass: skipping depth barrier (depth image missing) view=%p framebuffer=%p",
+			reinterpret_cast<void*>(static_cast<VkImageView>(depthView)),
+			static_cast<void*>(targetFramebuffer));
 	}
 
 	// Set up dynamic rendering (Vulkan 1.3+)
@@ -1657,6 +1690,8 @@ void VulkanRenderer::beginScenePass()
 		usingTextureManagerRT ? 1 : 0);
 
 	m_sceneCommandBuffer.beginRendering(renderingInfo);
+	// Set dynamic state defaults expected by validation/layers
+	m_sceneCommandBuffer.setLineWidth(1.0f);
 
 	m_scenePassActive = true;
 	
@@ -1666,6 +1701,12 @@ void VulkanRenderer::beginScenePass()
 
 void VulkanRenderer::endScenePass()
 {
+	vk_debugf("endScenePass entry scene=%d direct=%d cmd=%p frame=%u",
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
+		m_currentFrame);
+
 	if (!m_scenePassActive) {
 		vk_logf("VulkanRenderer",
 			"endScenePass called but no scene pass is active (frame=%u)",
@@ -1674,8 +1715,7 @@ void VulkanRenderer::endScenePass()
 	}
 
 	// End dynamic rendering
-	vk_logf("VulkanRenderer",
-		"endScenePass: endRendering for cmd=%p",
+	vk_debugf("endScenePass endRendering cmd=%p",
 		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)));
 	m_sceneCommandBuffer.endRendering();
 
@@ -1706,6 +1746,9 @@ void VulkanRenderer::endScenePass()
 	m_currentDepthFormat = vk::Format::eUndefined;
 	m_currentColorView = nullptr;
 	m_currentDepthView = nullptr;
+
+	// Scene pass is now ended; flip() may still record more commands on the same buffer.
+	m_scenePassActive = false;
 
 	// Note: We don't end the command buffer here - recordBlitToSwapchain will continue using it
 	// and flip() will finalize and submit it
@@ -1855,6 +1898,7 @@ void VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, Vul
 
 	m_sceneCommandBuffer.beginRendering(renderingInfo);
 	m_auxiliaryPassActive = true;
+	m_sceneCommandBuffer.setLineWidth(1.0f);
 
 	// Reset draw state for new pass
 	m_drawState.reset();
@@ -1887,8 +1931,36 @@ void VulkanRenderer::endAuxiliaryRenderPass()
 
 void VulkanRenderer::ensureRenderPassActive()
 {
-	// If scene pass or direct pass already active, nothing to do
-	if (m_scenePassActive || m_directPassActive) {
+	vk_debugf("ensureRenderPassActive entry scene=%d direct=%d aux=%d cmd=%p frame=%u swapImage=%u",
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
+		m_currentFrame,
+		m_currentSwapChainImage);
+
+	// If a pass is marked active but we lost the command buffer, reset state so we can recover.
+	if ((m_scenePassActive || m_directPassActive) && !m_sceneCommandBuffer) {
+		vk_logf("VulkanRenderer",
+			"ensureRenderPassActive: active flags set but command buffer missing, resetting to recover (scene=%d direct=%d frame=%u)",
+			m_scenePassActive ? 1 : 0,
+			m_directPassActive ? 1 : 0,
+			m_currentFrame);
+		m_scenePassActive = false;
+		m_directPassActive = false;
+		m_auxiliaryPassActive = false;
+		m_currentColorFormat = vk::Format::eUndefined;
+		m_currentDepthFormat = vk::Format::eUndefined;
+		m_currentColorView = nullptr;
+		m_currentDepthView = nullptr;
+	}
+
+	// If scene pass or direct pass already active and we still have a command buffer, nothing to do
+	if ((m_scenePassActive || m_directPassActive) && m_sceneCommandBuffer) {
+		vk_debugf("ensureRenderPassActive early return (already active) cmd=%p scene=%d direct=%d",
+			static_cast<void*>(m_sceneCommandBuffer),
+			m_scenePassActive ? 1 : 0,
+			m_directPassActive ? 1 : 0);
 		return;
 	}
 
@@ -1973,6 +2045,7 @@ void VulkanRenderer::ensureRenderPassActive()
 		m_swapChainExtent.height);
 
 	m_sceneCommandBuffer.beginRendering(renderingInfo);
+	m_sceneCommandBuffer.setLineWidth(1.0f);
 
 	m_directPassActive = true;
 	m_sceneExtent = m_swapChainExtent;
@@ -2000,16 +2073,40 @@ vk::RenderPass VulkanRenderer::getCurrentRenderPass() const
 	return nullptr;
 }
 
+void VulkanRenderer::logRenderState(const char* reason) const
+{
+	const char* label = reason ? reason : "state";
+	vk_logf("VulkanRenderer",
+		"renderState[%s]: frame=%u swapImage=%u scene=%d direct=%d aux=%d cmd=%p colorFmt=%d depthFmt=%d extent=%ux%u activeRT=%d textureRT=%d",
+		label,
+		m_currentFrame,
+		m_currentSwapChainImage,
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat),
+		m_sceneExtent.width,
+		m_sceneExtent.height,
+		m_activeRenderTarget.isActive ? 1 : 0,
+		(m_textureManager && m_textureManager->isRenderingToTexture()) ? 1 : 0);
+}
+
 void VulkanRenderer::recordBlitToSwapchain(vk::CommandBuffer cmdBuffer)
 {
+	vk_debugf("recordBlitToSwapchain entry cmd=%p swapImage=%u frame=%u",
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
+		m_currentSwapChainImage,
+		m_currentFrame);
+
 	// Transition swapchain image to COLOR_ATTACHMENT_OPTIMAL
 	vk::ImageView swapchainView = m_swapChainImageViews[m_currentSwapChainImage].get();
 
-	vk_logf("VulkanRenderer",
-		"recordBlitToSwapchain: cmd=%p swapImage=%u swapchainView=%p",
-		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
-		m_currentSwapChainImage,
-		reinterpret_cast<void*>(static_cast<VkImageView>(swapchainView)));
+	vk_debugf("recordBlitToSwapchain swapchainView=%p extent=%ux%u",
+		reinterpret_cast<void*>(static_cast<VkImageView>(swapchainView)),
+		m_swapChainExtent.width,
+		m_swapChainExtent.height);
 
 	vk::ImageMemoryBarrier2 colorBarrier;
 	colorBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
@@ -2156,30 +2253,26 @@ void VulkanRenderer::submitAuxiliaryCommandBuffer()
 void VulkanRenderer::flip()
 {
 	static int flipCount = 0;
-	char buf[64];
-	snprintf(buf, sizeof(buf), "flip() entry #%d", ++flipCount);
-	vk_debug(buf);
+	vk_debugf("flip entry #%d scene=%d direct=%d cmd=%p frame=%u swapImage=%u",
+		++flipCount,
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
+		m_currentFrame,
+		m_currentSwapChainImage);
 
 	// Submit any pending transfers FIRST - this must happen before any graphics submission
 	// and after fence synchronization (which happened in acquireNextSwapChainImage)
 	if (m_bufferManager) {
-		if (m_frames[m_currentFrame]) {
-			vk_logf("VulkanRenderer",
-				"pre-transfer fence=%p inFlight=%d frame=%u",
-				reinterpret_cast<void*>(static_cast<VkFence>(m_frames[m_currentFrame]->getFence())),
-				m_frames[m_currentFrame]->isInFlight() ? 1 : 0,
-				m_currentFrame);
-		}
-		vk_debug("flip() submitting buffer transfers");
+		vk_debugf("flip submitting buffer transfers frame=%u", m_currentFrame);
 		m_bufferManager->submitTransfers();
 	}
 	if (m_textureManager) {
-		vk_debug("flip() submitting texture uploads");
+		vk_debugf("flip submitting texture uploads frame=%u", m_currentFrame);
 		m_textureManager->submitUploads();
 	}
 
-	vk_logf("VulkanRenderer",
-		"flip state: scenePass=%d directPass=%d frame=%u",
+	vk_debugf("flip state after transfers scene=%d direct=%d frame=%u",
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
 		m_currentFrame);
@@ -2187,6 +2280,9 @@ void VulkanRenderer::flip()
 	PresentResult presentResult = PresentResult::Success;
 
 	if (m_scenePassActive) {
+		// Finish rendering so the scene texture transitions to shader-read for the blit.
+		endScenePass();
+
 		vk_logf("VulkanRenderer",
 			"flip path: scene pass blit+present (cmd=%p swapImage=%u)",
 			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),

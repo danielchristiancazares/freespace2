@@ -2,8 +2,18 @@
 // Enabled at all times but the define is kept here in case this should be configurable in the future
 #define EDGE_AA
 
+// Layout helpers for Vulkan vs. GL
+#ifdef GL_KHR_vulkan_glsl
+#extension GL_KHR_vulkan_glsl : enable
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140, set = set_id, binding = binding_id)
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140, binding = binding_id)
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(binding = binding_id)
+#endif
+
 // Uniform block - set 0, binding 2 matches uniform_block_type::NanoVGData
-layout(std140, set = 0, binding = 2) uniform NanoVGUniformData {
+LAYOUT_STD140_SET_BINDING(0, 2) uniform NanoVGUniformData {
     mat3 scissorMat;
 
     mat3 paintMat;
@@ -29,7 +39,7 @@ layout(std140, set = 0, binding = 2) uniform NanoVGUniformData {
 };
 
 // Material sampler - set 1, binding 0 (base texture slot)
-layout(set = 1, binding = 0) uniform sampler2DArray nvg_tex;
+LAYOUT_SET_BINDING(1, 0) uniform sampler2DArray nvg_tex;
 
 // Fragment inputs from vertex shader
 layout(location = 0) in vec2 ftcoord;

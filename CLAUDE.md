@@ -93,6 +93,39 @@ valgrind --leak-check=full ./bin/unittests --gtest_shuffle
 
 ### Windows Build
 
+**Quick Build (Recommended):**
+
+Use `build.ps1` for simplified builds:
+
+```powershell
+# Default: Debug build with Vulkan, cleans build directory
+.\build.ps1
+
+# Release build
+.\build.ps1 -Config Release
+
+# Disable Vulkan
+.\build.ps1 -Vulkan false
+
+# Incremental build (skip clean)
+.\build.ps1 -Clean false
+
+# Build specific target
+.\build.ps1 -Target unittests
+
+# Combined options
+.\build.ps1 -Config Release -Vulkan false -Clean false
+```
+
+**Parameters:**
+- `-Config` - Build configuration: Debug (default), Release, FastDebug
+- `-BuildDir` - Build directory (default: "build")
+- `-Vulkan` - Enable Vulkan renderer: true (default), false
+- `-Clean` - Clean build directory before building: true (default), false
+- `-Target` - Specific build target (e.g., unittests, clean)
+
+**Manual CMake Build:**
+
 ```bash
 mkdir build && cd build
 

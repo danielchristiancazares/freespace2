@@ -3,6 +3,7 @@
 #ifdef WITH_VULKAN
 
 #include "VulkanBuffer.h"
+#include "VulkanDebug.h"
 #include "VulkanShader.h"
 #include "cfile/cfile.h"
 #include "osapi/osapi.h"
@@ -183,6 +184,11 @@ void VulkanPipelineManager::shutdown()
 
 vk::Pipeline VulkanPipelineManager::getOrCreatePipeline(const PipelineKey& key)
 {
+	vk_debugf("getOrCreatePipeline entry shaderType=%d colorFmt=%d depthFmt=%d",
+		static_cast<int>(key.shaderType),
+		static_cast<int>(key.colorFormat),
+		static_cast<int>(key.depthFormat));
+
 	if (!m_initialized) {
 		return nullptr;
 	}
@@ -190,10 +196,12 @@ vk::Pipeline VulkanPipelineManager::getOrCreatePipeline(const PipelineKey& key)
 	// Check cache first
 	auto it = m_pipelineCache.find(key);
 	if (it != m_pipelineCache.end()) {
+		vk_debugf("getOrCreatePipeline cache hit");
 		return it->second.get();
 	}
 
 	// Create new pipeline
+	vk_debugf("getOrCreatePipeline cache miss, creating new pipeline");
 	vk::UniquePipeline pipeline = createPipeline(key);
 	if (!pipeline) {
 		mprintf(("VulkanPipelineManager: Failed to create pipeline for shader type %d\n",
@@ -203,6 +211,7 @@ vk::Pipeline VulkanPipelineManager::getOrCreatePipeline(const PipelineKey& key)
 
 	vk::Pipeline result = pipeline.get();
 	m_pipelineCache[key] = std::move(pipeline);
+	vk_debugf("getOrCreatePipeline created pipeline=%p", static_cast<void*>(result));
 	return result;
 }
 
@@ -249,6 +258,17 @@ bool VulkanPipelineManager::createUniformDescriptorLayout()
 		binding.stageFlags = vk::ShaderStageFlagBits::eVertex | 
 		                     vk::ShaderStageFlagBits::eFragment | 
 		                     vk::ShaderStageFlagBits::eGeometry;
+		binding.pImmutableSamplers = nullptr;
+		bindings.push_back(binding);
+	}
+
+	// Additional binding for transform_tex (samplerBuffer) used by instancing path
+	{
+		vk::DescriptorSetLayoutBinding binding;
+		binding.binding = static_cast<uint32_t>(uniform_block_type::NUM_BLOCK_TYPES);
+		binding.descriptorType = vk::DescriptorType::eUniformTexelBuffer;
+		binding.descriptorCount = 1;
+		binding.stageFlags = vk::ShaderStageFlagBits::eVertex;
 		binding.pImmutableSamplers = nullptr;
 		bindings.push_back(binding);
 	}

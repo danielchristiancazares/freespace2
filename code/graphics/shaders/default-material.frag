@@ -8,7 +8,7 @@ layout (location = 1) in vec4 fragColor;
 
 layout (location = 0) out vec4 fragOut0;
 
-layout (binding = 1, std140) uniform genericData {
+layout (set = 0, binding = 8, std140) uniform genericData {
 	mat4 modelMatrix;
 
 	vec4 color;
@@ -25,7 +25,7 @@ layout (binding = 1, std140) uniform genericData {
 	bool clipEnabled;
 };
 
-layout(binding = 2) uniform sampler2DArray baseMap;
+layout(set = 1, binding = 0) uniform sampler2DArray baseMap;
 
 void main()
 {

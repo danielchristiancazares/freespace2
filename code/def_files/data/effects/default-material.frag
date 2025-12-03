@@ -10,7 +10,16 @@ layout (location = 0) out vec4 fragOut0;
 
 // Set 0: Uniform buffers (bindings match uniform_block_type enum)
 // GenericData = 8
-layout (set = 0, binding = 8, std140) uniform genericData {
+#ifdef GL_KHR_vulkan_glsl
+#extension GL_KHR_vulkan_glsl : enable
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id, std140)
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140, binding = binding_id)
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(binding = binding_id)
+#endif
+
+LAYOUT_STD140_SET_BINDING(0, 8) uniform genericData {
 	mat4 modelMatrix;
 
 	vec4 color;
@@ -29,7 +38,7 @@ layout (set = 0, binding = 8, std140) uniform genericData {
 
 // Set 1: Material textures
 // Using sampler2D for now (not sampler2DArray) until texture array support is added
-layout(set = 1, binding = 0) uniform sampler2D baseMap;
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D baseMap;
 
 void main()
 {

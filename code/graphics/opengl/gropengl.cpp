@@ -1,9 +1,13 @@
 
 
+#include <cstdio>
+
 #if defined(_WIN32)
 #include <windows.h>
 #include <windowsx.h>
 #include <direct.h>
+#include <SDL_syswm.h>
+#include "graphics/opengl/win32/OGLHDRPresenter.h"
 #endif
 
 #if !defined __APPLE_CC__ && defined SCP_UNIX
@@ -44,6 +48,9 @@
 #include "pngutils/pngutils.h"
 
 #include <glad/glad.h>
+#if defined(_WIN32)
+#include <glad/glad_wgl.h>
+#endif
 
 // minimum GL version we can reliably support is 3.2
 static const int MIN_REQUIRED_GL_VERSION = 32;
@@ -86,6 +93,10 @@ static std::unique_ptr<os::OpenGLContext> GL_context = nullptr;
 
 static std::unique_ptr<os::GraphicsOperations> graphic_operations = nullptr;
 static os::Viewport* current_viewport = nullptr;
+
+#ifdef _WIN32
+OGLHDRPresenter* g_hdr_presenter = nullptr;
+#endif
 
 void gr_opengl_clear()
 {
@@ -131,6 +142,32 @@ void gr_opengl_flip()
 		glFinish();
 
 	Assertion(GL_state.ValidForFlip(), "OpenGL state is invalid!");
+
+#ifdef _WIN32
+	if (g_hdr_presenter != nullptr && g_hdr_presenter->isInitialized()) {
+		auto viewportSize = current_viewport->getSize();
+		if (g_hdr_presenter->presentFromGL(Scene_color_texture,
+				static_cast<int>(viewportSize.first),
+				static_cast<int>(viewportSize.second),
+				Gr_enable_vsync)) {
+			opengl_tcache_frame();
+#ifndef NDEBUG
+			int ic = opengl_check_for_errors();
+
+			if (ic) {
+				mprintf(("!!DEBUG!! OpenGL Errors this frame: %i\n", ic));
+			}
+#endif
+			return;
+		} else {
+			mprintf(("OpenGL HDR: Presenter failed, disabling HDR output\n"));
+			fflush(nullptr);
+			g_hdr_presenter->shutdown();
+			delete g_hdr_presenter;
+			g_hdr_presenter = nullptr;
+		}
+	}
+#endif
 
 	current_viewport->swapBuffers();
 
@@ -473,6 +510,14 @@ void gr_opengl_cleanup(bool closing, int  /*minimize*/)
 	if ( !GL_initted ) {
 		return;
 	}
+
+#ifdef _WIN32
+	if (g_hdr_presenter != nullptr) {
+		g_hdr_presenter->shutdown();
+		delete g_hdr_presenter;
+		g_hdr_presenter = nullptr;
+	}
+#endif
 
 	if ( !closing && !Fred_running ) {
 		gr_reset_clip();
@@ -1306,6 +1351,22 @@ bool gr_opengl_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 		Error(LOCATION, "Failed to load OpenGL!");
 	}
 
+#if defined(_WIN32)
+	if (current_viewport != nullptr) {
+		SDL_SysWMinfo wmInfo;
+		SDL_VERSION(&wmInfo.version);
+		HDC hdc = nullptr;
+		if (SDL_GetWindowWMInfo(current_viewport->toSDLWindow(), &wmInfo)) {
+			hdc = wmInfo.info.win.hdc;
+		}
+
+		if (!gladLoadWGLLoader(GL_context->getLoaderFunction(), hdc)) {
+			mprintf(("OpenGL HDR: Failed to load WGL extensions (HDR interop disabled)\n"));
+			fflush(nullptr);
+		}
+	}
+#endif
+
 #if !defined __APPLE_CC__ && defined SCP_UNIX
 	if (!gladLoadGLXLoader(GL_context->getLoaderFunction(), nullptr, 0)) {
 		Error(LOCATION, "Failed to load GLX!");
@@ -1326,6 +1387,30 @@ bool gr_opengl_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 	}
 
 	GL_initted = true;
+
+#ifdef _WIN32
+	if (gr_hdr_output_enabled()) {
+		if (g_hdr_presenter == nullptr) {
+			HWND hwnd = current_viewport ? current_viewport->getHWND() : nullptr;
+			if (hwnd != nullptr) {
+				auto vpSize = current_viewport->getSize();
+				g_hdr_presenter = new OGLHDRPresenter();
+				if (!g_hdr_presenter->initialize(hwnd, static_cast<int>(vpSize.first), static_cast<int>(vpSize.second))) {
+					delete g_hdr_presenter;
+					g_hdr_presenter = nullptr;
+					mprintf(("OpenGL HDR: Presenter initialization failed, continuing with SDR\n"));
+					fflush(nullptr);
+				} else {
+					mprintf(("OpenGL HDR: Presenter initialized successfully\n"));
+					fflush(nullptr);
+				}
+			} else {
+				mprintf(("OpenGL HDR: No HWND available, presenter disabled\n"));
+				fflush(nullptr);
+			}
+		}
+	}
+#endif
 
 #ifndef NDEBUG
 	// Set up the debug extension if present

@@ -13,6 +13,8 @@ RenderFrame::RenderFrame(vk::Device device, vk::SwapchainKHR swapChain, vk::Queu
 }
 void RenderFrame::waitForFinish()
 {
+	vk_debugf("waitForFinish entry inFlight=%d", m_inFlight ? 1 : 0);
+
 	if (!m_inFlight) {
 		return;
 	}
@@ -44,6 +46,8 @@ void RenderFrame::onFrameFinished(std::function<void()> finishFunc)
 }
 AcquireResult RenderFrame::acquireSwapchainImage(uint32_t& outImageIndex, vk::Semaphore imageAvailableSemaphore)
 {
+	vk_debugf("acquireSwapchainImage entry inFlight=%d", m_inFlight ? 1 : 0);
+
 	Assertion(!m_inFlight, "Cannot acquire swapchain image when frame is still in flight.");
 
 	uint32_t imageIndex;
@@ -82,6 +86,9 @@ PresentResult RenderFrame::submitAndPresent(const std::vector<vk::CommandBuffer>
                                            vk::Semaphore imageAvailableSemaphore,
                                            vk::Semaphore renderingFinishedSemaphore)
 {
+	vk_debugf("submitAndPresent entry cmdCount=%zu inFlight=%d swapIdx=%u",
+		cmdBuffers.size(), m_inFlight ? 1 : 0, m_swapChainIdx);
+
 	Assertion(!m_inFlight, "Cannot submit a frame for presentation when it is still in flight.");
 
 	vk_logf("RenderFrame",
@@ -154,6 +161,8 @@ PresentResult RenderFrame::submitAndPresent(const std::vector<vk::CommandBuffer>
 
 void RenderFrame::submitImmediateBlocking(const std::vector<vk::CommandBuffer>& cmdBuffers)
 {
+	vk_debugf("submitImmediateBlocking entry cmdCount=%zu inFlight=%d", cmdBuffers.size(), m_inFlight ? 1 : 0);
+
 	if (cmdBuffers.empty()) {
 		return;
 	}

@@ -3,6 +3,8 @@
 
 #ifdef WITH_VULKAN
 
+#include "VulkanDebug.h"
+
 namespace graphics {
 namespace vulkan {
 
@@ -103,6 +105,8 @@ bool VulkanDescriptorManager::createPool()
 
 vk::DescriptorSet VulkanDescriptorManager::allocateSet(vk::DescriptorSetLayout layout, const SCP_string& debugName)
 {
+	vk_debugf("allocateSet entry layout=%p name=%s", static_cast<void*>(layout), debugName.c_str());
+
 	if (!m_initialized) {
 		mprintf(("VulkanDescriptorManager: Cannot allocate - not initialized\n"));
 		return vk::DescriptorSet();
@@ -372,6 +376,9 @@ void VulkanDescriptorManager::bindDescriptorSet(vk::CommandBuffer cmd, vk::Pipel
                                                  vk::DescriptorSet set, const SCP_vector<uint32_t>& dynamicOffsets,
                                                  uint32_t firstSet)
 {
+	vk_debugf("bindDescriptorSet entry set=%p firstSet=%u dynOffsets=%zu",
+		static_cast<void*>(set), firstSet, dynamicOffsets.size());
+
 	if (!cmd || !pipelineLayout || !set || !m_initialized) {
 		return;
 	}

@@ -1,6 +1,7 @@
 
 #include "VulkanBuffer.h"
 
+#include "VulkanDebug.h"
 #include "VulkanDescriptorManager.h"
 #include "globalincs/pstypes.h"
 #include <cstdint>
@@ -96,6 +97,34 @@ void VulkanBufferManager::initialize(vk::Device device, vk::PhysicalDevice physi
 	m_device.bindBufferMemory(m_placeholderUniformBuffer, m_placeholderUniformMemory, 0);
 	mprintf(("VulkanBuffer: created placeholder uniform buffer (%zu bytes)\n", PLACEHOLDER_BUFFER_SIZE));
 
+	// Create placeholder texel buffer (one vec4 zero) for transform_tex binding
+	vk::BufferCreateInfo texelBufInfo;
+	texelBufInfo.size = sizeof(float) * 4;
+	texelBufInfo.usage = vk::BufferUsageFlagBits::eUniformTexelBuffer | vk::BufferUsageFlagBits::eTransferDst;
+	texelBufInfo.sharingMode = vk::SharingMode::eExclusive;
+	m_placeholderTexelBuffer = m_device.createBuffer(texelBufInfo);
+
+	auto texelReqs = m_device.getBufferMemoryRequirements(m_placeholderTexelBuffer);
+	vk::MemoryAllocateInfo texelAlloc;
+	texelAlloc.allocationSize = texelReqs.size;
+	texelAlloc.memoryTypeIndex = findMemoryType(texelReqs.memoryTypeBits,
+	    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	m_placeholderTexelMemory = m_device.allocateMemory(texelAlloc);
+	m_device.bindBufferMemory(m_placeholderTexelBuffer, m_placeholderTexelMemory, 0);
+	// Initialize to zeros
+	void* mapped = m_device.mapMemory(m_placeholderTexelMemory, 0, texelAlloc.allocationSize);
+	if (mapped) {
+		memset(mapped, 0, static_cast<size_t>(texelAlloc.allocationSize));
+		m_device.unmapMemory(m_placeholderTexelMemory);
+	}
+	vk::BufferViewCreateInfo viewInfo;
+	viewInfo.buffer = m_placeholderTexelBuffer;
+	viewInfo.format = vk::Format::eR32G32B32A32Sfloat;
+	viewInfo.offset = 0;
+	viewInfo.range = VK_WHOLE_SIZE;
+	m_placeholderTexelView = m_device.createBufferView(viewInfo);
+	mprintf(("VulkanBuffer: created placeholder texel buffer/view for transform_tex\n"));
+
 	m_initialized = true;
 }
 
@@ -168,6 +197,18 @@ void VulkanBufferManager::shutdown()
 	if (m_placeholderUniformMemory) {
 		m_device.freeMemory(m_placeholderUniformMemory);
 		m_placeholderUniformMemory = nullptr;
+	}
+	if (m_placeholderTexelView) {
+		m_device.destroyBufferView(m_placeholderTexelView);
+		m_placeholderTexelView = nullptr;
+	}
+	if (m_placeholderTexelBuffer) {
+		m_device.destroyBuffer(m_placeholderTexelBuffer);
+		m_placeholderTexelBuffer = nullptr;
+	}
+	if (m_placeholderTexelMemory) {
+		m_device.freeMemory(m_placeholderTexelMemory);
+		m_placeholderTexelMemory = nullptr;
 	}
 
 	m_initialized = false;
@@ -249,6 +290,8 @@ void VulkanBufferManager::createVkBuffer(VulkanBufferData& bufferData, size_t si
 
 gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageHint usage)
 {
+	vk_debugf("createBuffer entry type=%d usage=%d", static_cast<int>(type), static_cast<int>(usage));
+
 	Assertion(m_initialized, "VulkanBufferManager not initialized!");
 
 	VulkanBufferData bufferData;
@@ -576,6 +619,11 @@ bool VulkanBufferManager::initializeUniformDescriptorSet(vk::DescriptorSetLayout
 			    static_cast<uint32_t>(i), m_placeholderUniformBuffer, 0, PLACEHOLDER_BUFFER_SIZE, true);
 		}
 	}
+	// Bind placeholder texel buffer for transform_tex (binding = NUM_BLOCK_TYPES)
+	if (m_placeholderTexelView) {
+		m_descriptorManager->updateUniformTexelBuffer(m_uniformDescriptorSet,
+		    static_cast<uint32_t>(uniform_block_type::NUM_BLOCK_TYPES), m_placeholderTexelView);
+	}
 	mprintf(("VulkanBufferManager: Initialized %d uniform buffer bindings with placeholder\n",
 	         static_cast<int>(uniform_block_type::NUM_BLOCK_TYPES)));
 
@@ -624,6 +672,11 @@ bool VulkanBufferManager::recreateUniformDescriptorSet()
 
 		m_descriptorManager->updateUniformBuffer(m_uniformDescriptorSet,
 		    static_cast<uint32_t>(i), bufferToBind, 0, sizeToBind, true);
+	}
+	// Ensure transform_tex binding (binding = NUM_BLOCK_TYPES) is valid
+	if (m_placeholderTexelView) {
+		m_descriptorManager->updateUniformTexelBuffer(m_uniformDescriptorSet,
+		    static_cast<uint32_t>(uniform_block_type::NUM_BLOCK_TYPES), m_placeholderTexelView);
 	}
 
 	mprintf(("VulkanBufferManager: Recreated uniform descriptor set %p due to buffer reallocation\n",
@@ -956,10 +1009,8 @@ void VulkanBufferManager::copyViaStaging(VulkanBufferData& dst, size_t offset, s
 
 void VulkanBufferManager::submitTransfers()
 {
-	char buf[128];
-	sprintf(buf, "submitTransfers: frameIndex=%u, recording=%d",
+	vk_debugf("submitTransfers entry frameIndex=%u recording=%d",
 		m_currentFrameIndex, m_transferCmdRecording[m_currentFrameIndex] ? 1 : 0);
-	buf_debug(buf);
 
 	// If no transfers were recorded this frame, nothing to do
 	if (!m_transferCmdRecording[m_currentFrameIndex]) {

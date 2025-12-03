@@ -159,6 +159,13 @@ class VulkanRenderer {
 	 */
 	vk::Device getDevice() const { return m_device.get(); }
 
+	// Debug/inspection helpers
+	bool getCurrentScenePassActive() const { return m_scenePassActive; }
+	bool getCurrentDirectPassActive() const { return m_directPassActive; }
+	bool getCurrentAuxPassActive() const { return m_auxiliaryPassActive; }
+	uint32_t getCurrentFrameIndex() const { return m_currentFrame; }
+	void logRenderState(const char* reason = nullptr) const;
+
 	/**
 	 * @brief Get the physical device for resource creation
 	 */

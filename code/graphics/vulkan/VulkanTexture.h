@@ -309,6 +309,10 @@ public:
 	 * @brief Get placeholder texture (1x1 white pixel) for unbound material slots
 	 */
 	VulkanTexture* getPlaceholderTexture() { return m_placeholderTexture.get(); }
+	/**
+	 * @brief Get placeholder array texture (1x1x2 white) for sampler2DArray slots
+	 */
+	VulkanTexture* getPlaceholderArrayTexture() { return m_placeholderArrayTexture.get(); }
 
 	/**
 	 * @brief Queue a texture for deferred deletion
@@ -423,7 +427,8 @@ private:
 
 	// Staging buffer (16MB ring buffer)
 	// Each frame gets half the buffer to avoid overlap
-	static constexpr vk::DeviceSize STAGING_BUFFER_SIZE = 16 * 1024 * 1024;
+	// Larger staging buffer to avoid upload starvation; split across frames in flight
+	static constexpr vk::DeviceSize STAGING_BUFFER_SIZE = 64 * 1024 * 1024;
 	static constexpr vk::DeviceSize STAGING_PARTITION_SIZE = STAGING_BUFFER_SIZE / FRAMES_IN_FLIGHT;
 	vk::UniqueBuffer m_stagingBuffer;
 	vk::UniqueDeviceMemory m_stagingMemory;
@@ -436,6 +441,7 @@ private:
 
 	// Placeholder texture (1x1 white pixel) for unbound material descriptor slots
 	std::unique_ptr<VulkanTexture> m_placeholderTexture;
+	std::unique_ptr<VulkanTexture> m_placeholderArrayTexture;
 
 	// Texture storage - keyed by bitmap handle
 	// Note: VulkanTexture is stored as pointer since it inherits from gr_bitmap_info

@@ -8,12 +8,12 @@ layout (location = 2) in vec4 vertTexCoord;
 layout (location = 0) out vec4 fragTexCoord;
 layout (location = 1) out vec4 fragColor;
 
-layout (binding = 0, std140) uniform matrixData {
+layout (set = 0, binding = 6, std140) uniform matrixData {
 	mat4 modelViewMatrix;
 	mat4 projMatrix;
 };
 
-layout (binding = 1, std140) uniform genericData {
+layout (set = 0, binding = 8, std140) uniform genericData {
 	mat4 modelMatrix;
 
 	vec4 color;

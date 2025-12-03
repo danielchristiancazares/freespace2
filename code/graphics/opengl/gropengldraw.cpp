@@ -9,6 +9,8 @@
 
 #include "gropengldraw.h"
 
+#include <cstdio>
+
 #include "globalincs/pstypes.h"
 
 #include "ShaderProgram.h"
@@ -19,6 +21,11 @@
 #include "gropenglshader.h"
 #include "gropengltexture.h"
 #include "gropengltnl.h"
+
+#ifdef _WIN32
+#include "graphics/opengl/win32/OGLHDRPresenter.h"
+extern OGLHDRPresenter* g_hdr_presenter;
+#endif
 
 #include "cmdline/cmdline.h"
 #include "graphics/light.h"
@@ -608,6 +615,15 @@ void opengl_setup_scene_textures()
 	}
 
 	GL_state.BindFrameBuffer(0);
+
+#ifdef _WIN32
+	if (g_hdr_presenter != nullptr && g_hdr_presenter->isInitialized()) {
+		if (!g_hdr_presenter->resize(Scene_texture_width, Scene_texture_height)) {
+			mprintf(("OpenGL HDR: Failed to resize presenter to %dx%d\n", Scene_texture_width, Scene_texture_height));
+			fflush(nullptr);
+		}
+	}
+#endif
 
 	Scene_texture_initialized = 1;
 	Scene_framebuffer_in_frame = false;

@@ -2,8 +2,8 @@ in vec4 fragTexCoord;
 
 out vec4 fragOut0;
 
-uniform sampler2D tex;
-uniform sampler2D depth_tex;
+layout(set = 1, binding = 0) uniform sampler2D tex;
+layout(set = 1, binding = 1) uniform sampler2D depth_tex;
 
 layout (std140) uniform genericData {
 	float timer;

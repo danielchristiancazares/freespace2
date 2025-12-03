@@ -2,6 +2,8 @@
 
 #ifdef WITH_VULKAN
 
+#include "VulkanDebug.h"
+
 #define BMPMAN_INTERNAL
 #include "bmpman/bm_internal.h"
 #include "bmpman/bmpman.h"
@@ -511,6 +513,37 @@ bool VulkanTextureManager::initialize(vk::Device device, vk::PhysicalDevice phys
 	}
 	mprintf(("Vulkan: Created placeholder texture (1x1 white)\n"));
 
+	// Create placeholder array texture (1x1x2 white) for sampler2DArray bindings
+	m_placeholderArrayTexture = std::make_unique<VulkanTexture>();
+	if (m_placeholderArrayTexture->create(device, physicalDevice, 1, 1, vk::Format::eR8G8B8A8Unorm, 1, 2,
+	        vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst)) {
+		// Upload white pixel to both layers
+		vk::DeviceSize offsets[2] = {};
+		void* stagingPtrs[2] = {};
+		for (uint32_t layer = 0; layer < 2; ++layer) {
+			stagingPtrs[layer] = allocateStagingMemory(4, offsets[layer]);
+			if (stagingPtrs[layer]) {
+				uint8_t whitePixel[4] = {255, 255, 255, 255};
+				memcpy(stagingPtrs[layer], whitePixel, 4);
+			}
+		}
+		ensureUploadRecording();
+		vk::CommandBuffer cmd = getUploadCommandBuffer();
+		m_placeholderArrayTexture->transitionLayout(cmd, vk::ImageLayout::eUndefined,
+		                                            vk::ImageLayout::eTransferDstOptimal);
+		for (uint32_t layer = 0; layer < 2; ++layer) {
+			if (stagingPtrs[layer]) {
+				m_placeholderArrayTexture->uploadData(cmd, m_stagingBuffer.get(), offsets[layer], 4, 0, layer);
+			}
+		}
+		m_placeholderArrayTexture->transitionLayout(cmd, vk::ImageLayout::eTransferDstOptimal,
+		                                            vk::ImageLayout::eShaderReadOnlyOptimal);
+		submitUploads();  // ensure placeholder array is ready
+		mprintf(("Vulkan: Created placeholder array texture (1x1x2 white)\n"));
+	} else {
+		mprintf(("Vulkan: Failed to create placeholder array texture\n"));
+	}
+
 	m_initialized = true;
 	mprintf(("Vulkan: Texture manager initialized (staging buffer: %zu MB, %u partitions)\n",
 	         STAGING_BUFFER_SIZE / (1024 * 1024), FRAMES_IN_FLIGHT));
@@ -586,6 +619,8 @@ void VulkanTextureManager::shutdown()
 
 bool VulkanTextureManager::createTexture(int bitmapHandle, const bitmap* bm)
 {
+	vk_debugf("createTexture entry bitmapHandle=%d w=%d h=%d", bitmapHandle, bm ? bm->w : 0, bm ? bm->h : 0);
+
 	if (!m_initialized || !bm) {
 		return false;
 	}
@@ -625,6 +660,9 @@ bool VulkanTextureManager::createTexture(int bitmapHandle, const bitmap* bm)
 
 bool VulkanTextureManager::uploadTextureData(int bitmapHandle, const bitmap* bm)
 {
+	vk_debugf("uploadTextureData entry bitmapHandle=%d w=%d h=%d bpp=%d",
+		bitmapHandle, bm ? bm->w : 0, bm ? bm->h : 0, bm ? bm->bpp : 0);
+
 	if (!m_initialized || !bm || !bm->data) {
 		return false;
 	}
@@ -885,18 +923,14 @@ void VulkanTextureManager::queueTextureForDeletion(VulkanTexture* texture)
 
 void VulkanTextureManager::submitUploads()
 {
-	// Crash-safe logging
-	FILE* f = fopen("vulkan_debug.log", "a");
-	if (f) {
-		fprintf(f, "VulkanTextureManager::submitUploads: frame=%u, recording=%d\n",
-			m_currentFrameIndex, m_uploadCmdRecording[m_currentFrameIndex] ? 1 : 0);
-		fflush(f);
-		fclose(f);
-	}
+	vk_debugf("submitUploads entry frameIndex=%u recording=%d",
+		m_currentFrameIndex, m_uploadCmdRecording[m_currentFrameIndex] ? 1 : 0);
 
 	if (!m_uploadCmdRecording[m_currentFrameIndex]) {
 		return; // No uploads recorded this frame
 	}
+
+	FILE* f = nullptr;
 
 	try {
 		// End recording

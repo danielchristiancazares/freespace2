@@ -29,6 +29,11 @@
 
 #include <SDL_events.h>
 
+#ifdef _WIN32
+struct HWND__;
+using HWND = HWND__*;
+#endif
+
 // --------------------------------------------------------------------------------------------------
 // OSAPI DEFINES/VARS
 //
@@ -283,6 +288,13 @@ namespace os
 		 * @note Implementation may ignore invocations of this function
 		 */
 		virtual void restore() = 0;
+
+#ifdef _WIN32
+		/**
+		 * @brief Gets the native Win32 HWND backing this viewport if available
+		 */
+		virtual HWND getHWND() const { return nullptr; }
+#endif
 	};
 
 	/**

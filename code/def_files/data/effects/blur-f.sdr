@@ -2,7 +2,7 @@ out vec4 fragOut0;
 
 in vec4 fragTexCoord;
 
-uniform sampler2D tex;
+layout(set = 1, binding = 0) uniform sampler2D tex;
 
 const float TapSize = 1.0;
 

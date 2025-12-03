@@ -25,6 +25,11 @@
 #include "ship/ship.h"
 #include "tracing/tracing.h"
 
+#ifdef _WIN32
+#include "graphics/opengl/win32/OGLHDRPresenter.h"
+extern OGLHDRPresenter* g_hdr_presenter;
+#endif
+
 extern bool PostProcessing_override;
 extern int opengl_check_framebuffer();
 // Needed to track where the FXAA shaders are
@@ -110,9 +115,13 @@ void opengl_post_pass_tonemap()
 
 	// Select shader based on output mode: HDR10, OpenXR linear, or SDR
 	int shader_flags = 0;
-	if (gr_hdr_output_enabled()) {
+#ifdef _WIN32
+	bool presenter_active = g_hdr_presenter != nullptr && g_hdr_presenter->isInitialized();
+	if (presenter_active) {
 		shader_flags = SDR_FLAG_TONEMAPPING_HDR10_OUT;
-	} else if (openxr_enabled()) {
+	} else
+#endif
+	if (openxr_enabled()) {
 		shader_flags = SDR_FLAG_TONEMAPPING_LINEAR_OUT;
 	}
 

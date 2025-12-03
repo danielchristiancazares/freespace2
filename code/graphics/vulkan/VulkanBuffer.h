@@ -333,6 +333,10 @@ private:
 	vk::Buffer m_placeholderUniformBuffer = nullptr;
 	vk::DeviceMemory m_placeholderUniformMemory = nullptr;
 	static constexpr size_t PLACEHOLDER_BUFFER_SIZE = 256;  // Must be >= largest UBO alignment
+	// Placeholder texel buffer/view for transform_tex binding (samplerBuffer)
+	vk::Buffer m_placeholderTexelBuffer = nullptr;
+	vk::DeviceMemory m_placeholderTexelMemory = nullptr;
+	vk::BufferView m_placeholderTexelView = nullptr;
 
 	// Reference to descriptor manager (set by VulkanRenderer)
 	VulkanDescriptorManager* m_descriptorManager = nullptr;

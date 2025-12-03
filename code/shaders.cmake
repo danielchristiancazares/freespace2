@@ -45,7 +45,9 @@ foreach (_shader ${SHADERS})
 
 		add_custom_command(OUTPUT "${_spirvFile}"
 			COMMAND ${CMAKE_COMMAND} -E make_directory "${_depFileDir}"
-			COMMAND glslc "${_shader}" -o "${_spirvFile}" --target-env=vulkan1.4 -O -g "-I${SHADER_DIR}"
+			# shadertool (v1.0) cannot parse SPIR-V modules targeting Vulkan 1.1+.
+			# Emit Vulkan 1.0 SPIR-V for compatibility with the post-processing step.
+			COMMAND glslc "${_shader}" -o "${_spirvFile}" --target-env=vulkan1.0 -O -g "-I${SHADER_DIR}"
 				"-I${LEGACY_SHADER_DIR}" -MD -MF "${_depFile}" -MT "${_relativeSpirvPath}" -Werror -x glsl
 			MAIN_DEPENDENCY "${shader}"
 			COMMENT "Compiling shader ${_fileName}"
