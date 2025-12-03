@@ -286,11 +286,15 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 
 	// Initialize all bindings to placeholder texture to ensure valid descriptors
 	// This prevents validation errors for unused texture slots
+	// Use array view for bindings that expect sampler2DArray (0,1,2,3,9,10)
 	if (placeholderTex && placeholderTex->isValid() && defaultSampler) {
 		for (uint32_t binding = 0; binding < VulkanPipelineManager::MATERIAL_DESCRIPTOR_BINDING_COUNT; ++binding) {
+			bool needsArray = (binding == 0 || binding == 1 || binding == 2 || binding == 3 ||
+			                   binding == 9 || binding == 10);
+			vk::ImageView imageView = needsArray ? placeholderTex->getArrayImageView() : placeholderTex->getImageView();
 			descriptorManager->updateCombinedImageSampler(descriptorSet,
 			                                               binding,
-			                                               placeholderTex->getImageView(),
+			                                               imageView,
 			                                               defaultSampler,
 			                                               vk::ImageLayout::eShaderReadOnlyOptimal);
 		}
@@ -303,15 +307,14 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 		                         binding == 9 || binding == 10);
 
 		if (textureHandle < 0) {
-			// Texture not used - swap to array placeholder if needed
-			if (needsArray) {
-				if (auto* arrPlaceholder = g_vulkanTextureManager->getPlaceholderArrayTexture()) {
-					descriptorManager->updateCombinedImageSampler(descriptorSet,
-					                                               binding,
-					                                               arrPlaceholder->getImageView(),
-					                                               defaultSampler,
-					                                               vk::ImageLayout::eShaderReadOnlyOptimal);
-				}
+			// Texture not used - use placeholder with correct view type
+			if (placeholderTex && placeholderTex->isValid()) {
+				vk::ImageView imageView = needsArray ? placeholderTex->getArrayImageView() : placeholderTex->getImageView();
+				descriptorManager->updateCombinedImageSampler(descriptorSet,
+				                                               binding,
+				                                               imageView,
+				                                               defaultSampler,
+				                                               vk::ImageLayout::eShaderReadOnlyOptimal);
 			}
 			return;
 		}
@@ -393,17 +396,13 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 			return;
 		}
 
-		auto* imageSource = texture;
-		// If the shader expects an array and the texture isn't an array, use the placeholder array view
-		if (needsArray && texture->getArrayLayers() <= 1) {
-			if (auto* arrPlaceholder = g_vulkanTextureManager->getPlaceholderArrayTexture()) {
-				imageSource = arrPlaceholder;
-			}
-		}
+		// Use array view for bindings that expect sampler2DArray
+		// getArrayImageView() returns 2D_ARRAY view (or falls back to primary view for multi-layer textures)
+		vk::ImageView imageView = needsArray ? texture->getArrayImageView() : texture->getImageView();
 
 		descriptorManager->updateCombinedImageSampler(descriptorSet,
 		                                               binding,
-		                                               imageSource->getImageView(),
+		                                               imageView,
 		                                               sampler,
 		                                               vk::ImageLayout::eShaderReadOnlyOptimal);
 	};

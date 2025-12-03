@@ -1721,6 +1721,10 @@ void VulkanRenderer::endScenePass()
 
 	// Transition color attachment to SHADER_READ_ONLY_OPTIMAL for sampling in post-processing
 	if (m_currentColorView && m_sceneFramebuffer && m_sceneFramebuffer->getColorImage(0)) {
+		vk::Image sceneColorImage = m_sceneFramebuffer->getColorImage(0);
+		vk_debugf("endScenePass: transitioning scene color image=%p from COLOR_ATTACHMENT_OPTIMAL to SHADER_READ_ONLY_OPTIMAL",
+			reinterpret_cast<void*>(static_cast<VkImage>(sceneColorImage)));
+
 		vk::ImageMemoryBarrier2 colorBarrier;
 		colorBarrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 		colorBarrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
@@ -1739,6 +1743,11 @@ void VulkanRenderer::endScenePass()
 		depInfo.imageMemoryBarrierCount = 1;
 		depInfo.pImageMemoryBarriers = &colorBarrier;
 		m_sceneCommandBuffer.pipelineBarrier2(depInfo);
+	} else {
+		vk_debugf("endScenePass: SKIPPING scene color barrier - colorView=%p framebuffer=%p colorImage=%p",
+			reinterpret_cast<void*>(static_cast<VkImageView>(m_currentColorView)),
+			static_cast<void*>(m_sceneFramebuffer.get()),
+			m_sceneFramebuffer ? reinterpret_cast<void*>(static_cast<VkImage>(m_sceneFramebuffer->getColorImage(0))) : nullptr);
 	}
 
 	// Clear current format tracking

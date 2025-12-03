@@ -10,7 +10,8 @@ layout (location = 0) out vec4 fragOut0;
 
 // Set 0: Uniform buffers (bindings match uniform_block_type enum)
 // GenericData = 8
-#ifdef GL_KHR_vulkan_glsl
+// Note: shaderc defines VULKAN=1 when targeting Vulkan, not GL_KHR_vulkan_glsl
+#if defined(VULKAN) || defined(GL_KHR_vulkan_glsl)
 #extension GL_KHR_vulkan_glsl : enable
 #define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id, std140)
 #define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)

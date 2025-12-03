@@ -277,9 +277,17 @@ bool VulkanPipelineManager::createUniformDescriptorLayout()
 	layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
 	layoutInfo.pBindings = bindings.data();
 
+	// Log all bindings for debugging
+	for (size_t i = 0; i < bindings.size(); ++i) {
+		const auto& b = bindings[i];
+		vk_debugf("Uniform layout binding %u: type=%d count=%u stages=0x%x",
+			b.binding, static_cast<int>(b.descriptorType), b.descriptorCount,
+			static_cast<uint32_t>(b.stageFlags));
+	}
+
 	try {
 		m_uniformDescriptorSetLayout = m_device.createDescriptorSetLayoutUnique(layoutInfo);
-		mprintf(("VulkanPipelineManager: Created uniform buffer descriptor set layout with %zu bindings (dynamic offsets)\n", 
+		mprintf(("VulkanPipelineManager: Created uniform buffer descriptor set layout with %zu bindings (dynamic offsets)\n",
 		         bindings.size()));
 		return true;
 	} catch (const vk::SystemError& e) {
@@ -721,6 +729,12 @@ void VulkanPipelineManager::createVertexInputState(const vertex_layout& layout,
 		attr.offset = static_cast<uint32_t>(component->offset);
 		attributes.push_back(attr);
 	}
+
+	// Debug: Log all vertex attributes created
+	for (const auto& attr : attributes) {
+		vk_debugf("createVertexInputState: location=%u binding=%u format=%d offset=%u",
+			attr.location, attr.binding, static_cast<int>(attr.format), attr.offset);
+	}
 }
 
 vk::PrimitiveTopology VulkanPipelineManager::convertPrimitiveType(primitive_type primType)
@@ -963,9 +977,17 @@ bool VulkanPipelineManager::createMaterialDescriptorLayout()
 	layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
 	layoutInfo.pBindings = bindings.data();
 
+	// Log all bindings for debugging
+	for (size_t i = 0; i < bindings.size(); ++i) {
+		const auto& b = bindings[i];
+		vk_debugf("Material layout binding %u: type=%d count=%u stages=0x%x",
+			b.binding, static_cast<int>(b.descriptorType), b.descriptorCount,
+			static_cast<uint32_t>(b.stageFlags));
+	}
+
 	try {
 		m_materialDescriptorSetLayout = m_device.createDescriptorSetLayoutUnique(layoutInfo);
-		mprintf(("VulkanPipelineManager: Created material descriptor set layout with %zu bindings\n", 
+		mprintf(("VulkanPipelineManager: Created material descriptor set layout with %zu bindings\n",
 		         bindings.size()));
 		return true;
 	} catch (const vk::SystemError& e) {
@@ -989,15 +1011,32 @@ vk::PipelineLayout VulkanPipelineManager::getOrCreateLayout(shader_type type, ui
 	vk::PipelineLayoutCreateInfo layoutInfo;
 	SCP_vector<vk::DescriptorSetLayout> setLayouts;
 
-	// Set 0: Uniform buffers (global)
-	if (m_uniformDescriptorSetLayout) {
-		setLayouts.push_back(m_uniformDescriptorSetLayout.get());
+	// VALIDATION: Log descriptor set layout state for debugging
+	vk_debugf("getOrCreateLayout: uniform=%p material=%p key=%s",
+		static_cast<void*>(m_uniformDescriptorSetLayout.get()),
+		static_cast<void*>(m_materialDescriptorSetLayout.get()),
+		key.c_str());
+
+	// CRITICAL: Both layouts must exist - shaders expect Set 0 = uniforms, Set 1 = materials
+	// If uniform layout is null, material layout would shift to Set 0, causing validation errors:
+	// "SPIR-V uses descriptor [Set 0, Binding 0] of type UNIFORM_BUFFER_DYNAMIC but expected COMBINED_IMAGE_SAMPLER"
+	if (!m_uniformDescriptorSetLayout) {
+		vk_debugf("ERROR: Uniform descriptor set layout is null! This will cause Set 0 to receive material layout instead.");
+		return nullptr;  // Fail fast instead of creating broken pipeline
+	}
+	if (!m_materialDescriptorSetLayout) {
+		vk_debugf("ERROR: Material descriptor set layout is null!");
+		return nullptr;
 	}
 
-	// Set 1: Material textures (per-material)
-	if (m_materialDescriptorSetLayout) {
-		setLayouts.push_back(m_materialDescriptorSetLayout.get());
-	}
+	// Set 0: Uniform buffers (global) - MUST be first
+	setLayouts.push_back(m_uniformDescriptorSetLayout.get());
+
+	// Set 1: Material textures (per-material) - MUST be second
+	setLayouts.push_back(m_materialDescriptorSetLayout.get());
+
+	vk_debugf("Creating pipeline layout - Set 0=%p (uniforms), Set 1=%p (materials)",
+		static_cast<void*>(setLayouts[0]), static_cast<void*>(setLayouts[1]));
 
 	layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 	layoutInfo.pSetLayouts = setLayouts.data();

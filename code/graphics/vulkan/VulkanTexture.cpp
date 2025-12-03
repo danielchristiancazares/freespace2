@@ -103,12 +103,27 @@ bool VulkanTexture::create(vk::Device device, vk::PhysicalDevice physicalDevice,
 		return false;
 	}
 
+	// Create secondary array view for sampler2DArray compatibility
+	// Even single-layer images need a 2D_ARRAY view when bound to sampler2DArray shaders
+	// (layerCount=1 is valid for 2D_ARRAY views per Vulkan spec)
+	if (arrayLayers == 1) {
+		viewInfo.viewType = vk::ImageViewType::e2DArray;
+		try {
+			m_arrayImageView = device.createImageViewUnique(viewInfo);
+		} catch (const vk::SystemError& e) {
+			mprintf(("Vulkan: Failed to create texture array image view: %s\n", e.what()));
+			// Non-fatal: we can still use the 2D view, just not with sampler2DArray shaders
+		}
+	}
+	// For multi-layer images, m_imageView is already 2D_ARRAY, no separate array view needed
+
 	m_currentLayout = vk::ImageLayout::eUndefined;
 	return true;
 }
 
 void VulkanTexture::destroy()
 {
+	m_arrayImageView.reset();
 	m_imageView.reset();
 	m_memory.reset();
 	m_image.reset();

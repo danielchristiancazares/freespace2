@@ -122,6 +122,8 @@ public:
 	// Accessors
 	vk::Image getImage() const { return m_image.get(); }
 	vk::ImageView getImageView() const { return m_imageView.get(); }
+	// Array view for sampler2DArray compatibility (always 2D_ARRAY, even for single-layer)
+	vk::ImageView getArrayImageView() const { return m_arrayImageView ? m_arrayImageView.get() : m_imageView.get(); }
 	vk::Format getFormat() const { return m_format; }
 	uint32_t getWidth() const { return m_extent.width; }
 	uint32_t getHeight() const { return m_extent.height; }
@@ -135,6 +137,7 @@ private:
 	vk::UniqueImage m_image;
 	vk::UniqueDeviceMemory m_memory;
 	vk::UniqueImageView m_imageView;
+	vk::UniqueImageView m_arrayImageView;  // Always 2D_ARRAY for sampler2DArray compatibility
 
 	vk::Extent3D m_extent = {0, 0, 1};
 	vk::Format m_format = vk::Format::eUndefined;
