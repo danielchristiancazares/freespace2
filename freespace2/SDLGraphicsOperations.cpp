@@ -262,11 +262,16 @@ SDLGraphicsOperations::SDLGraphicsOperations() {
 SDLGraphicsOperations::~SDLGraphicsOperations() {
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);
 	
-	ImGui_ImplSDL2_Shutdown();
-
+#if SDL_VERSION_ATLEAST(2, 0, 6)
+	// ImGui platform/render backends are currently only initialized for OpenGL.
+	// When running with the Vulkan renderer, we never call ImGui_ImplSDL2_InitForVulkan
+	// or ImGui_ImplOpenGL3_Init(), so shutting them down would trigger asserts in
+	// ImGui (bd == nullptr / "No platform backend to shutdown").
 	if (!Cmdline_vulkan) {
+		ImGui_ImplSDL2_Shutdown();
 		ImGui_ImplOpenGL3_Shutdown();
 	}
+#endif
 }
 std::unique_ptr<os::Viewport> SDLGraphicsOperations::createViewport(const os::ViewPortProperties& props)
 {
