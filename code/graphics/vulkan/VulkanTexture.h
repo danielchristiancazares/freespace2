@@ -69,6 +69,7 @@ public:
 	 * @param mipLevels Number of mipmap levels
 	 * @param arrayLayers Number of array layers (for texture arrays)
 	 * @param usage Image usage flags
+	 * @param flags Image creation flags (e.g., eCubeCompatible for cubemaps)
 	 * @return true on success
 	 */
 	bool create(vk::Device device, vk::PhysicalDevice physicalDevice,
@@ -76,7 +77,8 @@ public:
 	            uint32_t mipLevels = 1, uint32_t arrayLayers = 1,
 	            vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled |
 	                                        vk::ImageUsageFlagBits::eTransferDst |
-	                                        vk::ImageUsageFlagBits::eTransferSrc);
+	                                        vk::ImageUsageFlagBits::eTransferSrc,
+	            vk::ImageCreateFlags flags = {});
 
 	/**
 	 * @brief Upload pixel data from staging buffer to texture
@@ -124,6 +126,8 @@ public:
 	vk::ImageView getImageView() const { return m_imageView.get(); }
 	// Array view for sampler2DArray compatibility (always 2D_ARRAY, even for single-layer)
 	vk::ImageView getArrayImageView() const { return m_arrayImageView ? m_arrayImageView.get() : m_imageView.get(); }
+	// Cube view for samplerCube compatibility (only valid for 6-layer cube-compatible images)
+	vk::ImageView getCubeImageView() const { return m_cubeImageView ? m_cubeImageView.get() : m_imageView.get(); }
 	vk::Format getFormat() const { return m_format; }
 	uint32_t getWidth() const { return m_extent.width; }
 	uint32_t getHeight() const { return m_extent.height; }
@@ -138,6 +142,7 @@ private:
 	vk::UniqueDeviceMemory m_memory;
 	vk::UniqueImageView m_imageView;
 	vk::UniqueImageView m_arrayImageView;  // Always 2D_ARRAY for sampler2DArray compatibility
+	vk::UniqueImageView m_cubeImageView;   // Cube view for samplerCube (6-layer cube-compatible only)
 
 	vk::Extent3D m_extent = {0, 0, 1};
 	vk::Format m_format = vk::Format::eUndefined;

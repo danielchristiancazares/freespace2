@@ -1,11 +1,18 @@
 //!#version 150
 #include "gamma.sdr" //! #include "gamma.sdr"
 #define PI 3.1415926535897932384626433832795
-layout(set = 1, binding = 0) uniform samplerCube envmap;
 
+#if defined(VULKAN)
+layout(set = 1, binding = 4) uniform samplerCube envmap;
+layout (std140, set = 0, binding = 8) uniform genericData {
+	int face;
+};
+#else
+layout(set = 1, binding = 0) uniform samplerCube envmap;
 layout (std140) uniform genericData {
 	int face;
 };
+#endif
 
 #if defined(VULKAN) || defined(GL_KHR_vulkan_glsl)
 layout(location = 0) in vec4 fragTexCoord;

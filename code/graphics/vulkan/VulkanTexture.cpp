@@ -32,7 +32,7 @@ VulkanTexture::~VulkanTexture()
 bool VulkanTexture::create(vk::Device device, vk::PhysicalDevice physicalDevice,
                            uint32_t width, uint32_t height, vk::Format format,
                            uint32_t mipLevels, uint32_t arrayLayers,
-                           vk::ImageUsageFlags usage)
+                           vk::ImageUsageFlags usage, vk::ImageCreateFlags flags)
 {
 	m_device = device;
 	m_extent = vk::Extent3D{width, height, 1};
@@ -52,6 +52,9 @@ bool VulkanTexture::create(vk::Device device, vk::PhysicalDevice physicalDevice,
 	imageInfo.usage = usage;
 	imageInfo.sharingMode = vk::SharingMode::eExclusive;
 	imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+	imageInfo.flags = flags;
+
+	const bool cubeCompatible = (flags & vk::ImageCreateFlagBits::eCubeCompatible) == vk::ImageCreateFlagBits::eCubeCompatible;
 
 	try {
 		m_image = device.createImageUnique(imageInfo);
@@ -117,12 +120,27 @@ bool VulkanTexture::create(vk::Device device, vk::PhysicalDevice physicalDevice,
 	}
 	// For multi-layer images, m_imageView is already 2D_ARRAY, no separate array view needed
 
+	// Create cube view for samplerCube compatibility when image is cube-compatible
+	if (cubeCompatible && arrayLayers >= 6) {
+		vk::ImageViewCreateInfo cubeViewInfo = viewInfo;
+		cubeViewInfo.viewType = (arrayLayers > 6 && arrayLayers % 6 == 0)
+		                        ? vk::ImageViewType::eCubeArray
+		                        : vk::ImageViewType::eCube;
+		try {
+			m_cubeImageView = device.createImageViewUnique(cubeViewInfo);
+		} catch (const vk::SystemError& e) {
+			mprintf(("Vulkan: Failed to create cube image view: %s\n", e.what()));
+			// Non-fatal: fall back to non-cube view
+		}
+	}
+
 	m_currentLayout = vk::ImageLayout::eUndefined;
 	return true;
 }
 
 void VulkanTexture::destroy()
 {
+	m_cubeImageView.reset();
 	m_arrayImageView.reset();
 	m_imageView.reset();
 	m_memory.reset();
@@ -656,8 +674,16 @@ bool VulkanTextureManager::createTexture(int bitmapHandle, const bitmap* bm)
 		mipLevels = calculateMipLevels(bm->w, bm->h);
 	}
 
+	// Detect cubemaps and set up cube-compatible creation
+	bool isCubemap = (bm->flags & BMP_FLAG_CUBEMAP) != 0;
+	uint32_t arrayLayers = isCubemap ? 6 : 1;
+	vk::ImageCreateFlags imageFlags = isCubemap ? vk::ImageCreateFlagBits::eCubeCompatible : vk::ImageCreateFlags{};
+	vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled |
+	                            vk::ImageUsageFlagBits::eTransferDst |
+	                            vk::ImageUsageFlagBits::eTransferSrc;
+
 	auto* texture = new VulkanTexture();
-	if (!texture->create(m_device, m_physicalDevice, bm->w, bm->h, format, mipLevels)) {
+	if (!texture->create(m_device, m_physicalDevice, bm->w, bm->h, format, mipLevels, arrayLayers, usage, imageFlags)) {
 		delete texture;
 		return false;
 	}
@@ -1352,22 +1378,8 @@ int VulkanTextureManager::createRenderTarget(int handle, int* width, int* height
 
 	// Create texture
 	auto texture = new VulkanTexture();
-	
-	// Need special create for cubemap
-	vk::ImageCreateInfo imageInfo{};
-	imageInfo.imageType = vk::ImageType::e2D;
-	imageInfo.format = colorFormat;
-	imageInfo.extent = vk::Extent3D{static_cast<uint32_t>(*width), static_cast<uint32_t>(*height), 1};
-	imageInfo.mipLevels = mipLevels;
-	imageInfo.arrayLayers = arrayLayers;
-	imageInfo.samples = vk::SampleCountFlagBits::e1;
-	imageInfo.tiling = vk::ImageTiling::eOptimal;
-	imageInfo.usage = usage;
-	imageInfo.sharingMode = vk::SharingMode::eExclusive;
-	imageInfo.initialLayout = vk::ImageLayout::eUndefined;
-	imageInfo.flags = imageFlags;
 
-	if (!texture->create(m_device, m_physicalDevice, *width, *height, colorFormat, mipLevels, arrayLayers, usage)) {
+	if (!texture->create(m_device, m_physicalDevice, *width, *height, colorFormat, mipLevels, arrayLayers, usage, imageFlags)) {
 		delete texture;
 		mprintf(("Vulkan: Failed to create render target texture\n"));
 		return 0;

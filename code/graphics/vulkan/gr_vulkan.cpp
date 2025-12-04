@@ -730,10 +730,10 @@ void gr_vulkan_calculate_irrmap()
 		if (materialLayout) {
 			vk::DescriptorSet materialSet = descriptorManager->allocateSet(materialLayout, "IrrmapEnvmap");
 			if (materialSet) {
-				// Update binding 4 with envmap cubemap
+				// Update binding 4 with envmap cubemap - use cube view for samplerCube
 				descriptorManager->updateCombinedImageSampler(
 				    materialSet, 4,  // binding 4 = envmap in material layout
-				    envmapTex->getImageView(),
+				    envmapTex->getCubeImageView(),
 				    envmapSampler,
 				    vk::ImageLayout::eShaderReadOnlyOptimal);
 
