@@ -313,8 +313,9 @@ bool VulkanPostProcessing::createBloomResources()
 		}
 
 		SCP_vector<vk::ImageView> fbViews = {mip0View.get()};
+		SCP_vector<vk::Image> fbImages = {m_bloomImages[i].get()};
 		if (!m_bloomFramebuffers[i]->createFromImageViews(
-			m_device, m_bloomWidth, m_bloomHeight, fbViews, bloomFormat, nullptr, vk::Format::eUndefined)) {
+			m_device, m_bloomWidth, m_bloomHeight, fbViews, bloomFormat, nullptr, vk::Format::eUndefined, fbImages)) {
 			mprintf(("Vulkan PostProcess: Failed to create bloom framebuffer %d\n", i));
 			return false;
 		}
@@ -601,4 +602,3 @@ void gr_vulkan_post_process_restore_zbuffer()
 } // namespace graphics
 
 #endif // WITH_VULKAN
-

@@ -102,7 +102,9 @@ bool VulkanFramebuffer::createFromImageViews(vk::Device device,
                                              const SCP_vector<vk::ImageView>& colorViews,
                                              vk::Format colorFormat,
                                              vk::ImageView depthView,
-                                             vk::Format depthFormat)
+                                             vk::Format depthFormat,
+                                             const SCP_vector<vk::Image>& colorImages,
+                                             vk::Image depthImage)
 {
 	m_device = device;
 	m_extent = vk::Extent2D{width, height};
@@ -110,9 +112,11 @@ bool VulkanFramebuffer::createFromImageViews(vk::Device device,
 
 	// Store external views and their formats
 	m_externalColorViews = colorViews;
+	m_externalColorImages = colorImages;
 	m_externalColorFormat = colorFormat;
 	m_externalDepthView = depthView;
 	m_externalDepthFormat = depthFormat;
+	m_externalDepthImage = depthImage;
 
 	// Note: With dynamic rendering (Vulkan 1.3+), VkFramebuffer objects are not needed.
 	// The image views are used directly in VkRenderingAttachmentInfo.
@@ -137,9 +141,11 @@ void VulkanFramebuffer::destroy()
 	}
 
 	m_externalColorViews.clear();
+	m_externalColorImages.clear();
 	m_externalColorFormat = vk::Format::eUndefined;
 	m_externalDepthView = nullptr;
 	m_externalDepthFormat = vk::Format::eUndefined;
+	m_externalDepthImage = VK_NULL_HANDLE;
 	m_extent = vk::Extent2D{0, 0};
 }
 
@@ -178,7 +184,9 @@ vk::Image VulkanFramebuffer::getColorImage(size_t index) const
 	if (m_ownsAttachments && index < m_colorAttachments.size()) {
 		return m_colorAttachments[index].image.get();
 	}
-	// External views don't have direct image access
+	if (!m_ownsAttachments && index < m_externalColorImages.size()) {
+		return m_externalColorImages[index];
+	}
 	return nullptr;
 }
 
@@ -203,7 +211,7 @@ vk::Image VulkanFramebuffer::getDepthImage() const
 	if (m_ownsAttachments) {
 		return m_depthAttachment.image.get();
 	}
-	return nullptr;
+	return m_externalDepthImage;
 }
 
 vk::Format VulkanFramebuffer::getColorFormat(size_t index) const

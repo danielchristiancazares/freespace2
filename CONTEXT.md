@@ -485,10 +485,11 @@ Attempted to fix the stale state issue by resetting all pass state flags in `sub
 ### Failed fixes
 
 1. **Blit shader R/B swap**: No effect - problem is upstream of blit
+2. **VulkanFramebuffer external images**: Extended `createFromImageViews` to accept `vk::Image` handles, stored them in `m_externalColorImages`/`m_externalDepthImage`, fixed `getColorImage()` to return external handles when attachments are external, and passed the images at the cubemap render target, swapchain framebuffer, and bloom framebuffer call sites. Result: red tint remained.
 
 ### Next steps
 
-1. Check where BGRA→RGBA conversion should happen (at texture upload? at sampling? at blit?)
+1. Check where BGRA->RGBA conversion should happen (at texture upload? at sampling? at blit?)
 2. Investigate if model/material shaders need channel swizzling
 3. Check if scene framebuffer is receiving correct color data
 4. Verify descriptor set bindings are correct

@@ -973,6 +973,10 @@ bool VulkanRenderer::createSceneFramebuffer()
 {
 	m_sceneFramebuffer = std::make_unique<VulkanFramebuffer>();
 
+	// Reset layout tracking - new image starts in UNDEFINED
+	m_sceneColorInShaderReadLayout = false;
+	mprintf(("Vulkan: createSceneFramebuffer LAYOUT TRACK reset m_sceneColorInShaderReadLayout=false\n"));
+
 	// Create scene framebuffer attachments with HDR color + depth
 	// Note: With dynamic rendering (Vulkan 1.3+), we only create the images/views, not VkFramebuffer
 	if (!m_sceneFramebuffer->create(m_device.get(),
@@ -999,13 +1003,15 @@ void VulkanRenderer::createSwapchainFramebuffers()
 	// Note: With dynamic rendering, we just store the image views, no VkFramebuffer is created
 	for (size_t i = 0; i < m_swapChainImageViews.size(); ++i) {
 		auto fb = std::make_unique<VulkanFramebuffer>();
+		SCP_vector<vk::Image> colorImages = {m_swapChainImages[i]};
 		if (!fb->createFromImageViews(m_device.get(),
 		        m_swapChainExtent.width,
 		        m_swapChainExtent.height,
 		        {m_swapChainImageViews[i].get()},
 		        m_swapChainImageFormat,  // Color format for getColorFormat()
 		        nullptr,                  // No depth view
-		        vk::Format::eUndefined)) { // No depth format
+		        vk::Format::eUndefined,   // No depth format
+		        colorImages)) {
 			mprintf(("Vulkan: Failed to create swapchain framebuffer %zu\n", i));
 			continue;
 		}
@@ -1601,12 +1607,31 @@ void VulkanRenderer::beginScenePass()
 
 	// Transition color attachment to COLOR_ATTACHMENT_OPTIMAL
 	if (colorView && colorImage) {
+		// Determine correct oldLayout based on tracked state
+		bool isSceneFramebuffer = (targetFramebuffer == m_sceneFramebuffer.get());
+		vk::ImageLayout oldLayout = vk::ImageLayout::eUndefined;
+		vk::PipelineStageFlags2 srcStage = vk::PipelineStageFlagBits2::eTopOfPipe;
+		vk::AccessFlags2 srcAccess = vk::AccessFlagBits2::eNone;
+
+		if (isSceneFramebuffer && m_sceneColorInShaderReadLayout) {
+			// Scene color was left in SHADER_READ_ONLY from previous frame's blit
+			oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			srcStage = vk::PipelineStageFlagBits2::eFragmentShader;
+			srcAccess = vk::AccessFlagBits2::eShaderSampledRead;
+		}
+
+		mprintf(("Vulkan: beginScenePass LAYOUT FIX image=%p isScene=%d inShaderRead=%d oldLayout=%s\n",
+		         reinterpret_cast<void*>(static_cast<VkImage>(colorImage)),
+		         isSceneFramebuffer ? 1 : 0,
+		         m_sceneColorInShaderReadLayout ? 1 : 0,
+		         oldLayout == vk::ImageLayout::eUndefined ? "UNDEFINED" : "SHADER_READ_ONLY"));
+
 		vk::ImageMemoryBarrier2 colorBarrier;
-		colorBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-		colorBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+		colorBarrier.srcStageMask = srcStage;
+		colorBarrier.srcAccessMask = srcAccess;
 		colorBarrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 		colorBarrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-		colorBarrier.oldLayout = vk::ImageLayout::eUndefined;
+		colorBarrier.oldLayout = oldLayout;
 		colorBarrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
 		colorBarrier.image = colorImage;
 		colorBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -1619,6 +1644,14 @@ void VulkanRenderer::beginScenePass()
 		depInfo.imageMemoryBarrierCount = 1;
 		depInfo.pImageMemoryBarriers = &colorBarrier;
 		m_sceneCommandBuffer.pipelineBarrier2(depInfo);
+
+		// DIAGNOSTIC: Confirm barrier is recorded for RT images
+		if (usingTextureManagerRT) {
+			mprintf(("Vulkan: beginScenePass BARRIER RECORDED for RT image=%p view=%p extent=%ux%u\n",
+			         reinterpret_cast<void*>(static_cast<VkImage>(colorImage)),
+			         reinterpret_cast<void*>(static_cast<VkImageView>(colorView)),
+			         targetExtent.width, targetExtent.height));
+		}
 	} else if (colorView && !colorImage) {
 		vk_logf("VulkanRenderer",
 			"beginScenePass: skipping color barrier (color image missing) view=%p framebuffer=%p",
@@ -1760,6 +1793,11 @@ void VulkanRenderer::endScenePass()
 		depInfo.imageMemoryBarrierCount = 1;
 		depInfo.pImageMemoryBarriers = &colorBarrier;
 		m_sceneCommandBuffer.pipelineBarrier2(depInfo);
+
+		// DIAGNOSTIC: Track that scene color is now in SHADER_READ_ONLY layout
+		m_sceneColorInShaderReadLayout = true;
+		mprintf(("Vulkan: endScenePass LAYOUT TRACK set m_sceneColorInShaderReadLayout=true image=%p\n",
+		         reinterpret_cast<void*>(static_cast<VkImage>(sceneColorImage))));
 	} else {
 		vk_debugf("endScenePass: SKIPPING scene color barrier - colorView=%p framebuffer=%p colorImage=%p",
 			reinterpret_cast<void*>(static_cast<VkImageView>(m_currentColorView)),
@@ -2422,6 +2460,16 @@ void VulkanRenderer::submitAuxiliaryCommandBuffer()
 void VulkanRenderer::flip()
 {
 	static int flipCount = 0;
+
+	// DIAGNOSTIC: Log scene color layout tracking state at flip entry
+	vk::Image sceneColorImg = m_sceneFramebuffer ? m_sceneFramebuffer->getColorImage(0) : vk::Image{};
+	mprintf(("Vulkan: flip LAYOUT STATE entry #%d sceneColorInShaderRead=%d sceneImg=%p scene=%d direct=%d\n",
+	         flipCount + 1,
+	         m_sceneColorInShaderReadLayout ? 1 : 0,
+	         reinterpret_cast<void*>(static_cast<VkImage>(sceneColorImg)),
+	         m_scenePassActive ? 1 : 0,
+	         m_directPassActive ? 1 : 0));
+
 	vk_debugf("flip entry #%d scene=%d direct=%d aux=%d recorded=%d cmd=%p frame=%u swapImage=%u colorFmt=%d depthFmt=%d",
 		++flipCount,
 		m_scenePassActive ? 1 : 0,
@@ -2456,6 +2504,10 @@ void VulkanRenderer::flip()
 	PresentResult presentResult = PresentResult::Success;
 
 	if (m_directPassActive) {
+		// DIAGNOSTIC: Confirm direct pass doesn't touch scene color image
+		mprintf(("Vulkan: flip DIRECT PATH - no scene color barrier should be recorded. sceneColorInShaderRead=%d\n",
+		         m_sceneColorInShaderReadLayout ? 1 : 0));
+
 		vk_logf("VulkanRenderer",
 			"flip path: direct pass present (cmd=%p swapImage=%u)",
 			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
@@ -2517,6 +2569,11 @@ void VulkanRenderer::flip()
 			m_directPassActive ? 1 : 0,
 			m_currentFrame);
 	} else if (m_scenePassActive || m_scenePassRecorded) {
+		// DIAGNOSTIC: Scene pass path - endScenePass will transition scene color to SHADER_READ_ONLY
+		mprintf(("Vulkan: flip SCENE PATH - will transition scene color. sceneColorInShaderRead=%d sceneActive=%d\n",
+		         m_sceneColorInShaderReadLayout ? 1 : 0,
+		         m_scenePassActive ? 1 : 0));
+
 		// Finish recording for the scene path and present it
 		if (m_scenePassActive) {
 			endScenePass();
@@ -2569,11 +2626,15 @@ void VulkanRenderer::flip()
 		// This handles cases where gr_scene_texture_begin() wasn't called before flip()
 		bool recoveryAttempted = false;
 		if (m_sceneFramebuffer && m_sceneFramebuffer->getColorImageView(0)) {
+			// DIAGNOSTIC: Recovery path - will start scene pass and record barrier on scene color
+			mprintf(("Vulkan: flip RECOVERY PATH - will start scene pass. sceneColorInShaderRead=%d\n",
+			         m_sceneColorInShaderReadLayout ? 1 : 0));
+
 			vk_logf("VulkanRenderer", "flip path: recovery - starting scene pass and blitting (scene framebuffer exists but no pass was started)");
 			vk_debugf("flip: recovery path - scene framebuffer exists, scenePassRecorded=%d, starting scene pass frame=%u",
 				m_scenePassRecorded ? 1 : 0,
 				m_currentFrame);
-			
+
 			// Start a scene pass to blit the scene framebuffer (which may have content from a previous frame)
 			beginScenePass();
 			

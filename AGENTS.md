@@ -9,8 +9,7 @@
 
 ## Build, Test, and Development Commands
 - Configure: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug` (add `-DSCP_RELEASE_LOGGING=ON` for release logs).
-- Build: `cmake --build build --config Debug --parallel`.
-- Run (Debug Vulkan): `build/bin/Debug/fs2_26_0_0.exe -vulkan` (adjust exe name per target/config).
+- Build: `build.ps1
 - Tests: `ctest -C Debug --output-on-failure -VV` from `build/`.
 
 ## Coding Style & Naming Conventions
@@ -35,5 +34,8 @@
   - When you fix a non-trivial crash/bug or discover a pitfall that future LLM sessions should avoid (add to “Crash fix” or “Mistakes to avoid” sections).
   - When you add/remove important files, tools, or workflows that should be reflected in its “File map” or “Testing & debugging” sections.
 - Do not revert user changes. Avoid destructive git commands. Prefer `rg` for search and `cmake --build` for builds. Log and test before handing off.***
-- `gr_vulkan_calculate_irrmap` now relies on per-face cubemap framebuffers to pull format/extent metadata; if you touch this path ensure you handle the `irrmapRT->framebuffer` null case by scanning `cubeFaceFramebuffers` before dereferencing and by using `faceFramebuffer->getExtent()` instead of hard-coded sizes.
 - When running `git show`/`git diff` in this repo, always pass `--no-pager` (or set `GIT_PAGER=cat`) so automated tooling is not blocked by the interactive pager/“spacebar to continue” prompt.
+
+# **CRITICAL - NEVER SKIP**
+**ALWAYS ADD DIAGNOSTICS BEFORE IMPLEMENTING FIXES**
+**NEVER IMPLEMENT CODE CHANGES BEFORE CONFIRMING WITH THE USER**

@@ -90,7 +90,9 @@ class VulkanFramebuffer {
 	                          const SCP_vector<vk::ImageView>& colorViews,
 	                          vk::Format colorFormat,
 	                          vk::ImageView depthView = nullptr,
-	                          vk::Format depthFormat = vk::Format::eUndefined);
+	                          vk::Format depthFormat = vk::Format::eUndefined,
+	                          const SCP_vector<vk::Image>& colorImages = {},
+	                          vk::Image depthImage = VK_NULL_HANDLE);
 
 	void destroy();
 
@@ -128,9 +130,11 @@ class VulkanFramebuffer {
 
 	// For external views (swapchain) - stores views and their formats
 	SCP_vector<vk::ImageView> m_externalColorViews;
+	SCP_vector<vk::Image> m_externalColorImages;
 	vk::Format m_externalColorFormat = vk::Format::eUndefined;
 	vk::ImageView m_externalDepthView;
 	vk::Format m_externalDepthFormat = vk::Format::eUndefined;
+	vk::Image m_externalDepthImage = VK_NULL_HANDLE;
 
 	bool createAttachment(vk::PhysicalDevice physicalDevice,
 	                      FramebufferAttachment& attachment,

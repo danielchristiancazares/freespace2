@@ -364,6 +364,7 @@ class VulkanRenderer {
 	bool m_directPassActive = false;  // Direct-to-swapchain pass (for menus)
 	bool m_auxiliaryPassActive = false;  // Auxiliary render pass (for off-screen rendering like cubemap faces)
 	bool m_scenePassRecorded = false; // Scene pass ended and needs to be blitted/presented
+	bool m_sceneColorInShaderReadLayout = false;  // Track scene color image layout across frames (DIAGNOSTIC)
 	vk::CommandBuffer m_sceneCommandBuffer;  // Allocated per-frame for scene rendering
 	DrawState m_drawState;
 	vk::Extent2D m_sceneExtent = {0, 0};

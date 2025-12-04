@@ -1,4 +1,11 @@
 
+// Layout helpers so Vulkan uses location 2 for texcoord (matches engine mapping: pos=0, tex=2)
+#if defined(VULKAN) || defined(GL_KHR_vulkan_glsl)
+#define NANO_TEXCOORD_LOCATION 2
+#else
+#define NANO_TEXCOORD_LOCATION 1
+#endif
+
 // Uniform block - set 0, binding 2 matches uniform_block_type::NanoVGData
 layout(std140, set = 0, binding = 2) uniform NanoVGUniformData {
     mat3 scissorMat;
@@ -25,9 +32,9 @@ layout(std140, set = 0, binding = 2) uniform NanoVGUniformData {
     int texArrayIndex;
 };
 
-// Vertex inputs - NanoVG uses locations 0 and 1 (no color vertex)
+// Vertex inputs - position at 0, texcoord at engine-mapped slot
 layout(location = 0) in vec2 vertPosition;
-layout(location = 1) in vec2 vertTexCoord;
+layout(location = NANO_TEXCOORD_LOCATION) in vec2 vertTexCoord;
 
 // Vertex outputs to fragment shader
 layout(location = 0) out vec2 ftcoord;

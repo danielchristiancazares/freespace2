@@ -722,6 +722,17 @@ bool VulkanTextureManager::uploadTextureData(int bitmapHandle, const bitmap* bm)
 	uint32_t textureMipLevels = texture->getMipLevels();
 	bool isCompressed = isCompressedFormat(format);
 
+	// DIAGNOSTIC: Check cubemap state
+	bool isCubemap = (bm->flags & BMP_FLAG_CUBEMAP) != 0;
+	uint32_t textureArrayLayers = texture->getArrayLayers();
+	if (isCubemap || textureArrayLayers > 1) {
+		mprintf(("Vulkan: uploadTextureData CUBEMAP DIAGNOSTIC handle=%d isCubemap=%d arrayLayers=%u "
+		         "w=%d h=%d bpp=%d mips=%u compressed=%d format=%d\n",
+		         bitmapHandle, isCubemap ? 1 : 0, textureArrayLayers,
+		         bm->w, bm->h, bm->bpp, textureMipLevels, isCompressed ? 1 : 0,
+		         static_cast<int>(format)));
+	}
+
 	// Handle 24-bit -> 32-bit conversion (only for uncompressed)
 	bool needsConversion = (bm->bpp == 24) && !isCompressed;
 	bool needsPaletteExpansion = (bm->bpp == 8) && !(bm->flags & BMP_AABITMAP) && !isCompressed;
@@ -1450,9 +1461,10 @@ int VulkanTextureManager::createRenderTarget(int handle, int* width, int* height
 			// Create framebuffer wrapper for this face (dynamic rendering - no VkFramebuffer)
 			rt->cubeFaceFramebuffers[face] = std::make_unique<VulkanFramebuffer>();
 			SCP_vector<vk::ImageView> views = {rt->cubeFaceViews[face].get()};
+			SCP_vector<vk::Image> images = {texture->getImage()};
 
 			if (!rt->cubeFaceFramebuffers[face]->createFromImageViews(
-				m_device, *width, *height, views, colorFormat, nullptr, vk::Format::eUndefined)) {
+				m_device, *width, *height, views, colorFormat, nullptr, vk::Format::eUndefined, images)) {
 				mprintf(("Vulkan: Failed to create cubemap face %d framebuffer\n", face));
 				m_textures.erase(handle);
 				delete texture;
