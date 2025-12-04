@@ -256,9 +256,8 @@ vk::SurfaceFormatKHR chooseSurfaceFormat(const PhysicalDeviceValues& values)
 		static_cast<int>(Gr_hdr_output_mode),
 		gr_hdr_output_enabled() ? 1 : 0));
 
-	// HDR10 path: DISABLED for debugging color issues
-	// TODO: Re-enable HDR after fixing color channel issues
-	if (false && gr_hdr_output_enabled()) {
+	// HDR10 path
+	if (gr_hdr_output_enabled()) {
 		for (const auto& availableFormat : values.surfaceFormats) {
 			if (availableFormat.format == vk::Format::eA2B10G10R10UnormPack32 &&
 				availableFormat.colorSpace == vk::ColorSpaceKHR::eHdr10St2084EXT) {
@@ -783,10 +782,6 @@ bool VulkanRenderer::pickPhysicalDevice(PhysicalDeviceValues& deviceValues)
 			deviceValues.preferredHDRColorSpace = format.colorSpace;
 		}
 	}
-
-	// FORCE SDR - disable HDR completely for debugging
-	Gr_hdr_output_capable = false;
-	mprintf(("Vulkan: HDR FORCED OFF for debugging\n"));
 
 	return true;
 }
