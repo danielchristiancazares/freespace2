@@ -287,3 +287,59 @@ Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `sh
 5. Updated `createRenderTarget()` and `createTexture()` to pass cube flags for 6-layer cubemaps
 6. Changed `gr_vulkan_calculate_irrmap()` to use `getCubeImageView()` for envmap binding
 7. Added Vulkan layout qualifiers to `irrmap-f.sdr` shader
+
+---
+
+## FAILED ATTEMPT: No geometry rendering (models invisible)
+
+**Status**: UNRESOLVED - approach below did not work
+
+### Symptoms
+
+- 3D models (ships, etc.) are not rendering - screen shows only UI/menus
+- UI elements using `SDR_TYPE_DEFAULT_MATERIAL` (shader type 17) and `SDR_TYPE_NANOVG` (18) render correctly
+- Model rendering using `SDR_TYPE_MODEL` (shader type 0) is called but produces no visible output
+
+### Investigation Findings
+
+1. **Log analysis** showed `render_model` calls happening with `depthFmt=0` (no depth buffer):
+   ```
+   VulkanTrace: render_model entry texi=0
+   VulkanTrace: ensureRenderPassActive entry scene=0 direct=1 aux=0
+   VulkanTrace: getOrCreatePipeline entry shaderType=0 colorFmt=64 depthFmt=0
+   ```
+
+2. **Root cause identified**: Irradiance map generation corrupts scene pass state
+   - `beginAuxiliaryRenderPass` is called while a scene/direct pass is already active
+   - It logs error and returns early WITHOUT doing anything
+   - But `gr_vulkan_calculate_irrmap` continues to call `submitAuxiliaryCommandBuffer()`
+   - This frees the scene command buffer but leaves `m_scenePassActive = true`
+   - Later, `beginScenePass` sees `m_scenePassActive = true` and returns early
+   - `ensureRenderPassActive` detects inconsistency and starts a **direct pass** (no depth)
+   - Models render to direct pass without depth buffer → invisible/broken
+
+3. **Log evidence**:
+   ```
+   Vulkan: Generating irradiance map from envmap
+   VulkanRenderer: beginAuxiliaryRenderPass called while scene/direct pass active - this is not supported (frame=0)
+   ...
+   Vulkan: Irradiance map generation complete
+   VulkanRenderer: renderState[beginScenePass entry]: scene=1 direct=0 cmd=0000000000000000
+   VulkanRenderer: beginScenePass called while scene pass already active (frame=0)
+   VulkanRenderer: ensureRenderPassActive: starting direct pass frame=0 swapImage=2
+   ```
+
+### Failed Fix Attempt
+
+1. Changed `beginAuxiliaryRenderPass` to return `bool` indicating success/failure
+2. Modified `gr_vulkan_calculate_irrmap` to check return value and abort early if auxiliary pass fails
+3. Changed `render_model` to call `beginScenePass()` directly instead of `ensureRenderPassActive()`
+
+**Result**: Did not fix the issue. The underlying problem is more complex - the scene/direct pass state management is fundamentally broken when irradiance map generation is called at the wrong time.
+
+### Potential Next Steps (not yet attempted)
+
+1. **Fix the caller**: Ensure irradiance map generation is called BEFORE any scene/direct pass starts, not during rendering
+2. **End active pass before auxiliary**: If a scene/direct pass is active, properly end it before starting auxiliary rendering
+3. **Separate command buffers**: Use a completely separate command buffer for auxiliary rendering operations
+4. **Investigate why scene pass is active**: Find what starts the scene/direct pass before irradiance map generation
