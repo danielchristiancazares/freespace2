@@ -1011,6 +1011,22 @@ void VulkanTextureManager::ensureUploadRecording()
 		return; // Already recording
 	}
 
+	// If a previous upload was submitted on this frame slot, wait for it to complete
+	// before reusing the command buffer. This happens when uploads are submitted
+	// multiple times in the same frame (e.g., during init or texture streaming).
+	if (m_uploadFenceSubmitted[m_currentFrameIndex]) {
+		vk_debugf("ensureUploadRecording: waiting for in-flight upload fence frame=%u",
+			m_currentFrameIndex);
+		auto waitResult = m_device.waitForFences(m_uploadFences[m_currentFrameIndex], true,
+		                                         std::numeric_limits<uint64_t>::max());
+		if (waitResult != vk::Result::eSuccess) {
+			mprintf(("VulkanTextureManager: WARNING - waitForFences in ensureUploadRecording returned %d\n",
+			         static_cast<int>(waitResult)));
+		}
+		m_device.resetFences(m_uploadFences[m_currentFrameIndex]);
+		m_uploadFenceSubmitted[m_currentFrameIndex] = false;
+	}
+
 	// Reset and begin recording
 	m_uploadCmds[m_currentFrameIndex].reset(vk::CommandBufferResetFlags{});
 	m_uploadCmds[m_currentFrameIndex].begin(vk::CommandBufferBeginInfo{

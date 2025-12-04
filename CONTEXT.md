@@ -445,3 +445,50 @@ Attempted to fix the stale state issue by resetting all pass state flags in `sub
 3. **Check if scene pass state is already corrupted before submitAuxiliaryCommandBuffer**: Maybe the issue is earlier in the flow
 4. **Add more logging**: Log the exact state of command buffer, scene framebuffer, and image layouts at each step
 5. **Compare with OpenGL flow**: Understand how OpenGL handles the scene texture → swapchain blit
+
+---
+
+## CURRENT BUG: Everything renders red/wrong colors
+
+**Status**: UNRESOLVED
+
+### Symptoms
+
+- All rendered content has a heavy red tint
+- Textures ARE rendering with correct shapes/detail but wrong colors
+- Font atlas is red
+- HUD elements are red
+- Menu backgrounds show red-tinted imagery
+- Green clear color test confirmed: clear color works (green background visible), red content is being drawn ON TOP
+
+### Investigation
+
+1. **Green clear color test**: Modified scene pass clear color to green. Result: green background with red content on top. This confirms:
+   - Scene pass and clear are working
+   - The problem is in what's being DRAWN, not the render pass itself
+   - Textures/geometry are rendering but with wrong colors
+
+2. **Blit shader R/B swap test**: Added `outColor = vec4(sceneColor.b, sceneColor.g, sceneColor.r, sceneColor.a)` to swap red and blue channels. Result: No change - still red. This suggests the swap isn't happening in the blit shader OR the problem is upstream.
+
+3. **Texture format analysis**:
+   - `VulkanTexture.cpp` comment says: "bmpman stores pixels as BGRA in memory... Use BGRA format so Vulkan interprets the bytes correctly. The blit shader then swaps R/B for the swapchain"
+   - But the blit shader does NOT swap - it just passes through `outColor = sceneColor`
+   - Texture format selection returns `vk::Format::eB8G8R8A8Unorm` for 32-bit textures
+
+### Hypotheses
+
+1. **Channel mismatch in texture sampling**: Textures are BGRA but being sampled as RGBA somewhere
+2. **Scene framebuffer format issue**: Scene FB is R16G16B16A16_SFLOAT (RGBA order) but receiving BGRA data
+3. **Shader uniform/UBO mismatch**: Color multiplier or material data is wrong
+4. **Descriptor binding issue**: Wrong texture bound to sampler slots
+
+### Failed fixes
+
+1. **Blit shader R/B swap**: No effect - problem is upstream of blit
+
+### Next steps
+
+1. Check where BGRA→RGBA conversion should happen (at texture upload? at sampling? at blit?)
+2. Investigate if model/material shaders need channel swizzling
+3. Check if scene framebuffer is receiving correct color data
+4. Verify descriptor set bindings are correct
