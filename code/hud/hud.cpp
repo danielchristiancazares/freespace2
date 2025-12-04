@@ -4144,29 +4144,39 @@ void HUD_get_nose_coordinates(int *x, int *y)
 
 	float x_nose;
 	float y_nose;
-	float x_center = gr_screen.clip_center_x;
-	float y_center = gr_screen.clip_center_y;
 
 	*x = 0;
 	*y = 0;
-	
+
 	vm_vec_scale_add(&p0, &Player_obj->pos, &Player_obj->orient.vec.fvec, 1000.0f);
 	g3_rotate_vertex(&v0, &p0);
 
 	if (v0.codes == 0) {
-		g3_project_vertex(&v0);
+		// Project vertex manually using full screen dimensions instead of g3_project_vertex(),
+		// which uses Canvas_width/Canvas_height that may be set to a small render target.
+		// This ensures HUD nose coordinates are always calculated relative to the full screen.
+		float screen_w = static_cast<float>(gr_screen.max_w);
+		float screen_h = static_cast<float>(gr_screen.max_h);
 
-		if ( !(v0.codes & PF_OVERFLOW) ) {
-			x_nose = v0.screen.xyw.x;
-			y_nose = v0.screen.xyw.y;
-		} else {
-			// Means that the ship forward vector is not going through the frame buffer.
-			// We're assigning a high negative value so that the the bitmaps will be drawn offscreen so that
-			// we can give the illusion that the player is looking away from the slewable HUD reticle.
+		if (v0.world.xyz.z <= 0.0f) {
+			// Behind camera - offscreen
 			*x = -100000;
 			*y = -100000;
 			return;
 		}
+
+		float w = 1.0f / v0.world.xyz.z;
+
+		// Same projection formula as g3_project_vertex but using full screen dimensions
+		x_nose = (screen_w + (v0.world.xyz.x * screen_w * w)) * 0.5f;
+		y_nose = (screen_h - (v0.world.xyz.y * screen_h * w)) * 0.5f;
+
+		// Screen center is always at half of max dimensions
+		float x_center = screen_w * 0.5f;
+		float y_center = screen_h * 0.5f;
+
+		*x = fl2i(x_nose - x_center);
+		*y = fl2i(y_nose - y_center);
 	} else {
 		// Means that the ship forward vector is not going through the frame buffer.
 		// We're assigning a high negative value so that the the bitmaps will be drawn offscreen so that
@@ -4176,11 +4186,6 @@ void HUD_get_nose_coordinates(int *x, int *y)
 		return;
 	}
 
-	gr_unsize_screen_posf(&x_nose, &y_nose);
-	gr_unsize_screen_posf(&x_center, &y_center);
-
-	*x = fl2i(x_nose - x_center);
-	*y = fl2i(y_nose - y_center);
 	return;
 }
 
