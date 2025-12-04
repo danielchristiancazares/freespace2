@@ -42,6 +42,40 @@ struct alignas(16) VulkanGenericData {
 	int _pad;               // 4 bytes padding to align to 16 bytes
 };
 
+// Determine whether a material binding expects a sampler2DArray view based on shader type.
+// This fixes validation errors where shaders declare sampler2D but get bound to 2D_ARRAY views.
+static bool shaderUsesArrayView(shader_type shaderType, uint32_t binding)
+{
+	switch (shaderType) {
+		case SDR_TYPE_MODEL:
+			// Base/glow/normal/spec + ambient/misc + shadow map use arrays
+			return (binding <= 3) || binding == 8 || binding == 9 || binding == 10;
+
+		case SDR_TYPE_EFFECT_PARTICLE:
+		case SDR_TYPE_EFFECT_DISTORTION:
+		case SDR_TYPE_BATCHED_BITMAP:
+		case SDR_TYPE_NANOVG:
+		case SDR_TYPE_ROCKET_UI:
+		case SDR_TYPE_SHIELD_DECAL:
+			return binding == 0;
+
+		case SDR_TYPE_DECAL:
+			// diffuse/glow/normal maps
+			return binding >= 2 && binding <= 4;
+
+		case SDR_TYPE_VIDEO_PROCESS:
+			// YUV planes
+			return binding <= 2;
+
+		case SDR_TYPE_COPY:
+		case SDR_TYPE_COPY_WORLD:
+			return binding == 0;
+
+		default:
+			return false;
+	}
+}
+
 // Helper to set up generic uniform data for Vulkan drawing
 void vulkan_set_generic_uniforms(material* mat)
 {
@@ -284,13 +318,14 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 	vk::Sampler defaultSampler = g_vulkanTextureManager->getSamplerCache().getSampler(
 	    vk::Filter::eLinear, vk::Filter::eLinear, vk::SamplerAddressMode::eRepeat, 1.0f, true);
 
+	// Get shader type to determine which bindings need array views
+	shader_type shaderType = mat->get_shader_type();
+
 	// Initialize all bindings to placeholder texture to ensure valid descriptors
 	// This prevents validation errors for unused texture slots
-	// Use array view for bindings that expect sampler2DArray (0,1,2,3,9,10)
 	if (placeholderTex && placeholderTex->isValid() && defaultSampler) {
 		for (uint32_t binding = 0; binding < VulkanPipelineManager::MATERIAL_DESCRIPTOR_BINDING_COUNT; ++binding) {
-			bool needsArray = (binding == 0 || binding == 1 || binding == 2 || binding == 3 ||
-			                   binding == 9 || binding == 10);
+			bool needsArray = shaderUsesArrayView(shaderType, binding);
 			vk::ImageView imageView = needsArray ? placeholderTex->getArrayImageView() : placeholderTex->getImageView();
 			descriptorManager->updateCombinedImageSampler(descriptorSet,
 			                                               binding,
@@ -302,9 +337,8 @@ bool bindMaterialDescriptors(vk::CommandBuffer cmd, material* mat,
 
 	// Helper to bind a texture slot (overrides placeholder if texture exists)
 	auto bindTextureSlot = [&](int textureHandle, uint32_t binding, const char* name) {
-		// These bindings are sampler2DArray in shaders
-		const bool needsArray = (binding == 0 || binding == 1 || binding == 2 || binding == 3 ||
-		                         binding == 9 || binding == 10);
+		// Determine view type based on shader type and binding
+		const bool needsArray = shaderUsesArrayView(shaderType, binding);
 
 		if (textureHandle < 0) {
 			// Texture not used - use placeholder with correct view type
