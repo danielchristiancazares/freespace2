@@ -217,57 +217,46 @@ The key insight was tracing the log to find `gr_set_viewport(0, 2048, 131, 112)`
 
 ---
 
-## Active validation error: sampler2D bound to 2D_ARRAY views
+## Bug fix: sampler2D bound to 2D_ARRAY views (VUID-07752)
 
-**Date**: 2025-12-03  
-**Status**: ACTIVE (causing rendering corruption)
+**Status**: **FIXED**
 
-### Validation Error
+### Problem
 
-```
-vkCmdDraw(): the combined image sampler descriptor [VkDescriptorSet 0x690000000069, Set 1, Binding 0, Index 0] 
-VkImageViewType is VK_IMAGE_VIEW_TYPE_2D_ARRAY but the OpTypeImage has (Dim = 2D) and (Arrayed = 0).
-Either fix in shader or update the VkImageViewType to VK_IMAGE_VIEW_TYPE_2D.
-VUID-vkCmdDraw-viewType-07752
-```
+Validation error `VUID-vkCmdDraw-viewType-07752`: shaders declared `sampler2D` but received `VK_IMAGE_VIEW_TYPE_2D_ARRAY` views, causing undefined behavior and rendering corruption.
 
 ### Root Cause
 
-**VulkanTexture.cpp:89-117** creates TWO image views per texture:
-- `m_imageView` (2D) - correct type for single-layer textures
-- `m_arrayImageView` (2D_ARRAY) - for sampler2DArray compatibility
-
-BUT: The code ALWAYS binds the 2D_ARRAY view to descriptors, even when shaders declare `sampler2D`.
-
-**The Problem**:
-1. Shaders use `layout(set = 1, binding = 0) uniform sampler2D baseMap;` (Dim=2D, Arrayed=0)
-2. VulkanTexture binds `m_arrayImageView` (VK_IMAGE_VIEW_TYPE_2D_ARRAY)
-3. Vulkan validation rejects this (undefined behavior)
-
-### Impact
-
-Rendering corruption:
-- Multiple scenes/frames appear simultaneously on screen
-- Static geometry invisible/corrupt
-- Objects only appear when animated
-- Tiled/repeated viewport artifacts
+`bindMaterialDescriptors()` used a hardcoded list of bindings (0,1,2,3,9,10) to determine which needed array views. This didn't account for different shader types having different expectations per binding.
 
 ### Fix
 
-Change descriptor binding to use the correct view type based on shader expectations:
+Added `shaderUsesArrayView(shader_type, binding)` in `code/graphics/vulkan/gr_vulkan.cpp` to determine correct view type based on shader type:
 
-**Option 1** (Recommended): Detect which view is needed
-- Check if descriptor binding expects `sampler2D` or `sampler2DArray` (via shader reflection)
-- Bind `m_imageView` for `sampler2D`, `m_arrayImageView` for `sampler2DArray`
+```cpp
+static bool shaderUsesArrayView(shader_type shaderType, uint32_t binding)
+{
+    switch (shaderType) {
+        case SDR_TYPE_MODEL:
+            return (binding <= 3) || binding == 8 || binding == 9 || binding == 10;
+        case SDR_TYPE_EFFECT_PARTICLE:
+        case SDR_TYPE_EFFECT_DISTORTION:
+        case SDR_TYPE_BATCHED_BITMAP:
+        case SDR_TYPE_NANOVG:
+        case SDR_TYPE_ROCKET_UI:
+        case SDR_TYPE_SHIELD_DECAL:
+            return binding == 0;
+        case SDR_TYPE_DECAL:
+            return binding >= 2 && binding <= 4;
+        case SDR_TYPE_VIDEO_PROCESS:
+            return binding <= 2;
+        case SDR_TYPE_COPY:
+        case SDR_TYPE_COPY_WORLD:
+            return binding == 0;
+        default:
+            return false;
+    }
+}
+```
 
-**Option 2** (Quick fix): Always use 2D views for single-layer textures
-- In `VulkanTextureManager::bindTextureToDescriptor()`, use `m_imageView` instead of `getImageView()` (which returns array view)
-
-**Option 3** (Nuclear): Change all shaders to `sampler2DArray`
-- DO NOT DO THIS - breaks OpenGL renderer, makes menus black (see "Mistakes to avoid" section)
-
-### Location
-
-- **Code**: `code/graphics/vulkan/VulkanTexture.cpp:89-117`
-- **Binding site**: Where textures are bound to descriptor sets (likely in `gr_vulkan.cpp` material binding)
-- **Logs**: `fs2_open.log` line 879+ shows repeated VUID-07752 errors
+Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `shaderUsesArrayView()` instead of hardcoded binding list
