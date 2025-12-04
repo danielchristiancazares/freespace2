@@ -7,9 +7,13 @@ layout (std140) uniform genericData {
 	int face;
 };
 
+#if defined(VULKAN) || defined(GL_KHR_vulkan_glsl)
+layout(location = 0) in vec4 fragTexCoord;
+layout(location = 0) out vec4 fragOut0;
+#else
 in vec4 fragTexCoord;
-
 out vec4 fragOut0;
+#endif
 
 // Iteratively optimised points to give low discrepancy distribution on arbitrary hemisphere.
 const vec3 points[128] = vec3[128](
