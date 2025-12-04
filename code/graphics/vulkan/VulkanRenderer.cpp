@@ -1689,7 +1689,7 @@ void VulkanRenderer::beginScenePass()
 	m_sceneCommandBuffer.setLineWidth(1.0f);
 
 	m_scenePassActive = true;
-	
+
 	// Reset draw state for new scene pass
 	m_drawState.reset();
 }
@@ -2000,13 +2000,13 @@ void VulkanRenderer::ensureRenderPassActive()
 	// Get swapchain image view for direct rendering
 	vk::ImageView swapchainView = m_swapChainImageViews[m_currentSwapChainImage].get();
 
-	// Transition swapchain image to COLOR_ATTACHMENT_OPTIMAL
+	// Transition swapchain image to COLOR_ATTACHMENT_OPTIMAL for rendering
 	vk::ImageMemoryBarrier2 colorBarrier;
 	colorBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
 	colorBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+	colorBarrier.oldLayout = vk::ImageLayout::eUndefined;
 	colorBarrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 	colorBarrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-	colorBarrier.oldLayout = vk::ImageLayout::eUndefined;
 	colorBarrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
 	colorBarrier.image = m_swapChainImages[m_currentSwapChainImage];
 	colorBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -2021,6 +2021,7 @@ void VulkanRenderer::ensureRenderPassActive()
 	m_sceneCommandBuffer.pipelineBarrier2(depInfo);
 
 	// Set up dynamic rendering directly on swapchain
+	// If scene was blitted, use eLoad to preserve it; otherwise clear
 	vk::RenderingAttachmentInfo colorAttachment;
 	colorAttachment.imageView = swapchainView;
 	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;

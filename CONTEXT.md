@@ -343,3 +343,161 @@ Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `sh
 2. **End active pass before auxiliary**: If a scene/direct pass is active, properly end it before starting auxiliary rendering
 3. **Separate command buffers**: Use a completely separate command buffer for auxiliary rendering operations
 4. **Investigate why scene pass is active**: Find what starts the scene/direct pass before irradiance map generation
+
+---
+
+## FAILED ATTEMPT #2: Restart scene pass for HUD rendering
+
+**Status**: FAILED - made the problem worse
+
+### Symptoms (before this attempt)
+
+- Skybox shows briefly (~0.5 seconds) then disappears
+- HUD renders correctly
+- 3D models (ships) are black/invisible
+
+### Analysis
+
+Identified that the scene texture was never being blitted to swapchain:
+
+1. `gr_scene_texture_begin()` starts scene pass, sets `m_scenePassActive = true`
+2. 3D content renders to scene framebuffer
+3. `gr_scene_texture_end()` ends scene pass, sets `m_scenePassActive = false`
+4. HUD rendering calls `ensureRenderPassActive()`
+5. Since `m_scenePassActive` is false, starts a **direct pass** to swapchain
+6. `flip()` checks `m_scenePassActive` (false), takes direct pass path
+7. Direct pass path does NOT call `recordBlitToSwapchain()`
+8. Scene texture with 3D content is never composited
+
+### Fix Attempt
+
+Added `m_scenePassWasUsedThisFrame` flag to track if scene pass was used. In `ensureRenderPassActive()`, if flag was set, call `beginScenePass()` to restart scene pass instead of starting direct pass.
+
+**Changes made:**
+1. Added `bool m_scenePassWasUsedThisFrame = false;` to `VulkanRenderer.h`
+2. Set flag in `beginScenePass()` after `m_scenePassActive = true`
+3. In `ensureRenderPassActive()`, if `m_scenePassWasUsedThisFrame` is true, call `beginScenePass()` and return
+4. Reset flag at end of `flip()`
+
+### Why it failed
+
+**Critical bug**: `beginScenePass()` allocates a NEW command buffer every time (line 1521-1522):
+```cpp
+auto allocatedBuffers = m_device->allocateCommandBuffers(cmdBufferAlloc);
+m_sceneCommandBuffer = allocatedBuffers.front();
+```
+
+When called the second time (for HUD after scene ended), this **overwrites** `m_sceneCommandBuffer`, losing all the 3D rendering commands from the first scene pass. The first command buffer (with skybox, ships, etc.) is abandoned without being submitted.
+
+**Result**: Made problem worse - skybox no longer even appeared briefly. Screen was completely black except for HUD.
+
+### Lesson learned
+
+Cannot simply "restart" the scene pass - the command buffer architecture doesn't support it. Need a different approach that either:
+1. Blits scene to swapchain BEFORE starting direct pass for HUD
+2. Keeps HUD rendering in the same command buffer as scene (composite in scene framebuffer)
+3. Uses separate command buffers that are properly sequenced
+
+---
+
+## FAILED ATTEMPT #3: Blit scene before direct pass in ensureRenderPassActive
+
+**Status**: FAILED - no change from original symptom
+
+### Approach
+
+Modified `ensureRenderPassActive()` to blit scene to swapchain BEFORE starting the direct pass for HUD:
+
+1. Check if `m_scenePassWasUsedThisFrame` is true
+2. If so, call `recordBlitToSwapchain()` to blit scene texture to swapchain
+3. Transition swapchain from `PRESENT_SRC_KHR` back to `COLOR_ATTACHMENT_OPTIMAL`
+4. Start direct pass with `loadOp = eLoad` (preserve blitted content) instead of `eClear`
+5. HUD renders on top of blitted scene
+
+**Changes made in `ensureRenderPassActive()`:**
+```cpp
+bool blitSceneFirst = m_scenePassWasUsedThisFrame && m_sceneFramebuffer && m_sceneFramebuffer->getColorImageView(0);
+if (blitSceneFirst) {
+    recordBlitToSwapchain(m_sceneCommandBuffer);
+}
+// ... barrier with oldLayout based on blitSceneFirst ...
+colorAttachment.loadOp = blitSceneFirst ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear;
+```
+
+### Why it failed
+
+Back to original symptom: skybox appears for ~0.5 seconds then disappears. The blit approach did not work - likely because:
+
+1. The scene framebuffer content may be empty/invalid when `ensureRenderPassActive()` is called
+2. The scene pass may have already ended and the scene texture transitioned to wrong layout
+3. Or there's something else clearing/overwriting the content
+
+### Key observation
+
+The skybox appearing briefly then disappearing suggests the FIRST frame renders correctly but subsequent frames do not. This points to a per-frame state issue rather than a fundamental rendering architecture problem.
+
+### Potential next steps
+
+1. **Investigate first frame vs subsequent frames**: Why does first frame work but later frames don't?
+2. **Check scene framebuffer state**: Is scene framebuffer content valid when blit is attempted?
+3. **Check image layout transitions**: Are layouts correct throughout the frame?
+4. **Consider NOT ending scene pass**: Keep scene pass active through HUD rendering instead of ending it early
+
+---
+
+## FAILED ATTEMPT #4: Reuse scene pass command buffer in ensureRenderPassActive
+
+**Status**: FAILED - did not fix the issue
+
+### Analysis
+
+Identified that `ensureRenderPassActive()` was always allocating a NEW command buffer when no pass was active, even when the scene pass command buffer still existed with all the 3D rendering recorded:
+
+```cpp
+// After endScenePass():
+// - m_scenePassActive = false
+// - m_sceneCommandBuffer = valid (contains 3D rendering)
+// 
+// ensureRenderPassActive() checks:
+if ((m_scenePassActive || m_directPassActive) && m_sceneCommandBuffer) {
+    return;  // early return only if pass is ACTIVE
+}
+// Falls through to allocate NEW command buffer, overwriting the existing one!
+```
+
+### Fix Attempt
+
+Modified `ensureRenderPassActive()` to check if we already have a command buffer from scene pass:
+
+```cpp
+bool reuseExistingCmdBuffer = m_scenePassWasUsedThisFrame && m_sceneCommandBuffer;
+
+if (!reuseExistingCmdBuffer) {
+    // Allocate NEW command buffer (menu-only path)
+    auto allocatedBuffers = m_device->allocateCommandBuffers(cmdBufferAlloc);
+    m_sceneCommandBuffer = allocatedBuffers.front();
+    m_sceneCommandBuffer.begin(beginInfo);
+} else {
+    // REUSE existing command buffer from scene pass
+    // Command buffer is already recording, just continue using it
+}
+```
+
+### Why it failed
+
+Unknown - the fix seemed logically correct but did not resolve the rendering issue. Possible causes:
+1. The command buffer state may be invalid after `endScenePass()` (already ended?)
+2. The scene framebuffer content may be getting cleared/overwritten elsewhere
+3. There may be synchronization issues between the scene pass and the blit
+4. The scene texture layout transition may be incorrect
+
+### Lesson learned
+
+The command buffer lifecycle is more complex than initially understood. Simply reusing the command buffer pointer is not sufficient - need to understand the full state of the command buffer after `endScenePass()`.
+
+### Potential next steps
+
+1. **Check if command buffer is still recording**: After `endScenePass()`, is the command buffer still in recording state or was it ended?
+2. **Add more logging**: Log the exact state of command buffer, scene framebuffer, and image layouts at each step
+3. **Compare with OpenGL flow**: Understand how OpenGL handles the scene texture → swapchain blit
+4. **Consider different architecture**: Maybe the scene pass and HUD should use separate command buffers that are properly sequenced
