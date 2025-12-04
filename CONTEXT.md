@@ -1,4 +1,4 @@
-# Vulkan Vulkan Backend Context (FSO)
+# Vulkan Backend Context (FSO)
 
 > This file exists **only** to feed context to LLM-based tooling.
 
@@ -20,45 +20,24 @@
 
 ---
 
-## Crash fix: `gf_calculate_irrmap` (null std::function)
+## Bug Fixes
 
-- **Problem**: `std::bad_function_call` in `stars_setup_environment_mapping` when calling `gr_screen.gf_calculate_irrmap()`.
-- **Root cause**:
-  - `gf_calculate_irrmap` is declared in `code/graphics/2d.h` and used in `code/starfield/starfield.cpp`.
-  - OpenGL assigns it in `code/graphics/opengl/gropengldraw.cpp` (`gr_opengl_calculate_irrmap`).
-  - Vulkan never assigned it; `std::function` remained empty → null-call crash.
-- **Fix**:
-  - Implemented `gr_vulkan_calculate_irrmap()` in `code/graphics/vulkan/gr_vulkan.cpp`.
-  - Declared in `code/graphics/vulkan/gr_vulkan.h`.
-  - Wired in `code/graphics/vulkan/vulkan_stubs.cpp`:
-    - `gr_screen.gf_calculate_irrmap = gr_vulkan_calculate_irrmap;`
-  - Implementation:
-    - Uses `VulkanTextureManager` to fetch envmap (`ENVMAP`) and irrmap render target.
-    - For each cubemap face:
-      - `bm_set_render_target(gr_screen.irrmap_render_target, face)`
-      - `VulkanRenderer::beginAuxiliaryRenderPass(...)` with that face’s `VulkanFramebuffer`
-      - Bind `SDR_TYPE_IRRADIANCE_MAP_GEN` pipeline via `VulkanPipelineManager`
-      - Bind envmap texture + sampler in a descriptor set
-      - Draw fullscreen triangle (no vertex buffer, `gl_VertexIndex`-style)
-      - End auxiliary render pass
-- **Status**: Null `gf_calculate_irrmap` crash is **fixed**. Missions can still crash from other causes (not assumed solved here).
+### Off-center reticle
+See [`docs/vulkan-off-center-reticle-fix.md`](../docs/vulkan-off-center-reticle-fix.md) for details.
 
----
+### ImGui SDL backend shutdown when using Vulkan
+See [`docs/vulkan-imgui-shutdown-fix.md`](../docs/vulkan-imgui-shutdown-fix.md) for details.
 
-## Crash fix: ImGui SDL backend shutdown when using Vulkan
+### Null std::function `gf_calculate_irrmap`
+See [`docs/vulkan-gf-calculate-irrmap-fix.md`](../docs/vulkan-gf-calculate-irrmap-fix.md) for details.
+**Note**: This fix resolved the null crash, but there is a known timing issue that can corrupt render state. See the external doc and FAILED ATTEMPT sections below for details.
 
-- **Problem**: Exiting the game with the Vulkan renderer enabled showed a Microsoft Visual C++ Runtime assertion dialog:
-  - `Assertion failed! ... imgui_impl_sdl.cpp Line: 423`
-  - Expression: `bd != nullptr && "No platform backend to shutdown, or already shutdown?"`
-- **Root cause**:
-  - `SDLGraphicsOperations::~SDLGraphicsOperations` always called `ImGui_ImplSDL2_Shutdown()` and `ImGui_ImplOpenGL3_Shutdown()`.
-  - The ImGui SDL/OpenGL backends are only initialized in the OpenGL path (`createOpenGLContext` via `ImGui_ImplSDL2_InitForOpenGL` / `ImGui_ImplOpenGL3_Init`).
-  - When running with `-vulkan`, those backends are never initialized, so `ImGui_ImplSDL2_GetBackendData()` returned `nullptr` and the shutdown assert fired.
-- **Fix**:
-  - In `freespace2/SDLGraphicsOperations.cpp`, guard the ImGui shutdown calls so they only run for the OpenGL renderer:
-    - Keep `SDL_QuitSubSystem(SDL_INIT_VIDEO);` unconditional.
-    - Under `#if SDL_VERSION_ATLEAST(2, 0, 6)`, only call `ImGui_ImplSDL2_Shutdown()` and `ImGui_ImplOpenGL3_Shutdown()` when `!Cmdline_vulkan`.
-- **Status**: Vulkan builds now exit cleanly without hitting the ImGui SDL backend assertion. If a dedicated Vulkan ImGui backend is added later, revisit this section to ensure its init/shutdown are balanced.
+### sampler2D bound to 2D_ARRAY views (VUID-07752)
+See [`docs/vulkan-sampler2d-2darray-fix.md`](../docs/vulkan-sampler2d-2darray-fix.md) for details.
+
+### `samplerCube` bound to non-cube view
+See [`docs/vulkan-samplercube-noncube-fix.md`](../docs/vulkan-samplercube-noncube-fix.md) for details.
+
 
 ---
 
@@ -117,182 +96,89 @@
 
 ## Testing & debugging
 
-- **Run Vulkan build (Debug, windowed)**:
-
+### Running a Build (Must be done inside game folder)
 ```cmd
 build\bin\Debug\fs2_26_0_0.exe -vulkan -window
 ```
 
-- **Enable validation layers**:
-
+### Enable validation layers
 ```cmd
 set VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
 set VK_LOADER_DEBUG=all
 build\bin\Debug\fs2_26_0_0.exe -vulkan -noshadercache
 ```
 
-- **Crash dump analysis (CDB)**:
-
+### Crash dump analysis (CDB)
 ```cmd
 cdbx64.exe -z "<dump>.mdmp" -c ".symfix; .sympath+ build\\bin\\Debug; .reload; !analyze -v; .ecxr; kv; q"
 ```
+- Tip: `cdbx64.exe` ships with the Windows SDK under `C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\`. Add that directory to `PATH` or invoke the tool via its full path when running the command above.
 
-> Tip: `cdbx64.exe` ships with the Windows SDK under `C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\`. Add that directory to `PATH` or invoke the tool via its full path when running the command above.
-
-- **Unit tests**:
+### Unit Tests
 
 ```cmd
 cd build
 ctest -C Debug --output-on-failure -VV
 ```
 
-- **Logs**:
-  - Main log: `%APPDATA%\HardLightProductions\FreeSpaceOpen\data\fs2_open.log`
-  - Validation log: `vulkan_debug.log` (game directory, written by `debugReportCallback`)
-  - HDR surface debug: `vulkan_hdr_debug.txt` (game directory)
-  - Helper scripts: `scripts/vulkan_debug_session.sh` (bash) and `scripts/vulkan_debug_session.ps1` (PowerShell) run the Vulkan exe and snapshot these logs into `out/vulkan_debug/<timestamp>/` for easier sharing with LLM tooling.
-
----
-
-## Bug fix: Off-center reticle (Vulkan)
-
-- **Problem**: Targeting reticle started centered for ~0.5 seconds, then moved to top-left corner. Other HUD elements remained correctly positioned.
-
-### Root cause
-
-Mid-frame render-to-texture operations (cockpit displays, radar) called `gr_set_viewport()` with small dimensions (e.g., `131x112`), which set `gr_screen.clip_width/clip_height` to those values. When `g3_start_frame()` was later called, it picked up these small values and set `Canvas_width/Canvas_height` accordingly. The `HUD_get_nose_coordinates()` function used `g3_project_vertex()`, which projected using the tiny canvas dimensions, producing coordinates like `(65, 56)` instead of the correct `(1920, 1080)`.
-
-**Call chain that caused the bug**:
-1. `gr_set_viewport(0, 2048, 131, 112)` – sets small clip region for render target
-2. `g3_start_frame()` – copies `gr_screen.clip_width/height` to `Canvas_width/Canvas_height`
-3. `HUD_get_nose_coordinates()` → `g3_project_vertex()` – projects using wrong canvas size
-4. Reticle renders at wrong position (top-left)
-
-### Fix
-
-Modified `HUD_get_nose_coordinates()` in `code/hud/hud.cpp` to manually project using `gr_screen.max_w/max_h` (always full screen dimensions) instead of calling `g3_project_vertex()` (which uses potentially-corrupted `Canvas_width/Canvas_height`).
-
-```cpp
-// Project vertex manually using full screen dimensions instead of g3_project_vertex(),
-// which uses Canvas_width/Canvas_height that may be set to a small render target.
-float screen_w = static_cast<float>(gr_screen.max_w);
-float screen_h = static_cast<float>(gr_screen.max_h);
-
-float w = 1.0f / v0.world.xyz.z;
-x_nose = (screen_w + (v0.world.xyz.x * screen_w * w)) * 0.5f;
-y_nose = (screen_h - (v0.world.xyz.y * screen_h * w)) * 0.5f;
-
-float x_center = screen_w * 0.5f;
-float y_center = screen_h * 0.5f;
-
-*x = fl2i(x_nose - x_center);
-*y = fl2i(y_nose - y_center);
-```
-
-- **Status**: **FIXED**. The reticle now stays centered correctly.
-
-### Investigation notes (for future reference)
-
-Failed approaches before finding root cause:
-1. Viewport tracking (`gr_vulkan_set_viewport`) – viewport values were correct, not the issue
-2. DrawState dirty flag logic – did not fix
-3. Scene pass timing – did not fix
-
-The key insight was tracing the log to find `gr_set_viewport(0, 2048, 131, 112)` being called mid-frame, which corrupted the projection state used by HUD calculations
+### Logfile Locations
+- Main log: `%APPDATA%\HardLightProductions\FreeSpaceOpen\data\fs2_open.log`
+- Validation log: `vulkan_debug.log` (game directory, written by `debugReportCallback`) Note: Logs here should also be in the main `fs2_open.log` file 
+- HDR surface debug: `vulkan_hdr_debug.txt` (game directory)
+- The application does not stdout or stderr anything directly.
 
 ---
 
 ## Historical validation errors (for pattern matching)
 
-- **Descriptor pool exhaustion** (historical):
-  - Error: `vk::Device::allocateDescriptorSets: ErrorOutOfPoolMemory`
-  - Likely site: `bindMaterialDescriptors` in `gr_vulkan.cpp` (label `"MaterialTextures"`)
-  - Current pool is large (`POOL_SIZE_COMBINED_IMAGE_SAMPLER = 65536`, `POOL_MAX_SETS = 4096`), so this may not repro now.
-  - If it does: consider caching/reusing per-material descriptor sets instead of allocating per draw.
-
-- **Framebuffer attachment count mismatch** (pre–dynamic rendering):
-  - Error: `vkCreateFramebuffer(): pCreateInfo->attachmentCount 1 does not match attachmentCount of 2`
-  - Came from old code that actually created `VkFramebuffer` objects for render targets.
-  - With dynamic rendering, check `vkCmdBeginRendering` attachments instead (color/depth views + formats) if a similar error reappears.
-
----
-
-## Bug fix: sampler2D bound to 2D_ARRAY views (VUID-07752)
-
-**Status**: **FIXED**
-
-### Problem
-
-Validation error `VUID-vkCmdDraw-viewType-07752`: shaders declared `sampler2D` but received `VK_IMAGE_VIEW_TYPE_2D_ARRAY` views, causing undefined behavior and rendering corruption.
-
-### Root Cause
-
-`bindMaterialDescriptors()` used a hardcoded list of bindings (0,1,2,3,9,10) to determine which needed array views. This didn't account for different shader types having different expectations per binding.
-
-### Fix
-
-Added `shaderUsesArrayView(shader_type, binding)` in `code/graphics/vulkan/gr_vulkan.cpp` to determine correct view type based on shader type:
-
-```cpp
-static bool shaderUsesArrayView(shader_type shaderType, uint32_t binding)
-{
-    switch (shaderType) {
-        case SDR_TYPE_MODEL:
-            return (binding <= 3) || binding == 8 || binding == 9 || binding == 10;
-        case SDR_TYPE_EFFECT_PARTICLE:
-        case SDR_TYPE_EFFECT_DISTORTION:
-        case SDR_TYPE_BATCHED_BITMAP:
-        case SDR_TYPE_NANOVG:
-        case SDR_TYPE_ROCKET_UI:
-        case SDR_TYPE_SHIELD_DECAL:
-            return binding == 0;
-        case SDR_TYPE_DECAL:
-            return binding >= 2 && binding <= 4;
-        case SDR_TYPE_VIDEO_PROCESS:
-            return binding <= 2;
-        case SDR_TYPE_COPY:
-        case SDR_TYPE_COPY_WORLD:
-            return binding == 0;
-        default:
-            return false;
-    }
-}
-```
-
-Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `shaderUsesArrayView()` instead of hardcoded binding list
+### Descriptor pool exhaustion
+- Error: `vk::Device::allocateDescriptorSets: ErrorOutOfPoolMemory`
+- Likely site: `bindMaterialDescriptors` in `gr_vulkan.cpp` (label `"MaterialTextures"`)
+- Current pool is large (`POOL_SIZE_COMBINED_IMAGE_SAMPLER = 65536`, `POOL_MAX_SETS = 4096`), so this may not repro now.
+- If it does: consider caching/reusing per-material descriptor sets instead of allocating per draw.
+### Framebuffer attachment count mismatch (pre–dynamic rendering):
+- Error: `vkCreateFramebuffer(): pCreateInfo->attachmentCount 1 does not match attachmentCount of 2`
+- Came from old code that actually created `VkFramebuffer` objects for render targets.
+- With dynamic rendering, check `vkCmdBeginRendering` attachments instead (color/depth views + formats) if a similar error reappears.
 
 ---
 
-## Bug fix: `samplerCube` bound to non-cube view
+## FAILED ATTEMPT #7: Track recorded scene pass and reuse command buffer for HUD
 
-**Status**: **FIXED**
+**Status**: FAILED (models still invisible)
 
-### Problem
+### Approach
 
-`gr_vulkan_calculate_irrmap` updated envmap binding 4 with `getImageView()` (2D/array view) even though the shader expects `samplerCube`, triggering viewType validation errors and incorrect sampling.
+- Added `m_scenePassRecorded` flag set by `endScenePass()`.
+- `ensureRenderPassActive()` now detects a recorded scene, blits it to the swapchain without transitioning to present, then starts a direct pass with `loadOp = eLoad` so HUD draws over the blitted scene while reusing the same command buffer.
+- `recordBlitToSwapchain()` can skip the final present transition so the swapchain stays in color-attachment layout for the HUD direct pass.
+- `flip()` now presents whenever a scene pass was recorded (even if ended earlier) so the scene buffer is submitted.
 
-### Root Cause
+### Result
 
-1. `VulkanTexture::create()` never set `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT` flag
-2. `createRenderTarget()` computed cube flags but didn't pass them to `create()`
-3. No cube view (`VK_IMAGE_VIEW_TYPE_CUBE`) was ever created
-4. Irradiance generation bound a 2D/2D_ARRAY view to a samplerCube descriptor
+- Reported as failed; scene/model visibility is still broken. Need log inspection to confirm state/layout correctness.
 
-### Fix
+### Notes / Suspicions
 
-1. Added `vk::ImageCreateFlags flags` parameter to `VulkanTexture::create()`
-2. Set `imageInfo.flags = flags` when creating the image
-3. Create `m_cubeImageView` with `VK_IMAGE_VIEW_TYPE_CUBE` when `cubeCompatible && arrayLayers >= 6`
-4. Added `getCubeImageView()` accessor
-5. Updated `createRenderTarget()` and `createTexture()` to pass cube flags for 6-layer cubemaps
-6. Changed `gr_vulkan_calculate_irrmap()` to use `getCubeImageView()` for envmap binding
-7. Added Vulkan layout qualifiers to `irrmap-f.sdr` shader
+- The blit + reload path may still be dropping the scene command buffer, or layouts may be invalid when the HUD direct pass begins.
+- More logging around `ensureRenderPassActive()`, `flip()`, and image layouts is needed to pinpoint where the scene content is lost.
 
 ---
 
-## FAILED ATTEMPT: No geometry rendering (models invisible)
+## Instrumentation (ongoing)
 
-**Status**: UNRESOLVED - approach below did not work
+- Added verbose vk_debugf/mprintf tracing for:
+  - `gr_vulkan_calculate_irrmap` entry, framebuffer/images per cubemap face, aux pass begin/end, and submit/skip decisions.
+  - `VulkanRenderer::ensureRenderPassActive` (includes `m_scenePassRecorded` and formats), HUD blit/direct path, and command buffer reuse.
+  - `VulkanRenderer::flip` (records `m_scenePassRecorded` state) and `submitAuxiliaryCommandBuffer` (state before/after).
+  - `beginAuxiliaryRenderPass` logs framebuffer image handles and rejection reasons when scene/direct passes are active.
+- Use these logs alongside validation output to pinpoint where images stay in `VK_IMAGE_LAYOUT_UNDEFINED` or where command buffers are dropped.
+
+---
+
+## CRITICAL BUG: No geometry rendering (models invisible)
+
+**Status**: UNRESOLVED
 
 ### Symptoms
 
@@ -309,13 +195,17 @@ Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `sh
    VulkanTrace: getOrCreatePipeline entry shaderType=0 colorFmt=64 depthFmt=0
    ```
 
-2. **Root cause identified**: Irradiance map generation corrupts scene pass state
+2. **Possible Causes - Unconfirmed (KEEP UP TO DATE)**: Irradiance map generation corrupts scene pass state
    - `beginAuxiliaryRenderPass` is called while a scene/direct pass is already active
-   - It logs error and returns early WITHOUT doing anything
+     - ✅ **Addressed**: Function returns early (line 1775-1779 in VulkanRenderer.cpp)
    - But `gr_vulkan_calculate_irrmap` continues to call `submitAuxiliaryCommandBuffer()`
+     - ⚠️ **Partially addressed**: ATTEMPT #1 tried to check return value and abort, but didn't fix the issue
    - This frees the scene command buffer but leaves `m_scenePassActive = true`
+     - ❌ **NOT addressed**: `submitAuxiliaryCommandBuffer()` (line 2253-2254) frees the buffer but doesn't reset `m_scenePassActive`
    - Later, `beginScenePass` sees `m_scenePassActive = true` and returns early
+     - ❌ **NOT addressed**: No fix to prevent stale `m_scenePassActive` state
    - `ensureRenderPassActive` detects inconsistency and starts a **direct pass** (no depth)
+     - ⚠️ **Symptom addressed**: ATTEMPT #2-4 tried to fix the direct pass issue, but not the root cause
    - Models render to direct pass without depth buffer → invisible/broken
 
 3. **Log evidence**:
@@ -329,7 +219,16 @@ Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `sh
    VulkanRenderer: ensureRenderPassActive: starting direct pass frame=0 swapImage=2
    ```
 
-### Failed Fix Attempt
+### PROPOSED FIX (pending validation)
+
+- Root cause appears to be the scene command buffer getting discarded when HUD/UI triggers a direct pass after `gr_scene_texture_end()`. The direct pass allocates a new command buffer and never blits the recorded scene.
+- New state flag `m_scenePassRecorded` tracks when `endScenePass()` finishes recording. When HUD calls `ensureRenderPassActive()`, the renderer now:
+  - Reuses the existing scene command buffer, blits the scene texture to the swapchain without transitioning to present, and starts a direct pass with `loadOp = eLoad` so HUD draws over the blit.
+  - Clears `m_scenePassRecorded` once consumed; direct-pass submissions also clear it.
+- `flip()` now presents the scene path whenever either `m_scenePassActive` **or** `m_scenePassRecorded` is set, so scene content is submitted even if the pass ended earlier for HUD rendering.
+- Motivation: previously `m_scenePassActive` was cleared by `gr_scene_texture_end()`, HUD drew to a fresh direct-pass command buffer, and `flip()` skipped the scene blit entirely → models never appeared.
+
+### ATTEMPT #1
 
 1. Changed `beginAuxiliaryRenderPass` to return `bool` indicating success/failure
 2. Modified `gr_vulkan_calculate_irrmap` to check return value and abort early if auxiliary pass fails
@@ -337,16 +236,9 @@ Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `sh
 
 **Result**: Did not fix the issue. The underlying problem is more complex - the scene/direct pass state management is fundamentally broken when irradiance map generation is called at the wrong time.
 
-### Potential Next Steps (not yet attempted)
-
-1. **Fix the caller**: Ensure irradiance map generation is called BEFORE any scene/direct pass starts, not during rendering
-2. **End active pass before auxiliary**: If a scene/direct pass is active, properly end it before starting auxiliary rendering
-3. **Separate command buffers**: Use a completely separate command buffer for auxiliary rendering operations
-4. **Investigate why scene pass is active**: Find what starts the scene/direct pass before irradiance map generation
-
 ---
 
-## FAILED ATTEMPT #2: Restart scene pass for HUD rendering
+## ATTEMPT #2: Restart scene pass for HUD rendering
 
 **Status**: FAILED - made the problem worse
 
@@ -495,9 +387,61 @@ Unknown - the fix seemed logically correct but did not resolve the rendering iss
 
 The command buffer lifecycle is more complex than initially understood. Simply reusing the command buffer pointer is not sufficient - need to understand the full state of the command buffer after `endScenePass()`.
 
-### Potential next steps
+---
 
-1. **Check if command buffer is still recording**: After `endScenePass()`, is the command buffer still in recording state or was it ended?
-2. **Add more logging**: Log the exact state of command buffer, scene framebuffer, and image layouts at each step
-3. **Compare with OpenGL flow**: Understand how OpenGL handles the scene texture → swapchain blit
-4. **Consider different architecture**: Maybe the scene pass and HUD should use separate command buffers that are properly sequenced
+## FAILED ATTEMPT #5: Skip irradiance generation when any pass is active
+
+**Status**: FAILED - regression (skybox never appears)
+
+### Change
+
+- Added a guard in `gr_vulkan_calculate_irrmap` to bail out if scene/direct/aux passes are active and to restore the previous render target.
+- Tracked auxiliary work with `m_auxiliaryCommandsRecorded` so `submitAuxiliaryCommandBuffer` skips when no aux work is recorded or when a scene/direct pass is active.
+
+### Result
+
+- The regression worsened: skybox/scene never appears (black immediately), not even for the first frame. The underlying state issue remains unresolved.
+
+### Note on contradictory guidance
+
+This attempt contradicts the suggestion in FAILED ATTEMPT #1 to "call irradiance generation BEFORE any scene/direct pass starts". The failure here suggests that simply skipping irradiance generation when passes are active doesn't solve the problem - the issue may be that irradiance generation is being called at the wrong time in the frame lifecycle, or there's a deeper architectural problem with how auxiliary passes interact with scene/direct passes.
+
+---
+
+## FAILED ATTEMPT #6: Reset pass state flags in submitAuxiliaryCommandBuffer
+
+**Status**: FAILED - regression (skybox never appears)
+
+### Approach
+
+Attempted to fix the stale state issue by resetting all pass state flags in `submitAuxiliaryCommandBuffer()`:
+
+1. Changed `beginAuxiliaryRenderPass()` to return `bool` indicating success/failure
+2. Modified `gr_vulkan_calculate_irrmap()` to track whether any auxiliary passes were started
+3. Only call `submitAuxiliaryCommandBuffer()` if auxiliary work was actually recorded
+4. Reset `m_scenePassActive`, `m_directPassActive`, `m_auxiliaryPassActive`, and format/view tracking in `submitAuxiliaryCommandBuffer()`
+
+**Changes made:**
+- `beginAuxiliaryRenderPass()` now returns `bool` (false if pass couldn't start)
+- `gr_vulkan_calculate_irrmap()` tracks `anyAuxiliaryPassesStarted` flag
+- `submitAuxiliaryCommandBuffer()` resets all pass state flags when freeing command buffer
+
+### Why it failed
+
+**Critical bug**: `submitAuxiliaryCommandBuffer()` should NOT reset `m_scenePassActive` or `m_directPassActive`. These flags are managed by `endScenePass()` and the direct pass end logic. Resetting them in `submitAuxiliaryCommandBuffer()` corrupts legitimate scene/direct pass state.
+
+**Result**: Skybox never appears - worse than before. The fix was too aggressive and broke legitimate scene pass state management.
+
+### Lesson learned
+
+- `submitAuxiliaryCommandBuffer()` should only reset `m_auxiliaryPassActive` (and related auxiliary state)
+- `m_scenePassActive` and `m_directPassActive` must only be reset by their respective end functions
+- The root cause is more subtle - need to understand when `submitAuxiliaryCommandBuffer()` is called relative to scene pass lifecycle
+
+### Potential next steps (KEEP UP TO DATE)
+
+1. **Revert the state flag resets**: Only reset `m_auxiliaryPassActive` in `submitAuxiliaryCommandBuffer()`, not scene/direct pass flags
+2. **Investigate when submitAuxiliaryCommandBuffer is called**: Is it being called at the wrong time in the frame lifecycle?
+3. **Check if scene pass state is already corrupted before submitAuxiliaryCommandBuffer**: Maybe the issue is earlier in the flow
+4. **Add more logging**: Log the exact state of command buffer, scene framebuffer, and image layouts at each step
+5. **Compare with OpenGL flow**: Understand how OpenGL handles the scene texture → swapchain blit

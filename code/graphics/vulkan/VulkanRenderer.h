@@ -67,6 +67,7 @@ class VulkanRenderer {
 		vk::DeviceSize boundIndexOffset = 0;
 		bool viewportSet = false;
 		bool scissorSet = false;
+		vk::Extent2D lastExtent = vk::Extent2D{0, 0};  // Track last extent to detect changes
 		
 		void reset() {
 			boundPipeline = nullptr;
@@ -77,6 +78,7 @@ class VulkanRenderer {
 			boundIndexOffset = 0;
 			viewportSet = false;
 			scissorSet = false;
+			lastExtent = vk::Extent2D{0, 0};
 		}
 	};
 
@@ -103,8 +105,9 @@ class VulkanRenderer {
 	 * @param framebuffer The framebuffer to render to
 	 * @param extent The extent of the render area
 	 * @param clearColor Whether to clear the color attachment (default true)
+	 * @return true if auxiliary pass was started successfully, false if it was skipped (e.g., scene/direct pass active)
 	 */
-	void beginAuxiliaryRenderPass(vk::RenderPass renderPass, VulkanFramebuffer* framebuffer,
+	bool beginAuxiliaryRenderPass(vk::RenderPass renderPass, VulkanFramebuffer* framebuffer,
 	                              vk::Extent2D extent, bool clearColor = true);
 
 	/**
@@ -360,6 +363,7 @@ class VulkanRenderer {
 	bool m_scenePassActive = false;
 	bool m_directPassActive = false;  // Direct-to-swapchain pass (for menus)
 	bool m_auxiliaryPassActive = false;  // Auxiliary render pass (for off-screen rendering like cubemap faces)
+	bool m_scenePassRecorded = false; // Scene pass ended and needs to be blitted/presented
 	vk::CommandBuffer m_sceneCommandBuffer;  // Allocated per-frame for scene rendering
 	DrawState m_drawState;
 	vk::Extent2D m_sceneExtent = {0, 0};
@@ -379,7 +383,7 @@ class VulkanRenderer {
 	vk::UniqueSampler m_blitSampler;
 
 	bool createBlitPipeline();
-	void recordBlitToSwapchain(vk::CommandBuffer cmdBuffer);
+	void recordBlitToSwapchain(vk::CommandBuffer cmdBuffer, bool transitionToPresent = true);
 
 	// Swapchain recreation
 	bool m_swapchainNeedsRecreate = false;

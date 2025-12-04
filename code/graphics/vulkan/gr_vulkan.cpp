@@ -122,7 +122,12 @@ void vulkan_set_generic_uniforms(material* mat)
 // Helper: Set viewport and scissor to scene extent
 void setViewportAndScissor(vk::CommandBuffer cmd, vk::Extent2D extent, VulkanRenderer::DrawState& state)
 {
-	if (!state.viewportSet) {
+	// Always update viewport/scissor if extent changed (don't rely on flags alone)
+	// This is critical because extent can change between passes (scene vs direct)
+	bool needsUpdate = !state.viewportSet || !state.scissorSet || 
+	                   (state.lastExtent.width != extent.width || state.lastExtent.height != extent.height);
+	
+	if (needsUpdate) {
 		vk::Viewport viewport;
 		viewport.x = 0.0f;
 		// Use negative height to flip Y-axis from Vulkan's top-down to OpenGL's bottom-up
@@ -135,14 +140,18 @@ void setViewportAndScissor(vk::CommandBuffer cmd, vk::Extent2D extent, VulkanRen
 		viewport.maxDepth = 1.0f;
 		cmd.setViewport(0, viewport);
 		state.viewportSet = true;
-	}
-	
-	if (!state.scissorSet) {
+		
 		vk::Rect2D scissor;
 		scissor.offset = vk::Offset2D{0, 0};
 		scissor.extent = extent;
 		cmd.setScissor(0, scissor);
 		state.scissorSet = true;
+		
+		state.lastExtent = extent;
+		
+		vk_debugf("setViewportAndScissor: updated viewport=%fx%f scissor=%ux%u",
+			viewport.width, viewport.height,
+			extent.width, extent.height);
 	}
 }
 
@@ -553,6 +562,13 @@ struct alignas(16) VulkanIrrmapData {
 
 void gr_vulkan_calculate_irrmap()
 {
+	vk_debugf("gr_vulkan_calculate_irrmap entry scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p frame=%u",
+		renderer_instance ? (renderer_instance->getCurrentScenePassActive() ? 1 : 0) : -1,
+		renderer_instance ? (renderer_instance->getCurrentDirectPassActive() ? 1 : 0) : -1,
+		renderer_instance ? (renderer_instance->getCurrentAuxPassActive() ? 1 : 0) : -1,
+		renderer_instance ? static_cast<void*>(renderer_instance->getCurrentCommandBuffer()) : nullptr,
+		renderer_instance ? renderer_instance->getCurrentFrameIndex() : 0);
+
 	// Validate required resources
 	if (!renderer_instance || !g_vulkanTextureManager || !g_vulkanPipelineManager) {
 		static bool warned = false;
@@ -599,6 +615,11 @@ void gr_vulkan_calculate_irrmap()
 		bm_set_render_target(previous_target);
 		return;
 	}
+	vk_debugf("gr_vulkan_calculate_irrmap: irrmapRT framebuffer=%p cube=%d activeFace=%d mainFb=%p",
+		static_cast<void*>(irrmapRT),
+		irrmapRT->isCubemap ? 1 : 0,
+		irrmapRT->activeFace,
+		static_cast<void*>(irrmapRT->framebuffer.get()));
 
 	// Determine a framebuffer we can sample metadata from (cubemaps only have per-face FBs)
 	VulkanFramebuffer* pipelineFramebuffer = irrmapRT->framebuffer.get();
@@ -673,9 +694,16 @@ void gr_vulkan_calculate_irrmap()
 	}
 
 	mprintf(("Vulkan: Generating irradiance map from envmap\n"));
+	vk_debugf("gr_vulkan_calculate_irrmap: starting generation scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p frame=%u",
+		renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+		renderer_instance->getCurrentAuxPassActive() ? 1 : 0,
+		static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+		renderer_instance->getCurrentFrameIndex());
 
 	// Process each face of the irradiance cubemap
 	// Use auxiliary render pass to avoid interfering with the main scene pass state
+	bool anyAuxiliaryPassesStarted = false;
 	for (int face = 0; face < 6; face++) {
 		// Set render target to this cubemap face (updates active face in RT)
 		bm_set_render_target(gr_screen.irrmap_render_target, face);
@@ -692,11 +720,31 @@ void gr_vulkan_calculate_irrmap()
 			mprintf(("Vulkan: gr_vulkan_calculate_irrmap - no framebuffer for face %d\n", face));
 			continue;
 		}
+		vk_debugf("gr_vulkan_calculate_irrmap: face=%d framebuffer=%p colorImage=%p depthImage=%p extent=%ux%u",
+			face,
+			static_cast<void*>(faceFramebuffer),
+			reinterpret_cast<void*>(static_cast<VkImage>(faceFramebuffer->getColorImage(0))),
+			reinterpret_cast<void*>(static_cast<VkImage>(faceFramebuffer->getDepthImage())),
+			faceFramebuffer->getExtent().width,
+			faceFramebuffer->getExtent().height);
 
 		// Begin auxiliary render pass for this face
 		// This does NOT set m_scenePassActive, allowing gr_scene_texture_begin() to work later
 		vk::Extent2D faceExtent = faceFramebuffer->getExtent();
-		renderer_instance->beginAuxiliaryRenderPass(irrmapRT->renderPass.get(), faceFramebuffer, faceExtent, true);
+		bool passStarted = renderer_instance->beginAuxiliaryRenderPass(irrmapRT->renderPass.get(), faceFramebuffer, faceExtent, true);
+		
+		if (!passStarted) {
+			// Auxiliary pass failed to start (likely because scene/direct pass is active)
+			// Skip this face and continue - don't try to submit work that wasn't recorded
+			mprintf(("Vulkan: gr_vulkan_calculate_irrmap - auxiliary pass failed to start for face %d (scene/direct pass may be active)\n", face));
+			continue;
+		}
+		
+		anyAuxiliaryPassesStarted = true;
+		vk_debugf("gr_vulkan_calculate_irrmap: aux pass started face=%d cmd=%p frame=%u",
+			face,
+			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+			renderer_instance->getCurrentFrameIndex());
 
 		auto cmdBuffer = renderer_instance->getCurrentCommandBuffer();
 		if (!cmdBuffer) {
@@ -750,15 +798,41 @@ void gr_vulkan_calculate_irrmap()
 
 		// End auxiliary render pass for this face
 		renderer_instance->endAuxiliaryRenderPass();
+		vk_debugf("gr_vulkan_calculate_irrmap: aux pass ended face=%d cmd=%p frame=%u",
+			face,
+			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+			renderer_instance->getCurrentFrameIndex());
 	}
 
 	// Submit recorded auxiliary passes so the irradiance cubemap is ready immediately
-	renderer_instance->submitAuxiliaryCommandBuffer();
+	// Only submit if we actually started any auxiliary passes (otherwise submitAuxiliaryCommandBuffer
+	// would free the scene command buffer and corrupt render state)
+	if (anyAuxiliaryPassesStarted) {
+		vk_debugf("gr_vulkan_calculate_irrmap: submitting auxiliary command buffer frame=%u",
+			renderer_instance->getCurrentFrameIndex());
+		renderer_instance->submitAuxiliaryCommandBuffer();
+		vk_debugf("gr_vulkan_calculate_irrmap: after submit scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p frame=%u",
+			renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+			renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+			renderer_instance->getCurrentAuxPassActive() ? 1 : 0,
+			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+			renderer_instance->getCurrentFrameIndex());
+	} else {
+		mprintf(("Vulkan: gr_vulkan_calculate_irrmap - no auxiliary passes were started, skipping submit (scene/direct pass may be active)\n"));
+		vk_debugf("gr_vulkan_calculate_irrmap: skipped submit - no passes started frame=%u",
+			renderer_instance->getCurrentFrameIndex());
+	}
 
 	// Restore previous render target
 	bm_set_render_target(previous_target);
 
 	mprintf(("Vulkan: Irradiance map generation complete\n"));
+	vk_debugf("gr_vulkan_calculate_irrmap: completed scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p frame=%u",
+		renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+		renderer_instance->getCurrentAuxPassActive() ? 1 : 0,
+		static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+		renderer_instance->getCurrentFrameIndex());
 }
 
 void gr_vulkan_render_primitives(material* material_info,
@@ -1268,17 +1342,30 @@ void gr_vulkan_render_model(model_material* material_info,
 		
 		// Draw indexed - use index_offset for first index, vertex_num_offset for vertex offset
 		if (vert_source->Ibuffer_handle.isValid()) {
+			vk_debugf("render_model: drawIndexed n_verts=%u index_offset=%u vertex_offset=%d cmd=%p",
+				static_cast<uint32_t>(texBuf.n_verts),
+				static_cast<uint32_t>(texBuf.index_offset),
+				static_cast<int32_t>(bufferp->vertex_num_offset),
+				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)));
 			cmdBuffer.drawIndexed(static_cast<uint32_t>(texBuf.n_verts),
 			                       1,
 			                       static_cast<uint32_t>(texBuf.index_offset),
 			                       static_cast<int32_t>(bufferp->vertex_num_offset),
 			                       0);
 		} else {
+			vk_debugf("render_model: draw n_verts=%u vertex_offset=%u cmd=%p",
+				static_cast<uint32_t>(texBuf.n_verts),
+				static_cast<uint32_t>(bufferp->vertex_num_offset),
+				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)));
 			cmdBuffer.draw(static_cast<uint32_t>(texBuf.n_verts),
 			               1,
 			               static_cast<uint32_t>(bufferp->vertex_num_offset),
 			               0);
 		}
+	} else {
+		vk_debugf("render_model: SKIPPING draw - texi=%zu >= tex_buf.size()=%zu",
+			texi,
+			bufferp->tex_buf.size());
 	}
 }
 

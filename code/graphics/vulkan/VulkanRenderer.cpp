@@ -1508,6 +1508,19 @@ void VulkanRenderer::beginScenePass()
 		return;
 	}
 
+	// Check if we have a recorded scene pass that hasn't been blitted yet
+	// This can happen if beginScenePass() is called again before flip()
+	if (m_scenePassRecorded && m_sceneCommandBuffer) {
+		vk_logf("VulkanRenderer",
+			"beginScenePass: scene pass already recorded with cmd=%p, cannot start new pass (frame=%u)",
+			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+			m_currentFrame);
+		return;  // Don't overwrite the existing recorded scene pass
+	}
+
+	// Starting a new scene pass; clear any pending scene-present flag
+	m_scenePassRecorded = false;
+
 	// NOTE: Do NOT submit transfers here - transfers are batched and submitted
 	// in flip() after proper fence synchronization. Submitting here would break
 	// the frame synchronization model.
@@ -1692,6 +1705,15 @@ void VulkanRenderer::beginScenePass()
 
 	// Reset draw state for new scene pass
 	m_drawState.reset();
+
+	vk_debugf("beginScenePass: completed successfully scenePassActive=%d cmd=%p colorFmt=%d depthFmt=%d extent=%ux%u frame=%u",
+		m_scenePassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat),
+		targetExtent.width,
+		targetExtent.height,
+		m_currentFrame);
 }
 
 void VulkanRenderer::endScenePass()
@@ -1753,12 +1775,18 @@ void VulkanRenderer::endScenePass()
 
 	// Scene pass is now ended; flip() may still record more commands on the same buffer.
 	m_scenePassActive = false;
+	m_scenePassRecorded = true;
+
+	vk_debugf("endScenePass: completed scenePassActive=%d cmd=%p frame=%u (command buffer still open for blit)",
+		m_scenePassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		m_currentFrame);
 
 	// Note: We don't end the command buffer here - recordBlitToSwapchain will continue using it
 	// and flip() will finalize and submit it
 }
 
-void VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, VulkanFramebuffer* framebuffer,
+bool VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, VulkanFramebuffer* framebuffer,
                                                vk::Extent2D extent, bool clearColor)
 {
 	// Note: renderPass parameter is ignored with dynamic rendering (Vulkan 1.3+)
@@ -1768,34 +1796,39 @@ void VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, Vul
 		vk_logf("VulkanRenderer",
 			"beginAuxiliaryRenderPass called while auxiliary pass already active (frame=%u)",
 			m_currentFrame);
-		return;
+		return false;
 	}
 
 	if (m_scenePassActive || m_directPassActive) {
 		vk_logf("VulkanRenderer",
-			"beginAuxiliaryRenderPass called while scene/direct pass active - this is not supported (frame=%u)",
-			m_currentFrame);
-		return;
+			"beginAuxiliaryRenderPass called while scene/direct pass active - this is not supported (frame=%u scene=%d direct=%d recorded=%d cmd=%p)",
+			m_currentFrame,
+			m_scenePassActive ? 1 : 0,
+			m_directPassActive ? 1 : 0,
+			m_scenePassRecorded ? 1 : 0,
+			static_cast<void*>(m_sceneCommandBuffer));
+		return false;
 	}
 
 	if (!framebuffer) {
 		vk_logf("VulkanRenderer",
 			"beginAuxiliaryRenderPass: invalid framebuffer=%p",
 			static_cast<void*>(framebuffer));
-		return;
+		return false;
 	}
 
 	// Allocate command buffer if not already allocated
+	bool allocatedNewBuffer = false;
 	if (!m_sceneCommandBuffer) {
 		vk::CommandBufferAllocateInfo cmdBufferAlloc;
 		cmdBufferAlloc.commandPool = m_graphicsCommandPool.get();
 		cmdBufferAlloc.level = vk::CommandBufferLevel::ePrimary;
 		cmdBufferAlloc.commandBufferCount = 1;
 
-		auto allocatedBuffers = m_device->allocateCommandBuffers(cmdBufferAlloc);
-		m_sceneCommandBuffer = allocatedBuffers.front();
-		vk_logf("VulkanRenderer",
-			"beginAuxiliaryRenderPass: allocated command buffer %p frame=%u",
+	auto allocatedBuffers = m_device->allocateCommandBuffers(cmdBufferAlloc);
+	m_sceneCommandBuffer = allocatedBuffers.front();
+	allocatedNewBuffer = true;
+	vk_debugf("beginAuxiliaryRenderPass: allocated NEW command buffer %p frame=%u",
 			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
 			m_currentFrame);
 
@@ -1803,6 +1836,10 @@ void VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, Vul
 		vk::CommandBufferBeginInfo beginInfo;
 		beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
 		m_sceneCommandBuffer.begin(beginInfo);
+	} else {
+		vk_debugf("beginAuxiliaryRenderPass: REUSING existing command buffer %p frame=%u",
+			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+			m_currentFrame);
 	}
 
 	// Get attachment views and formats
@@ -1810,6 +1847,17 @@ void VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, Vul
 	vk::ImageView depthView = framebuffer->getDepthImageView();
 	vk::Format colorFormat = framebuffer->getColorFormat(0);
 	vk::Format depthFormat = framebuffer->getDepthFormat();
+	vk_logf("VulkanRenderer",
+		"beginAuxiliaryRenderPass: framebuffer=%p colorView=%p depthView=%p colorImg=%p depthImg=%p extent=%ux%u cmd=%p newCmd=%d",
+		static_cast<void*>(framebuffer),
+		reinterpret_cast<void*>(static_cast<VkImageView>(colorView)),
+		reinterpret_cast<void*>(static_cast<VkImageView>(depthView)),
+		reinterpret_cast<void*>(static_cast<VkImage>(framebuffer->getColorImage(0))),
+		reinterpret_cast<void*>(static_cast<VkImage>(framebuffer->getDepthImage())),
+		extent.width,
+		extent.height,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		allocatedNewBuffer ? 1 : 0);
 
 	// Transition color attachment to COLOR_ATTACHMENT_OPTIMAL
 	if (colorView && framebuffer->getColorImage(0)) {
@@ -1906,6 +1954,13 @@ void VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, Vul
 
 	// Reset draw state for new pass
 	m_drawState.reset();
+
+	vk_debugf("beginAuxiliaryRenderPass: completed successfully auxPassActive=%d cmd=%p allocatedNew=%d frame=%u",
+		m_auxiliaryPassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		allocatedNewBuffer ? 1 : 0,
+		m_currentFrame);
+	return true;
 }
 
 void VulkanRenderer::endAuxiliaryRenderPass()
@@ -1930,18 +1985,26 @@ void VulkanRenderer::endAuxiliaryRenderPass()
 
 	m_auxiliaryPassActive = false;
 
+	vk_debugf("endAuxiliaryRenderPass: completed auxPassActive=%d cmd=%p frame=%u (command buffer still open)",
+		m_auxiliaryPassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		m_currentFrame);
+
 	// Note: Command buffer is left open for further commands (more auxiliary passes or scene pass)
 }
 
 void VulkanRenderer::ensureRenderPassActive()
 {
-	vk_debugf("ensureRenderPassActive entry scene=%d direct=%d aux=%d cmd=%p frame=%u swapImage=%u",
+	vk_debugf("ensureRenderPassActive entry scene=%d direct=%d aux=%d recorded=%d cmd=%p frame=%u swapImage=%u colorFmt=%d depthFmt=%d",
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
 		m_auxiliaryPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
 		static_cast<void*>(m_sceneCommandBuffer),
 		m_currentFrame,
-		m_currentSwapChainImage);
+		m_currentSwapChainImage,
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat));
 
 	// If a pass is marked active but we lost the command buffer, reset state so we can recover.
 	if ((m_scenePassActive || m_directPassActive) && !m_sceneCommandBuffer) {
@@ -1953,18 +2016,74 @@ void VulkanRenderer::ensureRenderPassActive()
 		m_scenePassActive = false;
 		m_directPassActive = false;
 		m_auxiliaryPassActive = false;
+		m_scenePassRecorded = false;
 		m_currentColorFormat = vk::Format::eUndefined;
 		m_currentDepthFormat = vk::Format::eUndefined;
 		m_currentColorView = nullptr;
 		m_currentDepthView = nullptr;
 	}
 
+	if (m_scenePassRecorded && !m_sceneCommandBuffer) {
+		vk_logf("VulkanRenderer",
+			"ensureRenderPassActive: scene pass recorded but command buffer missing, clearing pending blit (frame=%u)",
+			m_currentFrame);
+		m_scenePassRecorded = false;
+	}
+
 	// If scene pass or direct pass already active and we still have a command buffer, nothing to do
 	if ((m_scenePassActive || m_directPassActive) && m_sceneCommandBuffer) {
-		vk_debugf("ensureRenderPassActive early return (already active) cmd=%p scene=%d direct=%d",
+		vk_debugf("ensureRenderPassActive early return (already active) cmd=%p scene=%d direct=%d recorded=%d",
 			static_cast<void*>(m_sceneCommandBuffer),
 			m_scenePassActive ? 1 : 0,
-			m_directPassActive ? 1 : 0);
+			m_directPassActive ? 1 : 0,
+			m_scenePassRecorded ? 1 : 0);
+		return;
+	}
+
+	// If a scene pass was recorded earlier this frame, blit it to the swapchain and continue with a direct pass for HUD/UI.
+	if (m_scenePassRecorded && m_sceneCommandBuffer) {
+		vk_logf("VulkanRenderer",
+			"ensureRenderPassActive: blitting recorded scene then starting direct pass frame=%u swapImage=%u",
+			m_currentFrame,
+			m_currentSwapChainImage);
+
+		// Copy scene framebuffer to swapchain but keep layout for further rendering
+		recordBlitToSwapchain(m_sceneCommandBuffer, false /*transitionToPresent*/);
+		vk_debugf("ensureRenderPassActive: blit done, starting HUD direct pass cmd=%p colorFmt=%d depthFmt=%d",
+			static_cast<void*>(m_sceneCommandBuffer),
+			static_cast<int>(m_currentColorFormat),
+			static_cast<int>(m_currentDepthFormat));
+
+		vk::ImageView swapchainView = m_swapChainImageViews[m_currentSwapChainImage].get();
+
+		// Begin a direct pass that preserves the blitted scene contents
+		vk::RenderingAttachmentInfo colorAttachment;
+		colorAttachment.imageView = swapchainView;
+		colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		colorAttachment.loadOp = vk::AttachmentLoadOp::eLoad; // Keep the scene blit
+		colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+
+		vk::RenderingInfo renderingInfo;
+		renderingInfo.renderArea.offset = vk::Offset2D{0, 0};
+		renderingInfo.renderArea.extent = m_swapChainExtent;
+		renderingInfo.layerCount = 1;
+		renderingInfo.colorAttachmentCount = 1;
+		renderingInfo.pColorAttachments = &colorAttachment;
+
+		// Track formats for pipeline selection
+		m_currentColorFormat = m_swapChainImageFormat;
+		m_currentDepthFormat = vk::Format::eUndefined;
+		m_currentColorView = swapchainView;
+		m_currentDepthView = nullptr;
+
+		m_sceneCommandBuffer.beginRendering(renderingInfo);
+		m_sceneCommandBuffer.setLineWidth(1.0f);
+
+		m_directPassActive = true;
+		m_scenePassRecorded = false; // Scene was consumed by the blit
+		m_sceneExtent = m_swapChainExtent;
+		resetDrawState();
+		vk_debugf("ensureRenderPassActive: HUD direct pass started cmd=%p recorded cleared", static_cast<void*>(m_sceneCommandBuffer));
 		return;
 	}
 
@@ -1972,6 +2091,11 @@ void VulkanRenderer::ensureRenderPassActive()
 		"ensureRenderPassActive: starting direct pass frame=%u swapImage=%u",
 		m_currentFrame,
 		m_currentSwapChainImage);
+	vk_debugf("ensureRenderPassActive: reason for direct pass - scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p",
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer));
 
 	// Start a direct-to-swapchain rendering for menu/UI rendering
 	// This is similar to beginScenePass but renders directly to the swapchain image
@@ -2037,11 +2161,19 @@ void VulkanRenderer::ensureRenderPassActive()
 	renderingInfo.pColorAttachments = &colorAttachment;
 
 	// Track current formats for pipeline creation
+	m_scenePassRecorded = false;
 	m_currentColorFormat = m_swapChainImageFormat;
 	m_currentDepthFormat = vk::Format::eUndefined;  // No depth for direct pass
 	m_currentColorView = swapchainView;
 	m_currentDepthView = nullptr;
 
+	vk_debugf("ensureRenderPassActive: completed successfully directPassActive=%d cmd=%p swapchainView=%p extent=%ux%u frame=%u",
+		m_directPassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		reinterpret_cast<void*>(static_cast<VkImageView>(swapchainView)),
+		m_swapChainExtent.width,
+		m_swapChainExtent.height,
+		m_currentFrame);
 	vk_logf("VulkanRenderer",
 		"ensureRenderPassActive: beginRendering cmd=%p swapchainView=%p extent=%ux%u",
 		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
@@ -2098,7 +2230,7 @@ void VulkanRenderer::logRenderState(const char* reason) const
 		(m_textureManager && m_textureManager->isRenderingToTexture()) ? 1 : 0);
 }
 
-void VulkanRenderer::recordBlitToSwapchain(vk::CommandBuffer cmdBuffer)
+void VulkanRenderer::recordBlitToSwapchain(vk::CommandBuffer cmdBuffer, bool transitionToPresent)
 {
 	vk_debugf("recordBlitToSwapchain entry cmd=%p swapImage=%u frame=%u",
 		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
@@ -2172,29 +2304,32 @@ void VulkanRenderer::recordBlitToSwapchain(vk::CommandBuffer cmdBuffer)
 
 	cmdBuffer.endRendering();
 
-	// Transition swapchain image to PRESENT_SRC_KHR for presentation
-	vk::ImageMemoryBarrier2 presentBarrier;
-	presentBarrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-	presentBarrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-	presentBarrier.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
-	presentBarrier.dstAccessMask = vk::AccessFlagBits2::eNone;
-	presentBarrier.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	presentBarrier.newLayout = vk::ImageLayout::ePresentSrcKHR;
-	presentBarrier.image = m_swapChainImages[m_currentSwapChainImage];
-	presentBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-	presentBarrier.subresourceRange.baseMipLevel = 0;
-	presentBarrier.subresourceRange.levelCount = 1;
-	presentBarrier.subresourceRange.baseArrayLayer = 0;
-	presentBarrier.subresourceRange.layerCount = 1;
+	if (transitionToPresent) {
+		// Transition swapchain image to PRESENT_SRC_KHR for presentation
+		vk::ImageMemoryBarrier2 presentBarrier;
+		presentBarrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+		presentBarrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+		presentBarrier.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+		presentBarrier.dstAccessMask = vk::AccessFlagBits2::eNone;
+		presentBarrier.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		presentBarrier.newLayout = vk::ImageLayout::ePresentSrcKHR;
+		presentBarrier.image = m_swapChainImages[m_currentSwapChainImage];
+		presentBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		presentBarrier.subresourceRange.baseMipLevel = 0;
+		presentBarrier.subresourceRange.levelCount = 1;
+		presentBarrier.subresourceRange.baseArrayLayer = 0;
+		presentBarrier.subresourceRange.layerCount = 1;
 
-	vk::DependencyInfo presentDepInfo;
-	presentDepInfo.imageMemoryBarrierCount = 1;
-	presentDepInfo.pImageMemoryBarriers = &presentBarrier;
-	cmdBuffer.pipelineBarrier2(presentDepInfo);
+		vk::DependencyInfo presentDepInfo;
+		presentDepInfo.imageMemoryBarrierCount = 1;
+		presentDepInfo.pImageMemoryBarriers = &presentBarrier;
+		cmdBuffer.pipelineBarrier2(presentDepInfo);
+	}
 
 	vk_logf("VulkanRenderer",
-		"recordBlitToSwapchain: endRendering cmd=%p",
-		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)));
+		"recordBlitToSwapchain: endRendering cmd=%p transitionToPresent=%d",
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
+		transitionToPresent ? 1 : 0);
 }
 
 void VulkanRenderer::queueDescriptorSetFree(vk::DescriptorSet set)
@@ -2216,6 +2351,14 @@ void VulkanRenderer::queueDescriptorSetFree(vk::DescriptorSet set)
 
 void VulkanRenderer::submitAuxiliaryCommandBuffer()
 {
+	vk_debugf("submitAuxiliaryCommandBuffer entry auxPassActive=%d scenePassActive=%d directPassActive=%d recorded=%d cmd=%p frame=%u",
+		m_auxiliaryPassActive ? 1 : 0,
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		m_currentFrame);
+
 	if (m_auxiliaryPassActive) {
 		vk_logf("VulkanRenderer",
 			"submitAuxiliaryCommandBuffer called while auxiliary pass still active (frame=%u)",
@@ -2224,6 +2367,7 @@ void VulkanRenderer::submitAuxiliaryCommandBuffer()
 	}
 
 	if (!m_sceneCommandBuffer) {
+		vk_debugf("submitAuxiliaryCommandBuffer: no command buffer, returning early frame=%u", m_currentFrame);
 		return; // Nothing recorded
 	}
 
@@ -2249,22 +2393,46 @@ void VulkanRenderer::submitAuxiliaryCommandBuffer()
 	}
 
 	// Command buffer is no longer needed
+	vk_debugf("submitAuxiliaryCommandBuffer: freeing command buffer %p frame=%u",
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		m_currentFrame);
 	m_device->freeCommandBuffers(m_graphicsCommandPool.get(), {m_sceneCommandBuffer});
 	m_sceneCommandBuffer = nullptr;
 	m_drawState.reset();
 	m_sceneExtent = vk::Extent2D{0, 0};
+	
+	// Reset auxiliary pass state (this function only handles auxiliary work)
+	// NOTE: Do NOT reset m_scenePassActive or m_directPassActive here - those are managed
+	// by their respective end functions (endScenePass, etc.)
+	m_auxiliaryPassActive = false;
+	m_currentColorFormat = vk::Format::eUndefined;
+	m_currentDepthFormat = vk::Format::eUndefined;
+	m_currentColorView = nullptr;
+	m_currentDepthView = nullptr;
+	m_scenePassRecorded = false;
+
+	vk_debugf("submitAuxiliaryCommandBuffer: completed cmd=nullptr auxPassActive=%d scenePassActive=%d directPassActive=%d recorded=%d frame=%u",
+		m_auxiliaryPassActive ? 1 : 0,
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
+		m_currentFrame);
 }
 
 void VulkanRenderer::flip()
 {
 	static int flipCount = 0;
-	vk_debugf("flip entry #%d scene=%d direct=%d cmd=%p frame=%u swapImage=%u",
+	vk_debugf("flip entry #%d scene=%d direct=%d aux=%d recorded=%d cmd=%p frame=%u swapImage=%u colorFmt=%d depthFmt=%d",
 		++flipCount,
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
 		static_cast<void*>(m_sceneCommandBuffer),
 		m_currentFrame,
-		m_currentSwapChainImage);
+		m_currentSwapChainImage,
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat));
 
 	// Submit any pending transfers FIRST - this must happen before any graphics submission
 	// and after fence synchronization (which happened in acquireNextSwapChainImage)
@@ -2277,48 +2445,25 @@ void VulkanRenderer::flip()
 		m_textureManager->submitUploads();
 	}
 
-	vk_debugf("flip state after transfers scene=%d direct=%d frame=%u",
+	vk_debugf("flip state after transfers scene=%d direct=%d aux=%d recorded=%d cmd=%p frame=%u",
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
 		m_currentFrame);
 
 	PresentResult presentResult = PresentResult::Success;
 
-	if (m_scenePassActive) {
-		// Finish rendering so the scene texture transitions to shader-read for the blit.
-		endScenePass();
-
-		vk_logf("VulkanRenderer",
-			"flip path: scene pass blit+present (cmd=%p swapImage=%u)",
-			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
-			m_currentSwapChainImage);
-		// Scene pass was used - blit scene to swapchain
-		recordBlitToSwapchain(m_sceneCommandBuffer);
-
-		// End the command buffer
-		vk_logf("VulkanRenderer",
-			"flip scene: ending command buffer %p",
-			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)));
-		m_sceneCommandBuffer.end();
-
-		// Schedule command buffer cleanup
-		vk::CommandBuffer cmdToFree = m_sceneCommandBuffer;
-		m_frames[m_currentFrame]->onFrameFinished([this, cmdToFree]() {
-			m_device->freeCommandBuffers(m_graphicsCommandPool.get(), {cmdToFree});
-		});
-
-		// Submit and present with per-image semaphores
-		vk::Semaphore acquireSem = m_imageAvailableSemaphores[m_currentFrame].get();
-		vk::Semaphore renderSem = m_renderingFinishedSemaphores[m_currentSwapChainImage].get();
-		presentResult = m_frames[m_currentFrame]->submitAndPresent({m_sceneCommandBuffer}, acquireSem, renderSem);
-
-		m_scenePassActive = false;
-		m_sceneCommandBuffer = nullptr;
-	} else if (m_directPassActive) {
+	if (m_directPassActive) {
 		vk_logf("VulkanRenderer",
 			"flip path: direct pass present (cmd=%p swapImage=%u)",
 			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
 			m_currentSwapChainImage);
+		vk_debugf("flip: taking direct pass path - ending rendering and presenting cmd=%p frame=%u recorded=%d",
+			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+			m_currentFrame,
+			m_scenePassRecorded ? 1 : 0);
 		// Direct pass was used (menu/UI rendering) - already rendered to swapchain
 		// Just need to end dynamic rendering and transition to present
 		m_sceneCommandBuffer.endRendering();
@@ -2366,41 +2511,140 @@ void VulkanRenderer::flip()
 		presentResult = m_frames[m_currentFrame]->submitAndPresent({m_sceneCommandBuffer}, acquireSem, renderSem);
 
 		m_directPassActive = false;
+		m_scenePassRecorded = false;
 		m_sceneCommandBuffer = nullptr;
-	} else {
-		vk_logf("VulkanRenderer", "flip path: fallback triangle");
-		// No pass was started - draw debug triangle (fallback)
-		vk_debug("flip() fallback triangle path");
-
-		// NOTE: Transfers already submitted at start of flip()
-
-		vk_debug("flip() allocating command buffer");
-		vk::CommandBufferAllocateInfo cmdBufferAlloc;
-		cmdBufferAlloc.commandPool = m_graphicsCommandPool.get();
-		cmdBufferAlloc.level = vk::CommandBufferLevel::ePrimary;
-		cmdBufferAlloc.commandBufferCount = 1;
-
-		auto allocatedBuffers = m_device->allocateCommandBuffers(cmdBufferAlloc);
-		auto& cmdBuffer = allocatedBuffers.front();
+		vk_debugf("flip: direct pass path completed - reset state directPassActive=%d cmd=nullptr frame=%u",
+			m_directPassActive ? 1 : 0,
+			m_currentFrame);
+	} else if (m_scenePassActive || m_scenePassRecorded) {
+		// Finish recording for the scene path and present it
+		if (m_scenePassActive) {
+			endScenePass();
+		}
 
 		vk_logf("VulkanRenderer",
-			"flip fallback: command buffer %p swapImage=%u",
-			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
-			m_currentSwapChainImage);
+			"flip path: scene pass blit+present (cmd=%p swapImage=%u recorded=%d)",
+			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+			m_currentSwapChainImage,
+			m_scenePassRecorded ? 1 : 0);
+		vk_debugf("flip: taking scene pass path - blitting scene to swapchain cmd=%p frame=%u",
+			reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+			m_currentFrame);
 
-		vk_debug("flip() drawing scene");
-		drawScene(m_swapchainFramebuffers[m_currentSwapChainImage]->getFramebuffer(), cmdBuffer);
-		m_frames[m_currentFrame]->onFrameFinished([this, allocatedBuffers]() mutable {
-			m_device->freeCommandBuffers(m_graphicsCommandPool.get(), allocatedBuffers);
-			allocatedBuffers.clear();
-		});
+		if (m_sceneCommandBuffer) {
+			// Scene pass was used - blit scene to swapchain
+			recordBlitToSwapchain(m_sceneCommandBuffer);
 
-		vk_debug("flip() submitting and presenting");
-		// Submit and present with per-image semaphores
-		vk::Semaphore acquireSem = m_imageAvailableSemaphores[m_currentFrame].get();
-		vk::Semaphore renderSem = m_renderingFinishedSemaphores[m_currentSwapChainImage].get();
-		presentResult = m_frames[m_currentFrame]->submitAndPresent(allocatedBuffers, acquireSem, renderSem);
-		vk_debug("flip() present complete");
+			// End the command buffer
+			vk_logf("VulkanRenderer",
+				"flip scene: ending command buffer %p",
+				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)));
+			m_sceneCommandBuffer.end();
+
+			// Schedule command buffer cleanup
+			vk::CommandBuffer cmdToFree = m_sceneCommandBuffer;
+			m_frames[m_currentFrame]->onFrameFinished([this, cmdToFree]() {
+				m_device->freeCommandBuffers(m_graphicsCommandPool.get(), {cmdToFree});
+			});
+
+			// Submit and present with per-image semaphores
+			vk::Semaphore acquireSem = m_imageAvailableSemaphores[m_currentFrame].get();
+			vk::Semaphore renderSem = m_renderingFinishedSemaphores[m_currentSwapChainImage].get();
+			presentResult = m_frames[m_currentFrame]->submitAndPresent({m_sceneCommandBuffer}, acquireSem, renderSem);
+		} else {
+			vk_logf("VulkanRenderer",
+				"flip scene: missing command buffer for recorded scene, skipping present");
+			presentResult = PresentResult::Error;
+		}
+
+		m_scenePassActive = false;
+		m_scenePassRecorded = false;
+		m_sceneCommandBuffer = nullptr;
+		vk_debugf("flip: scene pass path completed - reset state scenePassActive=%d scenePassRecorded=%d cmd=nullptr frame=%u",
+			m_scenePassActive ? 1 : 0,
+			m_scenePassRecorded ? 1 : 0,
+			m_currentFrame);
+	} else {
+		// No pass was started - check if we should recover by starting a scene pass
+		// This handles cases where gr_scene_texture_begin() wasn't called before flip()
+		bool recoveryAttempted = false;
+		if (m_sceneFramebuffer && m_sceneFramebuffer->getColorImageView(0)) {
+			vk_logf("VulkanRenderer", "flip path: recovery - starting scene pass and blitting (scene framebuffer exists but no pass was started)");
+			vk_debugf("flip: recovery path - scene framebuffer exists, scenePassRecorded=%d, starting scene pass frame=%u",
+				m_scenePassRecorded ? 1 : 0,
+				m_currentFrame);
+			
+			// Start a scene pass to blit the scene framebuffer (which may have content from a previous frame)
+			beginScenePass();
+			
+			// If scene pass started successfully, end it and blit
+			if (m_scenePassActive && m_sceneCommandBuffer) {
+				endScenePass();
+				recordBlitToSwapchain(m_sceneCommandBuffer);
+				
+				// End the command buffer
+				m_sceneCommandBuffer.end();
+				
+				// Schedule command buffer cleanup
+				vk::CommandBuffer cmdToFree = m_sceneCommandBuffer;
+				m_frames[m_currentFrame]->onFrameFinished([this, cmdToFree]() {
+					m_device->freeCommandBuffers(m_graphicsCommandPool.get(), {cmdToFree});
+				});
+				
+				// Submit and present with per-image semaphores
+				vk::Semaphore acquireSem = m_imageAvailableSemaphores[m_currentFrame].get();
+				vk::Semaphore renderSem = m_renderingFinishedSemaphores[m_currentSwapChainImage].get();
+				presentResult = m_frames[m_currentFrame]->submitAndPresent({m_sceneCommandBuffer}, acquireSem, renderSem);
+				
+				m_scenePassActive = false;
+				m_scenePassRecorded = false;
+				m_sceneCommandBuffer = nullptr;
+				vk_debugf("flip: recovery path completed scenePassActive=%d scenePassRecorded=%d cmd=nullptr frame=%u",
+					m_scenePassActive ? 1 : 0,
+					m_scenePassRecorded ? 1 : 0,
+					m_currentFrame);
+				recoveryAttempted = true;
+			} else {
+				// Scene pass failed to start - fall through to fallback path
+				vk_logf("VulkanRenderer", "flip recovery: scene pass failed to start, falling back to triangle");
+			}
+		}
+		
+		if (!recoveryAttempted) {
+			vk_logf("VulkanRenderer", "flip path: fallback triangle");
+			// No pass was started and no scene framebuffer (or recovery failed) - draw debug triangle (fallback)
+			vk_debug("flip() fallback triangle path");
+
+			// NOTE: Transfers already submitted at start of flip()
+
+			vk_debug("flip() allocating command buffer");
+			vk::CommandBufferAllocateInfo cmdBufferAlloc;
+			cmdBufferAlloc.commandPool = m_graphicsCommandPool.get();
+			cmdBufferAlloc.level = vk::CommandBufferLevel::ePrimary;
+			cmdBufferAlloc.commandBufferCount = 1;
+
+			auto allocatedBuffers = m_device->allocateCommandBuffers(cmdBufferAlloc);
+			auto& cmdBuffer = allocatedBuffers.front();
+
+			vk_logf("VulkanRenderer",
+				"flip fallback: command buffer %p swapImage=%u",
+				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
+				m_currentSwapChainImage);
+
+			vk_debug("flip() drawing scene");
+			drawScene(m_swapchainFramebuffers[m_currentSwapChainImage]->getFramebuffer(), cmdBuffer);
+			m_frames[m_currentFrame]->onFrameFinished([this, allocatedBuffers]() mutable {
+				m_device->freeCommandBuffers(m_graphicsCommandPool.get(), allocatedBuffers);
+				allocatedBuffers.clear();
+			});
+
+			vk_debug("flip() submitting and presenting");
+			// Submit and present with per-image semaphores
+			vk::Semaphore acquireSem = m_imageAvailableSemaphores[m_currentFrame].get();
+			vk::Semaphore renderSem = m_renderingFinishedSemaphores[m_currentSwapChainImage].get();
+			presentResult = m_frames[m_currentFrame]->submitAndPresent(allocatedBuffers, acquireSem, renderSem);
+			vk_debug("flip() present complete");
+		}
 	}
 
 	// Handle present result
