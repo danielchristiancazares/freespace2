@@ -1562,28 +1562,15 @@ void VulkanRenderer::beginScenePass()
 	void* activeRenderTargetFramebuffer =
 		reinterpret_cast<void*>(static_cast<VkFramebuffer>(m_activeRenderTarget.framebuffer ? m_activeRenderTarget.framebuffer->getFramebuffer() : VK_NULL_HANDLE));
 
-	// Check if a render target is active
+	// Check if a render target is active (explicitly set via gr_render_target_start)
 	if (m_activeRenderTarget.isActive && m_activeRenderTarget.framebuffer) {
 		targetFramebuffer = m_activeRenderTarget.framebuffer;
 		targetExtent = m_activeRenderTarget.extent;
 		usingActiveRenderTarget = true;
-	} else if (m_textureManager && m_textureManager->isRenderingToTexture()) {
-		// Fallback to texture manager's render target tracking (for compatibility)
-		if (auto activeRT = m_textureManager->getActiveRenderTarget()) {
-			VulkanFramebuffer* rtFramebuffer = nullptr;
-			if (activeRT->isCubemap && activeRT->cubeFaceFramebuffers[activeRT->activeFace]) {
-				rtFramebuffer = activeRT->cubeFaceFramebuffers[activeRT->activeFace].get();
-			} else {
-				rtFramebuffer = activeRT->framebuffer.get();
-			}
-
-			if (rtFramebuffer) {
-				targetFramebuffer = rtFramebuffer;
-				targetExtent = rtFramebuffer->getExtent();
-				usingTextureManagerRT = true;
-			}
-		}
 	}
+	// NOTE: Removed texture manager fallback (isRenderingToTexture check) - it caused
+	// beginScenePass to latch stale render targets (e.g., irrmap 512x512 RT) when called
+	// during irradiance map generation, resulting in models rendering without depth buffer.
 
 	if (!targetFramebuffer) {
 		vk_logf("VulkanRenderer",
