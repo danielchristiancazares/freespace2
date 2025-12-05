@@ -493,3 +493,224 @@ Attempted to fix the stale state issue by resetting all pass state flags in `sub
 2. Investigate if model/material shaders need channel swizzling
 3. Check if scene framebuffer is receiving correct color data
 4. Verify descriptor set bindings are correct
+
+---
+
+## Investigation Session: 2025-12-04
+
+### Current Symptoms
+- **Skybox**: Scrambled geometry - triangles scattered randomly, but visible with correct nebula texture
+- **Ships**: Completely invisible
+- **HUD**: Renders correctly
+- Both skybox and ships use `SDR_TYPE_MODEL` (shader type 0)
+
+### Verified/Ruled Out
+
+#### std140 Layout (FIXED)
+- `sizeof(model_light)` = 80 bytes (matches std140)
+- `sizeof(model_uniform_data)` = 1600 bytes
+- Padding was added to fix alignment
+- **Not the cause** of current symptoms (still broken after fix)
+
+#### Uniform Buffer Binding Numbers
+- `uniform_block_type::ModelData` has enum value `1`
+- Descriptor layout puts ModelData at binding index 1
+- Shader expects `modelData` at Set 0, Binding 1
+- **Match confirmed** - not the issue
+
+#### Uniform Buffer Offset Flow
+- `build_uniform_buffer()` calculates offset correctly
+- `render_buffer()` binds the correct offset
+- `bindUniformDescriptors()` passes offset to `vkCmdBindDescriptorSets`
+- Offset calculation verified as correct
+
+#### Memory Visibility
+- Uniform buffers use `HOST_VISIBLE | HOST_COHERENT`
+- Writes immediately visible to GPU
+- No explicit flush needed
+
+#### Descriptor Set Creation
+- `m_uniformDescriptorSet` created during initialization
+- Initialized with placeholder buffers
+- Updates when buffer changes
+
+### NOT Verified
+
+#### Draw Calls Actually Happening
+- Need to confirm `vkCmdDrawIndexed` is called for ships
+- Add logging before draw call to verify
+
+#### Vertex Buffer Binding
+- Offset and stride not verified
+- Could explain scrambled skybox geometry
+
+#### Uniform Data Content
+- Data written correctly to shadow buffer
+- `submitData()` called at correct time
+- But actual matrix values not logged
+
+### Failed OpenGL Comparison Attempt
+
+1. **Problem**: Shader changes added `layout(set = ...)` which is Vulkan-only
+2. **Fix attempt**: Macro to conditionally emit set qualifier
+3. **Result**: GL compiles but renders completely black
+4. **Root cause**: Original GL shaders had NO binding qualifiers - GL sets bindings programmatically via `glUniform1i`/`glUniformBlockBinding`
+5. **Abandoned**: Can't use GL as reference implementation
+
+### Key Insight: Two Separate Bugs
+
+1. **Scrambled skybox** = geometry visible but wrong vertex positions
+   - Matrices at struct start should be correct
+   - Suggests uniform buffer offset or vertex buffer issue
+
+2. **Invisible ships** = nothing rendered at all
+   - Same shader path as skybox
+   - Different failure mode = different cause
+   - Could be: alpha=0, clipped, depth fail, draw not issued
+
+### Next Steps
+
+1. Add draw call logging to verify ships issue draws
+2. Log matrix values being written to uniform buffer
+3. Check vertex buffer binding (offset/stride)
+
+---
+
+## FAILED ATTEMPT #8: Remove texture manager fallback from beginScenePass
+
+**Status**: FAILED - no change (not the root cause)
+
+### Investigation
+
+Log analysis showed some `render_model` calls had `depthFmt=0` (no depth buffer):
+```
+beginScenePass target framebuffer=... extent=512x512 activeRT=0 textureRT=1 ... colorFmt=37 depthFmt=0
+```
+
+Hypothesis: The texture manager fallback in `beginScenePass` was latching stale render targets (e.g., irrmap 512x512 RT with no depth) when `gr_vulkan_calculate_irrmap` ran, causing models to render without depth testing.
+
+### Code Analysis
+
+`beginScenePass()` had two ways to select a render target:
+1. `m_activeRenderTarget.isActive && m_activeRenderTarget.framebuffer` - explicit renderer state
+2. `m_textureManager->isRenderingToTexture()` fallback - grab RT from texture manager
+
+### Critical Discovery: Dead Code
+
+**`VulkanRenderer::setActiveRenderTarget()` is NEVER CALLED anywhere in the codebase.**
+
+- The function exists (lines 2897-2911 in VulkanRenderer.cpp)
+- It's declared in the header
+- But no code ever calls it
+- Therefore `m_activeRenderTarget.isActive` is **always false**
+- The first condition in `beginScenePass` was never true
+- Only the texture manager fallback could ever trigger
+
+### Fix Attempt
+
+Removed the texture manager fallback from `beginScenePass()`:
+```cpp
+// BEFORE:
+if (m_activeRenderTarget.isActive && m_activeRenderTarget.framebuffer) {
+    // use explicit RT
+} else if (m_textureManager && m_textureManager->isRenderingToTexture()) {
+    // fallback to texture manager RT
+}
+
+// AFTER:
+if (m_activeRenderTarget.isActive && m_activeRenderTarget.framebuffer) {
+    // use explicit RT (never true - dead code path)
+}
+// Fallback removed
+```
+
+### Result
+
+**Nothing changed.** Skybox still scrambled, ships still invisible.
+
+### Conclusions
+
+1. The texture manager fallback was either:
+   - Not being hit during the problematic rendering
+   - Being hit but not causing the visual issues
+
+2. The `depthFmt=0` log entries were likely from auxiliary passes that don't affect model rendering
+
+3. **Render target tracking is broken** (dead `setActiveRenderTarget()`) but this is a separate bug, not the cause of scrambled skybox / invisible ships
+
+4. Root cause must be elsewhere: uniforms, vertex data, descriptors, or pipeline state
+
+### Commits
+
+- `560d62366` - Add instrumentation to debug beginScenePass render target hijacking
+- `e106729df` - Remove texture manager fallback from beginScenePass
+
+---
+
+## Main Model Shader Interface (Reference)
+
+### main-v.sdr (Vertex Shader)
+
+**Inputs:**
+| Location | Name | Type |
+|----------|------|------|
+| 0 | vertPosition | vec4 |
+| 2 | vertTexCoord | vec4 |
+| 3 | vertNormal | vec3 |
+| 4 | vertTangent | vec4 |
+| 5 | vertModelID | float |
+
+**Outputs (VertexOutput block, location 0):**
+- `tangentMatrix` (mat3)
+- `fogDist` (float) - conditional
+- `position` (vec4)
+- `normal` (vec3)
+- `texCoord` (vec4)
+- `shadowUV[4]` (vec4) - conditional
+- `shadowPos` (vec4) - conditional
+
+**UBOs:**
+| Set | Binding | Name | Size (approx) |
+|-----|---------|------|---------------|
+| 0 | 1 | modelData | ~1600 bytes |
+| 0 | 9 | transform_tex | samplerBuffer (conditional) |
+
+### main-f.sdr (Fragment Shader)
+
+**Inputs:** VertexOutput block from vertex shader
+
+**Outputs:**
+| Location | Name | Purpose |
+|----------|------|---------|
+| 0 | fragOut0 | Base color / final color |
+| 1 | fragOut1 | Position + AO (deferred) |
+| 2 | fragOut2 | Normal + gloss (deferred) |
+| 3 | fragOut3 | Spec color + fresnel (deferred) |
+| 4 | fragOut4 | Emissive (deferred) |
+
+**Textures (Set 1):**
+| Binding | Name | Type | Conditional |
+|---------|------|------|-------------|
+| 0 | sBasemap | sampler2DArray | MODEL_SDR_FLAG_DIFFUSE |
+| 1 | sGlowmap | sampler2DArray | MODEL_SDR_FLAG_GLOW |
+| 2 | sNormalmap | sampler2DArray | MODEL_SDR_FLAG_NORMAL |
+| 3 | sSpecmap | sampler2DArray | MODEL_SDR_FLAG_SPEC |
+| 8 | shadow_map | sampler2DArray | MODEL_SDR_FLAG_SHADOWS |
+| 9 | sAmbientmap | sampler2DArray | MODEL_SDR_FLAG_AMBIENT |
+| 10 | sMiscmap | sampler2DArray | MODEL_SDR_FLAG_MISC |
+| 11 | sFramebuffer | sampler2D | always |
+
+### modelData UBO members (binding 1)
+
+- Matrices: modelViewMatrix, modelMatrix, viewMatrix, projMatrix, textureMatrix, shadow_mv_matrix, shadow_proj_matrix[4]
+- color (vec4)
+- lights[8] (model_light struct - 80 bytes each)
+- fogStart, fogScale, fogColor
+- clip_equation, use_clip_plane
+- n_lights, defaultGloss, alphaGloss, gammaSpec, envGloss
+- ambientFactor, diffuseFactor, emissionFactor
+- Texture indices: sBasemapIndex, sGlowmapIndex, sSpecmapIndex, sNormalmapIndex, sAmbientmapIndex, sMiscmapIndex
+- Team colors: base_color, stripe_color, team_glow_enabled
+- Shadow distances: veryneardist, neardist, middist, fardist
+- Viewport: vpwidth, vpheight, znear, zfar
+- effect_num, anim_timer, alphaMult, flags, etc.
