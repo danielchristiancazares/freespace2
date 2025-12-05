@@ -122,12 +122,7 @@ void vulkan_set_generic_uniforms(material* mat)
 // Helper: Set viewport and scissor to scene extent
 void setViewportAndScissor(vk::CommandBuffer cmd, vk::Extent2D extent, VulkanRenderer::DrawState& state)
 {
-	// Always update viewport/scissor if extent changed (don't rely on flags alone)
-	// This is critical because extent can change between passes (scene vs direct)
-	bool needsUpdate = !state.viewportSet || !state.scissorSet || 
-	                   (state.lastExtent.width != extent.width || state.lastExtent.height != extent.height);
-	
-	if (needsUpdate) {
+	if (!state.viewportSet) {
 		vk::Viewport viewport;
 		viewport.x = 0.0f;
 		// Use negative height to flip Y-axis from Vulkan's top-down to OpenGL's bottom-up
@@ -140,18 +135,14 @@ void setViewportAndScissor(vk::CommandBuffer cmd, vk::Extent2D extent, VulkanRen
 		viewport.maxDepth = 1.0f;
 		cmd.setViewport(0, viewport);
 		state.viewportSet = true;
-		
+	}
+	
+	if (!state.scissorSet) {
 		vk::Rect2D scissor;
 		scissor.offset = vk::Offset2D{0, 0};
 		scissor.extent = extent;
 		cmd.setScissor(0, scissor);
 		state.scissorSet = true;
-		
-		state.lastExtent = extent;
-		
-		vk_debugf("setViewportAndScissor: updated viewport=%fx%f scissor=%ux%u",
-			viewport.width, viewport.height,
-			extent.width, extent.height);
 	}
 }
 
@@ -615,11 +606,6 @@ void gr_vulkan_calculate_irrmap()
 		bm_set_render_target(previous_target);
 		return;
 	}
-	vk_debugf("gr_vulkan_calculate_irrmap: irrmapRT framebuffer=%p cube=%d activeFace=%d mainFb=%p",
-		static_cast<void*>(irrmapRT),
-		irrmapRT->isCubemap ? 1 : 0,
-		irrmapRT->activeFace,
-		static_cast<void*>(irrmapRT->framebuffer.get()));
 
 	// Determine a framebuffer we can sample metadata from (cubemaps only have per-face FBs)
 	VulkanFramebuffer* pipelineFramebuffer = irrmapRT->framebuffer.get();
@@ -720,13 +706,6 @@ void gr_vulkan_calculate_irrmap()
 			mprintf(("Vulkan: gr_vulkan_calculate_irrmap - no framebuffer for face %d\n", face));
 			continue;
 		}
-		vk_debugf("gr_vulkan_calculate_irrmap: face=%d framebuffer=%p colorImage=%p depthImage=%p extent=%ux%u",
-			face,
-			static_cast<void*>(faceFramebuffer),
-			reinterpret_cast<void*>(static_cast<VkImage>(faceFramebuffer->getColorImage(0))),
-			reinterpret_cast<void*>(static_cast<VkImage>(faceFramebuffer->getDepthImage())),
-			faceFramebuffer->getExtent().width,
-			faceFramebuffer->getExtent().height);
 
 		// Begin auxiliary render pass for this face
 		// This does NOT set m_scenePassActive, allowing gr_scene_texture_begin() to work later
@@ -741,10 +720,6 @@ void gr_vulkan_calculate_irrmap()
 		}
 		
 		anyAuxiliaryPassesStarted = true;
-		vk_debugf("gr_vulkan_calculate_irrmap: aux pass started face=%d cmd=%p frame=%u",
-			face,
-			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
-			renderer_instance->getCurrentFrameIndex());
 
 		auto cmdBuffer = renderer_instance->getCurrentCommandBuffer();
 		if (!cmdBuffer) {
@@ -798,10 +773,6 @@ void gr_vulkan_calculate_irrmap()
 
 		// End auxiliary render pass for this face
 		renderer_instance->endAuxiliaryRenderPass();
-		vk_debugf("gr_vulkan_calculate_irrmap: aux pass ended face=%d cmd=%p frame=%u",
-			face,
-			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
-			renderer_instance->getCurrentFrameIndex());
 	}
 
 	// Submit recorded auxiliary passes so the irradiance cubemap is ready immediately
@@ -1287,8 +1258,6 @@ void gr_vulkan_render_model(model_material* material_info,
     vertex_buffer* bufferp,
     size_t texi)
 {
-	vk_debugf("render_model entry texi=%zu", texi);
-
 	if (!renderer_instance || !material_info || !vert_source || !bufferp) {
 		return;
 	}
@@ -1298,15 +1267,22 @@ void gr_vulkan_render_model(model_material* material_info,
 	vulkan_set_generic_uniforms(material_info);
 
 	renderer_instance->ensureRenderPassActive();
-	
+
 	auto cmdBuffer = renderer_instance->getCurrentCommandBuffer();
 	if (!cmdBuffer) {
 		return;
 	}
-	
+
 	// Get current rendering formats for pipeline creation
 	vk::Format colorFormat = renderer_instance->getCurrentColorFormat();
 	vk::Format depthFormat = renderer_instance->getCurrentDepthFormat();
+
+	vk_debugf("render_model: shader=%d texi=%zu colorFmt=%d depthFmt=%d",
+	    (int)material_info->get_shader_type(),
+	    texi,
+	    (int)colorFormat,
+	    (int)depthFormat);
+
 	if (colorFormat == vk::Format::eUndefined) {
 		return;  // No active rendering
 	}
@@ -1327,6 +1303,12 @@ void gr_vulkan_render_model(model_material* material_info,
 	setViewportAndScissor(cmdBuffer, renderer_instance->getSceneExtent(), state);
 	
 	// Bind vertex and index buffers
+	vk_debugf("render_model: vbuf=%u voffset=%zu ibuf=%u ioffset=%zu stride=%zu",
+	    vert_source->Vbuffer_handle.value(),
+	    vert_source->Vertex_offset,
+	    vert_source->Ibuffer_handle.isValid() ? vert_source->Ibuffer_handle.value() : 0,
+	    vert_source->Index_offset,
+	    bufferp->layout.get_vertex_stride());
 	bindVertexBuffer(cmdBuffer, vert_source->Vbuffer_handle, vert_source->Vertex_offset, state);
 
 	if (vert_source->Ibuffer_handle.isValid()) {

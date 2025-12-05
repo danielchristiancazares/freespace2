@@ -14,6 +14,7 @@
 #include "backends/imgui_impl_vulkan.h"
 #include "def_files/def_files.h"
 #include "graphics/2d.h"
+#include "graphics/util/uniform_structs.h"
 #include "libs/renderdoc/renderdoc.h"
 #include "mod_table/mod_table.h"
 
@@ -340,6 +341,8 @@ VulkanRenderer::VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsO
 bool VulkanRenderer::initialize()
 {
 	vk_debug("initialize() entry");
+	vk_debugf("sizeof(model_uniform_data) = %zu", sizeof(graphics::model_uniform_data));
+	vk_debugf("sizeof(model_light) = %zu", sizeof(graphics::model_light));
 	mprintf(("Initializing Vulkan graphics device at %ix%i with %i-bit color...\n",
 		gr_screen.max_w,
 		gr_screen.max_h,
@@ -1555,6 +1558,9 @@ void VulkanRenderer::beginScenePass()
 	vk::Extent2D targetExtent = m_swapChainExtent;
 	bool usingActiveRenderTarget = false;
 	bool usingTextureManagerRT = false;
+	bool activeRenderTargetIsActive = m_activeRenderTarget.isActive;
+	void* activeRenderTargetFramebuffer =
+		reinterpret_cast<void*>(static_cast<VkFramebuffer>(m_activeRenderTarget.framebuffer ? m_activeRenderTarget.framebuffer->getFramebuffer() : VK_NULL_HANDLE));
 
 	// Check if a render target is active
 	if (m_activeRenderTarget.isActive && m_activeRenderTarget.framebuffer) {
@@ -1594,7 +1600,7 @@ void VulkanRenderer::beginScenePass()
 	vk::Image depthImage = targetFramebuffer->getDepthImage();
 
 	vk_logf("VulkanRenderer",
-		"beginScenePass target framebuffer=%p colorView=%p colorImage=%p depthView=%p depthImage=%p extent=%ux%u activeRT=%d textureRT=%d",
+		"beginScenePass target framebuffer=%p colorView=%p colorImage=%p depthView=%p depthImage=%p extent=%ux%u activeRT=%d textureRT=%d activeRT.isActive=%d activeRT.fbHandle=%p colorFmt=%d depthFmt=%d",
 		static_cast<void*>(targetFramebuffer),
 		reinterpret_cast<void*>(static_cast<VkImageView>(colorView)),
 		reinterpret_cast<void*>(static_cast<VkImage>(colorImage)),
@@ -1603,7 +1609,11 @@ void VulkanRenderer::beginScenePass()
 		targetExtent.width,
 		targetExtent.height,
 		usingActiveRenderTarget ? 1 : 0,
-		usingTextureManagerRT ? 1 : 0);
+		usingTextureManagerRT ? 1 : 0,
+		activeRenderTargetIsActive ? 1 : 0,
+		activeRenderTargetFramebuffer,
+		static_cast<int>(colorFormat),
+		static_cast<int>(depthFormat));
 
 	// Transition color attachment to COLOR_ATTACHMENT_OPTIMAL
 	if (colorView && colorImage) {

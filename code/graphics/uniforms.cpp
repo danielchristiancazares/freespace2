@@ -6,6 +6,7 @@
 #include "light.h"
 #include "globalincs/systemvars.h"
 #include "shadows.h"
+#include "graphics/vulkan/VulkanDebug.h"
 
 #define MODEL_SDR_FLAG_MODE_CPP
 #include "def_files/data/effects/model_shader_flags.h"
@@ -47,6 +48,12 @@ void convert_model_material(model_uniform_data* data_out,
 	vm_matrix4_x_matrix4(&data_out->modelViewMatrix, &gr_view_matrix, &scaled_matrix);
 	data_out->projMatrix = gr_projection_matrix;
 	data_out->textureMatrix = gr_texture_matrix;
+
+	graphics::vulkan::vk_debugf("uniforms: mv[0]=[%.2f,%.2f,%.2f,%.2f] proj[0]=[%.2f,%.2f,%.2f,%.2f]",
+	    data_out->modelViewMatrix.a1d[0], data_out->modelViewMatrix.a1d[1],
+	    data_out->modelViewMatrix.a1d[2], data_out->modelViewMatrix.a1d[3],
+	    data_out->projMatrix.a1d[0], data_out->projMatrix.a1d[1],
+	    data_out->projMatrix.a1d[2], data_out->projMatrix.a1d[3]);
 
 	data_out->color = material.get_color();
 
@@ -91,19 +98,22 @@ void convert_model_material(model_uniform_data* data_out,
 		gr_lighting_fill_uniforms(data_out->lights, sizeof(data_out->lights));
 
 		float light_factor = material.get_light_factor();
-		data_out->diffuseFactor.xyz.x = gr_light_color[0] * light_factor;
-		data_out->diffuseFactor.xyz.y = gr_light_color[1] * light_factor;
-		data_out->diffuseFactor.xyz.z = gr_light_color[2] * light_factor;
-		gr_get_ambient_light(&data_out->ambientFactor);
+		data_out->diffuseFactor.x = gr_light_color[0] * light_factor;
+		data_out->diffuseFactor.y = gr_light_color[1] * light_factor;
+		data_out->diffuseFactor.z = gr_light_color[2] * light_factor;
+
+		vec3d ambient;
+		gr_get_ambient_light(&ambient);
+		data_out->ambientFactor = ambient;
 
 		if (material.get_light_factor() > 0.25f && Cmdline_emissive) {
-			data_out->emissionFactor.xyz.x = gr_light_emission[0];
-			data_out->emissionFactor.xyz.y = gr_light_emission[1];
-			data_out->emissionFactor.xyz.z = gr_light_emission[2];
+			data_out->emissionFactor.x = gr_light_emission[0];
+			data_out->emissionFactor.y = gr_light_emission[1];
+			data_out->emissionFactor.z = gr_light_emission[2];
 		} else {
-			data_out->emissionFactor.xyz.x = gr_light_zero[0];
-			data_out->emissionFactor.xyz.y = gr_light_zero[1];
-			data_out->emissionFactor.xyz.z = gr_light_zero[2];
+			data_out->emissionFactor.x = gr_light_zero[0];
+			data_out->emissionFactor.y = gr_light_zero[1];
+			data_out->emissionFactor.z = gr_light_zero[2];
 		}
 
 	}

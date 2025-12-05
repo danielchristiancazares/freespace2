@@ -146,8 +146,20 @@ void FSLight2GLLight(light* FSLight, gr_light* GLLight) {
 static void set_light(int light_num, gr_light* ltp) {
 	Assert(light_num < (int)graphics::MAX_UNIFORM_LIGHTS);
 
-	vm_vec_transform(&gr_light_uniforms[light_num].position, &ltp->Position, &gr_view_matrix);
-	vm_vec_transform(&gr_light_uniforms[light_num].direction, &ltp->SpotDir, &gr_view_matrix, false);
+	vec3d pos;
+	vec3d srcPos;
+	srcPos.xyz.x = ltp->Position.xyzw.x;
+	srcPos.xyz.y = ltp->Position.xyzw.y;
+	srcPos.xyz.z = ltp->Position.xyzw.z;
+	vm_vec_transform(&pos, &srcPos, &gr_view_matrix);
+	gr_light_uniforms[light_num].position.xyzw.x = pos.xyz.x;
+	gr_light_uniforms[light_num].position.xyzw.y = pos.xyz.y;
+	gr_light_uniforms[light_num].position.xyzw.z = pos.xyz.z;
+	gr_light_uniforms[light_num].position.xyzw.w = 1.0f;
+
+	vec3d dir;
+	vm_vec_transform(&dir, &ltp->SpotDir, &gr_view_matrix, false);
+	gr_light_uniforms[light_num].direction = dir;
 
 	gr_light_uniforms[light_num].diffuse_color = vm_vec4_to_vec3(ltp->Diffuse);
 

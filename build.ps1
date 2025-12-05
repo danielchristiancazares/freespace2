@@ -47,6 +47,9 @@ if ($EnableShaderCompilation) {
 }
 
 cmake @configureArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "CMake configure failed with exit code $LASTEXITCODE"
+}
 
 # Build (optionally with an explicit target, e.g., -Target clean or -Target unittests)
 $buildArgs = @(
@@ -59,3 +62,6 @@ if ($Target -ne "") {
 }
 
 cmake @buildArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "CMake build failed with exit code $LASTEXITCODE"
+}
