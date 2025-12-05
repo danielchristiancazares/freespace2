@@ -449,9 +449,22 @@ vk::SampleCountFlagBits VulkanPipelineManager::getMsaaSamples() const
 
 vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key)
 {
+	vk_logf("VulkanRenderer",
+		"createPipeline DIAG start shaderType=%d flags=%u prim=%d colorFmt=%d depthFmt=%d layoutHash=%zu",
+		static_cast<int>(key.shaderType),
+		key.shaderFlags,
+		static_cast<int>(key.primitiveType),
+		static_cast<int>(key.colorFormat),
+		static_cast<int>(key.depthFormat),
+		key.vertexLayoutHash);
 	// Get shader modules
 	vk::ShaderModule vertShader = m_shaderManager->getVertexShader(key.shaderType, key.shaderFlags);
 	vk::ShaderModule fragShader = m_shaderManager->getFragmentShader(key.shaderType, key.shaderFlags);
+
+	vk_logf("VulkanRenderer",
+		"createPipeline DIAG shaders vert=%p frag=%p",
+		reinterpret_cast<void*>(static_cast<VkShaderModule>(vertShader)),
+		reinterpret_cast<void*>(static_cast<VkShaderModule>(fragShader)));
 
 	if (!vertShader || !fragShader) {
 		mprintf(("VulkanPipelineManager: Failed to get shaders for type %d, flags %u\n",
@@ -497,6 +510,10 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key)
 		// Hash is set but layout not found - this shouldn't happen if used correctly
 		mprintf(("VulkanPipelineManager: Vertex layout hash %zu not found in cache\n", key.vertexLayoutHash));
 	}
+	vk_logf("VulkanRenderer",
+		"createPipeline DIAG vertexInput bindings=%zu attributes=%zu",
+		vertexBindings.size(),
+		vertexAttributes.size());
 	// If hash is 0, we use empty vertex input (e.g., for fullscreen passes)
 	
 	vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
@@ -549,6 +566,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key)
 		mprintf(("VulkanPipelineManager: Failed to get pipeline layout\n"));
 		return vk::UniquePipeline();
 	}
+	vk_logf("VulkanRenderer", "createPipeline DIAG got layout=%p", reinterpret_cast<void*>(static_cast<VkPipelineLayout>(layout)));
 
 	// Dynamic rendering (Vulkan 1.3+) - specify attachment formats directly
 	// This replaces VkRenderPass/VkFramebuffer with inline format specification
@@ -578,8 +596,11 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key)
 	pipelineInfo.basePipelineHandle = nullptr;
 	pipelineInfo.basePipelineIndex = -1;
 
+	vk_logf("VulkanRenderer", "createPipeline DIAG creating graphics pipeline");
 	try {
 		auto result = m_device.createGraphicsPipelineUnique(m_vkPipelineCache.get(), pipelineInfo);
+		vk_logf("VulkanRenderer", "createPipeline DIAG pipeline created=%p",
+			reinterpret_cast<void*>(static_cast<VkPipeline>(result.value.get())));
 		return std::move(result.value);
 	} catch (const vk::SystemError& e) {
 		mprintf(("VulkanPipelineManager: Failed to create pipeline: %s\n", e.what()));

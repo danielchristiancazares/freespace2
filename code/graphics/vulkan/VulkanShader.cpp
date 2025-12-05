@@ -6,6 +6,7 @@
 #include "cfile/cfile.h"
 #include "cmdline/cmdline.h"
 #include "def_files/def_files.h"
+#include "graphics/vulkan/VulkanDebug.h"
 #include "globalincs/systemvars.h"
 #include "graphics/grinternal.h"
 #include "graphics/util/ShaderPreprocessor.h"
@@ -389,11 +390,17 @@ SCP_string VulkanShaderManager::makeShaderKey(shader_type type, uint32_t flags, 
 }
 
 vk::ShaderModule VulkanShaderManager::getShader(shader_type type, uint32_t flags, ShaderStage stage) {
+	vk_logf("VulkanRenderer",
+		"VulkanShaderManager::getShader entry type=%d flags=0x%x stage=%d",
+		static_cast<int>(type),
+		flags,
+		static_cast<int>(stage));
 	auto key = makeShaderKey(type, flags, stage);
 
 	// Check in-memory cache first
 	auto it = m_shaderModules.find(key);
 	if (it != m_shaderModules.end()) {
+		vk_logf("VulkanRenderer", "VulkanShaderManager::getShader cache hit key=%s", key.c_str());
 		return it->second.get();
 	}
 
@@ -402,22 +409,27 @@ vk::ShaderModule VulkanShaderManager::getShader(shader_type type, uint32_t flags
 
 #ifdef FSO_HAVE_SHADERC
 	// Preprocess the shader
+	vk_logf("VulkanRenderer", "VulkanShaderManager::getShader preprocessing key=%s", key.c_str());
 	auto source = preprocessShader(type, flags, stage);
 	if (source.empty()) {
 		mprintf(("VulkanShaderManager: Failed to preprocess shader type=%d flags=0x%x stage=%d\n",
 			static_cast<int>(type), flags, static_cast<int>(stage)));
+		vk_logf("VulkanRenderer", "VulkanShaderManager::getShader preprocess FAILED key=%s", key.c_str());
 		return nullptr;
 	}
+	vk_logf("VulkanRenderer", "VulkanShaderManager::getShader preprocess OK key=%s len=%zu", key.c_str(), source.size());
 
 	// Compute source hash for caching
 	auto sourceHash = computeSourceHash(source);
 	auto cacheKey = m_cache.computeCacheKey(sourceHash, type, flags, stage);
+	vk_logf("VulkanRenderer", "VulkanShaderManager::getShader cacheKey=%s", cacheKey.c_str());
 
 	// Try to load from disk cache
 	spirv = m_cache.loadCachedSpirv(cacheKey);
 
 	if (spirv.empty()) {
 		// Cache miss - compile with shaderc
+		vk_logf("VulkanRenderer", "VulkanShaderManager::getShader cache miss key=%s compiling", key.c_str());
 		auto filename = getShaderFilename(type, stage);
 		nprintf(("VulkanShader", "Compiling shader: %s (type=%d, flags=0x%x)\n", filename, static_cast<int>(type), flags));
 
@@ -426,7 +438,11 @@ vk::ShaderModule VulkanShaderManager::getShader(shader_type type, uint32_t flags
 		if (!spirv.empty()) {
 			// Save to cache for next time
 			m_cache.saveSpirvToCache(cacheKey, spirv);
+		} else {
+			vk_logf("VulkanRenderer", "VulkanShaderManager::getShader compile FAILED key=%s", key.c_str());
 		}
+	} else {
+		vk_logf("VulkanRenderer", "VulkanShaderManager::getShader cache hit for key=%s", key.c_str());
 	}
 #else
 	mprintf(("VulkanShaderManager: shaderc not available, cannot compile shader\n"));
@@ -435,10 +451,12 @@ vk::ShaderModule VulkanShaderManager::getShader(shader_type type, uint32_t flags
 	if (spirv.empty()) {
 		mprintf(("VulkanShaderManager: Failed to get SPIR-V for shader type=%d flags=0x%x stage=%d\n",
 			static_cast<int>(type), flags, static_cast<int>(stage)));
+		vk_logf("VulkanRenderer", "VulkanShaderManager::getShader SPIR-V missing key=%s", key.c_str());
 		return nullptr;
 	}
 
 	// Create the shader module
+	vk_logf("VulkanRenderer", "VulkanShaderManager::getShader creating module key=%s words=%zu", key.c_str(), spirv.size());
 	auto module = createShaderModule(spirv);
 	if (!module) {
 		mprintf(("VulkanShaderManager: Failed to create shader module\n"));
@@ -447,6 +465,8 @@ vk::ShaderModule VulkanShaderManager::getShader(shader_type type, uint32_t flags
 
 	auto result = module.get();
 	m_shaderModules[key] = std::move(module);
+	vk_logf("VulkanRenderer", "VulkanShaderManager::getShader success key=%s module=%p", key.c_str(),
+		reinterpret_cast<void*>(static_cast<VkShaderModule>(result)));
 	return result;
 }
 

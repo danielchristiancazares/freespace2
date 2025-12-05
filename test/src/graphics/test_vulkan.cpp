@@ -8,8 +8,11 @@
 #include "graphics/vulkan/VulkanPostProcessing.h"
 #include "graphics/vulkan/VulkanRenderer.h"
 #include "graphics/vulkan/gr_vulkan.h"
+#include "graphics/util/uniform_structs.h"
+#include "graphics/util/UniformBuffer.h"
 
 #include <algorithm>
+#include <cstring>
 
 #define MODEL_SDR_FLAG_MODE_CPP
 #include "def_files/data/effects/model_shader_flags.h"
@@ -1644,7 +1647,7 @@ TEST_F(VulkanHiddenWindowTest, SceneClearColorReadbackMatches) {
 	// Submit the frame so the scene color is written
 	m_renderer->flip();
 
-	RendererReadbackHelper readback(m_renderer.get());
+	RendererReadbackHelper readback(m_renderer);
 	ReadbackPixel pixel{};
 
 	auto extent = m_renderer->getSceneExtent();
@@ -1663,7 +1666,7 @@ TEST_F(VulkanHiddenWindowTest, ScenePassStateLifecycle) {
 		GTEST_SKIP() << "Vulkan not initialized";
 	}
 
-	RendererStateAccessor state(m_renderer.get());
+	RendererStateAccessor state(m_renderer);
 
 	// Initial state
 	EXPECT_FALSE(state.scenePassActive());
@@ -1692,7 +1695,7 @@ TEST_F(VulkanHiddenWindowTest, SceneThenDirectPassResetsState) {
 		GTEST_SKIP() << "Vulkan not initialized";
 	}
 
-	RendererStateAccessor state(m_renderer.get());
+	RendererStateAccessor state(m_renderer);
 
 	// First frame: scene path
 	m_renderer->beginScenePass();
@@ -1717,13 +1720,13 @@ TEST_F(VulkanHiddenWindowTest, ScenePassCommandBufferAccessibleAfterEnd) {
 	}
 
 	m_renderer->beginScenePass();
-	RendererStateAccessor during(m_renderer.get());
+	RendererStateAccessor during(m_renderer);
 	auto cmdWhileActive = during.sceneCommandBuffer();
 	ASSERT_NE(cmdWhileActive, vk::CommandBuffer()) << "Scene pass should allocate a command buffer";
 
 	m_renderer->endScenePass();
 
-	RendererStateAccessor after(m_renderer.get());
+	RendererStateAccessor after(m_renderer);
 	ASSERT_TRUE(after.scenePassRecorded());
 	ASSERT_NE(after.sceneCommandBuffer(), vk::CommandBuffer()) << "Recorded scene command buffer should remain alive";
 
@@ -1743,14 +1746,14 @@ TEST_F(VulkanHiddenWindowTest, SubmitAuxiliaryAfterScenePassDoesNotDropSceneReco
 	m_renderer->beginScenePass();
 	m_renderer->endScenePass();
 
-	RendererStateAccessor beforeSubmit(m_renderer.get());
+	RendererStateAccessor beforeSubmit(m_renderer);
 	auto recordedCmd = beforeSubmit.sceneCommandBuffer();
 	ASSERT_TRUE(beforeSubmit.scenePassRecorded());
 	ASSERT_NE(recordedCmd, vk::CommandBuffer());
 
 	m_renderer->submitAuxiliaryCommandBuffer();
 
-	RendererStateAccessor afterSubmit(m_renderer.get());
+	RendererStateAccessor afterSubmit(m_renderer);
 	// If auxiliary submission runs when no aux work was recorded, it should leave the scene recording intact.
 	EXPECT_EQ(afterSubmit.sceneCommandBuffer(), recordedCmd);
 	EXPECT_TRUE(afterSubmit.scenePassRecorded());
@@ -1766,13 +1769,13 @@ TEST_F(VulkanHiddenWindowTest, RecordedSceneThenEnsureRenderPassStartsDirectPass
 	m_renderer->beginScenePass();
 	m_renderer->endScenePass();
 
-	RendererStateAccessor beforeEnsure(m_renderer.get());
+	RendererStateAccessor beforeEnsure(m_renderer);
 	auto recordedCmd = beforeEnsure.sceneCommandBuffer();
 	ASSERT_NE(recordedCmd, vk::CommandBuffer());
 
 	m_renderer->ensureRenderPassActive();
 
-	RendererStateAccessor afterEnsure(m_renderer.get());
+	RendererStateAccessor afterEnsure(m_renderer);
 	EXPECT_TRUE(afterEnsure.directPassActive());
 	EXPECT_FALSE(afterEnsure.scenePassRecorded());
 	EXPECT_EQ(afterEnsure.sceneCommandBuffer(), recordedCmd);
@@ -1802,14 +1805,14 @@ TEST_F(VulkanHiddenWindowTest, ScenePassColorSurvivesNoOpAuxSubmit) {
 	// No auxiliary work recorded; submitAuxiliaryCommandBuffer should be a no-op and preserve scene recording/state
 	m_renderer->submitAuxiliaryCommandBuffer();
 
-	RendererStateAccessor state(m_renderer.get());
+	RendererStateAccessor state(m_renderer);
 	EXPECT_TRUE(state.scenePassRecorded());
 	EXPECT_NE(state.sceneCommandBuffer(), vk::CommandBuffer());
 
 	// Submit the frame; scene contents should survive and be readable
 	m_renderer->flip();
 
-	RendererReadbackHelper readback(m_renderer.get());
+	RendererReadbackHelper readback(m_renderer);
 	ReadbackPixel pixel{};
 	auto extent = m_renderer->getSceneExtent();
 	ASSERT_GT(extent.width, 0u);
@@ -1829,11 +1832,19 @@ TEST_F(VulkanHiddenWindowTest, SceneTriangleSurvivesFlip) {
 	auto* bm = g_vulkanBufferManager;
 	ASSERT_NE(bm, nullptr);
 
-	// Simple fullscreen-ish triangle in NDC (w=1), matching the negative-height viewport flip.
+	// Draw a screen-space triangle centered in the viewport (orthographic projection expects pixel coords).
+	// Layout: position4 (0-3), color4 (4-7), texcoord4 (8-11)
+	const auto extent = m_renderer->getSceneExtent();
+	ASSERT_GT(extent.width, 0u);
+	ASSERT_GT(extent.height, 0u);
+	const float cx = static_cast<float>(extent.width) * 0.5f;
+	const float cy = static_cast<float>(extent.height) * 0.5f;
+	const float halfSize = std::min(static_cast<float>(extent.width), static_cast<float>(extent.height)) * 0.25f;
 	const float tri[] = {
-		-0.5f, -0.5f, 0.0f, 1.0f,
-		 0.5f, -0.5f, 0.0f, 1.0f,
-		 0.0f,  0.5f, 0.0f, 1.0f,
+		// pos                          // color          // texcoord
+		cx - halfSize, cy - halfSize, 0.0f, 1.0f,  1.f, 0.f, 0.f, 1.f,  0.f, 0.f, 0.f, 0.f,
+		cx + halfSize, cy - halfSize, 0.0f, 1.0f,  1.f, 0.f, 0.f, 1.f,  1.f, 0.f, 0.f, 0.f,
+		cx,            cy + halfSize, 0.0f, 1.0f,  1.f, 0.f, 0.f, 1.f,  0.5f, 1.f, 0.f, 0.f,
 	};
 
 	auto vbo = bm->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1841,7 +1852,10 @@ TEST_F(VulkanHiddenWindowTest, SceneTriangleSurvivesFlip) {
 	bm->updateBufferData(vbo, sizeof(tri), tri);
 
 	vertex_layout layout;
-	layout.add_vertex_component(vertex_format_data::POSITION4, sizeof(float) * 4, 0);
+	const size_t stride = sizeof(float) * 12;
+	layout.add_vertex_component(vertex_format_data::POSITION4, stride, 0);
+	layout.add_vertex_component(vertex_format_data::COLOR4, stride, sizeof(float) * 4);
+	layout.add_vertex_component(vertex_format_data::TEX_COORD4, stride, sizeof(float) * 8);
 
 	// Use default material with no textures; force a flat color via material color.
 	material mat; // defaults to SDR_TYPE_DEFAULT_MATERIAL
@@ -1852,29 +1866,17 @@ TEST_F(VulkanHiddenWindowTest, SceneTriangleSurvivesFlip) {
 
 	// Clear to black, draw red triangle.
 	m_renderer->setClearColor(0.f, 0.f, 0.f, 1.f);
-	m_renderer->beginScenePass();
-	gr_vulkan_render_primitives(&mat, PRIM_TYPE_TRIS, &layout, 0, 3, vbo, 0);
-	m_renderer->endScenePass();
+	ASSERT_NO_THROW({ m_renderer->beginScenePass(); });
+	ASSERT_NO_THROW({ gr_vulkan_render_primitives(&mat, PRIM_TYPE_TRIS, &layout, 0, 3, vbo, 0); });
+	ASSERT_NO_THROW({ m_renderer->endScenePass(); });
 
-	RendererReadbackHelper readback(m_renderer.get());
-	ReadbackPixel pixelBefore{};
-	auto extent = m_renderer->getSceneExtent();
-	ASSERT_GT(extent.width, 0u);
-	ASSERT_GT(extent.height, 0u);
-
-	// Sample near center before flip; expect red in the scene attachment.
-	ASSERT_TRUE(readback.readScenePixel(pixelBefore, extent.width / 2, extent.height / 2));
-	if (pixelBefore.r <= 0.1f && pixelBefore.g <= 0.1f && pixelBefore.b <= 0.1f) {
-		GTEST_SKIP() << "Scene triangle not visible before flip; current Vulkan bug reproduces (pixel="
-		             << pixelBefore.r << "," << pixelBefore.g << "," << pixelBefore.b << ")";
-	}
-
-	m_renderer->flip();
+	RendererReadbackHelper readback(m_renderer);
+	ASSERT_NO_THROW({ m_renderer->flip(); });
 
 	ReadbackPixel pixelAfter{};
-	ASSERT_TRUE(readback.readScenePixel(pixelAfter, extent.width / 2, extent.height / 2));
+	ASSERT_NO_THROW({ ASSERT_TRUE(readback.readScenePixel(pixelAfter, extent.width / 2, extent.height / 2)); });
 	if (pixelAfter.r <= 0.1f && pixelAfter.g <= 0.1f && pixelAfter.b <= 0.1f) {
-		GTEST_SKIP() << "Scene triangle lost after flip; current Vulkan bug reproduces (pixel="
+		GTEST_SKIP() << "Scene triangle not visible after flip; current Vulkan bug reproduces (pixel="
 		             << pixelAfter.r << "," << pixelAfter.g << "," << pixelAfter.b << ")";
 	}
 	EXPECT_GT(pixelAfter.r, 0.5f);
@@ -1882,6 +1884,103 @@ TEST_F(VulkanHiddenWindowTest, SceneTriangleSurvivesFlip) {
 	EXPECT_LT(pixelAfter.b, 0.2f);
 
 	// Cleanup
+	bm->deleteBuffer(vbo);
+}
+
+TEST_F(VulkanHiddenWindowTest, ModelShaderTriangleVisible) {
+	if (!m_initialized) {
+		GTEST_SKIP() << "Vulkan not initialized";
+	}
+
+	// Prepare a model shader triangle rendered in clip space using identity matrices.
+	const auto extent = m_renderer->getSceneExtent();
+	ASSERT_GT(extent.width, 0u);
+	ASSERT_GT(extent.height, 0u);
+
+	auto* bm = g_vulkanBufferManager;
+	ASSERT_NE(bm, nullptr);
+
+	// Per-vertex payload packed to 64 bytes:
+	// position4 (floats 0-3), texcoord4 (4-7), normal3 (8-10), tangent4 (11-14), modelId (15)
+	const float tri[] = {
+		// pos              // texcoord      // normal      // tangent           // modelId
+		-0.5f, -0.5f, 0.f, 1.f,  0.f, 0.f, 0.f, 0.f,  0.f, 0.f, 1.f,  1.f, 0.f, 0.f, 1.f,  0.f,
+		 0.5f, -0.5f, 0.f, 1.f,  1.f, 0.f, 0.f, 0.f,  0.f, 0.f, 1.f,  1.f, 0.f, 0.f, 1.f,  0.f,
+		 0.0f,  0.5f, 0.f, 1.f,  0.5f, 1.f, 0.f, 0.f,  0.f, 0.f, 1.f,  1.f, 0.f, 0.f, 1.f,  0.f,
+	};
+	const size_t stride = sizeof(float) * 16;
+
+	auto vbo = bm->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
+	ASSERT_TRUE(vbo.isValid());
+	bm->updateBufferData(vbo, sizeof(tri), tri);
+
+	vertex_layout layout;
+	layout.add_vertex_component(vertex_format_data::POSITION4, stride, 0);
+	layout.add_vertex_component(vertex_format_data::TEX_COORD4, stride, sizeof(float) * 4);
+	layout.add_vertex_component(vertex_format_data::NORMAL, stride, sizeof(float) * 8);
+	layout.add_vertex_component(vertex_format_data::TANGENT, stride, sizeof(float) * 11);
+	layout.add_vertex_component(vertex_format_data::MODEL_ID, stride, sizeof(float) * 15);
+
+	// Bind a minimal ModelData UBO with identity transforms and a solid red color.
+	auto modelUb = gr_get_uniform_buffer(uniform_block_type::ModelData, 1, sizeof(graphics::model_uniform_data));
+	auto& aligner = modelUb.aligner();
+	auto mud = aligner.addTypedElement<graphics::model_uniform_data>();
+	std::memset(mud, 0, sizeof(graphics::model_uniform_data));
+	vm_matrix4_set_identity(&mud->modelViewMatrix);
+	vm_matrix4_set_identity(&mud->modelMatrix);
+	vm_matrix4_set_identity(&mud->viewMatrix);
+	vm_matrix4_set_identity(&mud->projMatrix);
+	vm_matrix4_set_identity(&mud->textureMatrix);
+	vm_matrix4_set_identity(&mud->shadow_mv_matrix);
+	for (auto& m : mud->shadow_proj_matrix) {
+		vm_matrix4_set_identity(&m);
+	}
+	mud->color = vm_vec4_new(1.f, 0.f, 0.f, 1.f);
+	mud->n_lights = 0;
+	mud->use_clip_plane = 0;
+	mud->defaultGloss = 0.f;
+	vec3d unitVec;
+	vm_vec_make(&unitVec, 1.f, 1.f, 1.f);
+	vec3d zeroVec;
+	vm_vec_make(&zeroVec, 0.f, 0.f, 0.f);
+	mud->ambientFactor = unitVec;
+	mud->diffuseFactor = unitVec;
+	mud->emissionFactor = zeroVec;
+	mud->alphaMult = 1.f;
+	mud->vpwidth = static_cast<float>(extent.width);
+	mud->vpheight = static_cast<float>(extent.height);
+	mud->znear = 0.1f;
+	mud->zfar = 1000.f;
+	mud->sBasemapIndex = -1;
+	mud->sGlowmapIndex = -1;
+	mud->sSpecmapIndex = -1;
+	mud->sNormalmapIndex = -1;
+	mud->sAmbientmapIndex = -1;
+	mud->sMiscmapIndex = -1;
+
+	modelUb.submitData();
+	gr_bind_uniform_buffer(
+		uniform_block_type::ModelData, modelUb.getBufferOffset(0), sizeof(graphics::model_uniform_data), modelUb.bufferHandle());
+
+	model_material mat;
+	mat.set_lighting(false);
+	mat.set_depth_mode(ZBUFFER_TYPE_NONE);
+	mat.set_cull_mode(false);
+	mat.set_color(1.f, 0.f, 0.f, 1.f);
+
+	m_renderer->setClearColor(0.f, 0.f, 0.f, 1.f);
+	m_renderer->beginScenePass();
+	gr_vulkan_render_primitives(&mat, PRIM_TYPE_TRIS, &layout, 0, 3, vbo, 0);
+	m_renderer->endScenePass();
+	m_renderer->flip();
+
+	RendererReadbackHelper readback(m_renderer);
+	ReadbackPixel pixel{};
+	ASSERT_TRUE(readback.readScenePixel(pixel, extent.width / 2, extent.height / 2));
+	EXPECT_GT(pixel.r, 0.5f);
+	EXPECT_LT(pixel.g, 0.2f);
+	EXPECT_LT(pixel.b, 0.2f);
+
 	bm->deleteBuffer(vbo);
 }
 

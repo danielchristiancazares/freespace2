@@ -850,8 +850,11 @@ void gr_vulkan_render_primitives(material* material_info,
 		renderer_instance->getCurrentFrameIndex());
 
 	// Update uniform buffers before drawing
+	vk_logf("VulkanRenderer", "render_primitives DIAG: before matrix uniforms cmd=%p", static_cast<void*>(preCmd));
 	gr_matrix_set_uniforms();
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after matrix uniforms");
 	vulkan_set_generic_uniforms(material_info);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after generic uniforms");
 
 	// Ensure a render pass is active (auto-starts direct pass for menus).
 	// If no pass is active, force a scene pass to make sure we have a depth target and scene formats.
@@ -894,10 +897,24 @@ void gr_vulkan_render_primitives(material* material_info,
 		static_cast<int>(colorFormat),
 		static_cast<int>(depthFormat),
 		renderer_instance->getCurrentFrameIndex());
+	if (g_vulkanBufferManager && material_info->get_shader_type() == SDR_TYPE_MODEL) {
+		auto modelBound = g_vulkanBufferManager->getBoundUniformBuffer(uniform_block_type::ModelData);
+		auto matrixBound = g_vulkanBufferManager->getBoundUniformBuffer(uniform_block_type::Matrices);
+		auto genericBound = g_vulkanBufferManager->getBoundUniformBuffer(uniform_block_type::GenericData);
+		vk_logf("VulkanRenderer",
+			"render_primitives DIAG: UBOs model(offset=%zu size=%zu buf=%p) matrices(offset=%zu size=%zu buf=%p) generic(offset=%zu size=%zu buf=%p)",
+			modelBound.offset, modelBound.size, static_cast<void*>(static_cast<VkBuffer>(modelBound.vkBuffer)),
+			matrixBound.offset, matrixBound.size, static_cast<void*>(static_cast<VkBuffer>(matrixBound.vkBuffer)),
+			genericBound.offset, genericBound.size, static_cast<void*>(static_cast<VkBuffer>(genericBound.vkBuffer)));
+	}
 
 	// Get or create pipeline from material and layout
 	vk::Pipeline pipeline = g_vulkanPipelineManager->getOrCreatePipeline(
 	    *material_info, *layout, prim_type, colorFormat, depthFormat);
+
+	vk_logf("VulkanRenderer",
+		"render_primitives DIAG: pipeline lookup result=%p",
+		reinterpret_cast<void*>(static_cast<VkPipeline>(pipeline)));
 	
 	if (!pipeline) {
 		mprintf(("Vulkan: Failed to get pipeline for render_primitives\n"));
@@ -908,24 +925,33 @@ void gr_vulkan_render_primitives(material* material_info,
 	
 	// Bind pipeline
 	bindPipeline(cmdBuffer, pipeline, state);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after bindPipeline");
 	
 	// Set viewport and scissor
 	setViewportAndScissor(cmdBuffer, renderer_instance->getSceneExtent(), state);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after setViewportAndScissor");
 	
 	// Bind vertex buffer
 	bindVertexBuffer(cmdBuffer, buffer_handle, buffer_offset, state);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after bindVertexBuffer");
 	
 	// Get pipeline layout
 	auto pipelineLayout = getMaterialPipelineLayout(material_info);
+	vk_logf("VulkanRenderer",
+		"render_primitives DIAG: pipelineLayout=%p",
+		reinterpret_cast<void*>(static_cast<VkPipelineLayout>(pipelineLayout)));
 	
 	// Bind uniform buffers (Set 0)
 	bindUniformDescriptors(cmdBuffer, pipelineLayout, state);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after bindUniformDescriptors");
 	
 	// Bind material descriptors (Set 1)
 	bindMaterialDescriptors(cmdBuffer, material_info, pipelineLayout, state);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after bindMaterialDescriptors");
 
 	// Draw
 	cmdBuffer.draw(static_cast<uint32_t>(n_verts), 1, static_cast<uint32_t>(offset), 0);
+	vk_logf("VulkanRenderer", "render_primitives DIAG: after draw");
 }
 
 void gr_vulkan_render_primitives_particle(particle_material* material_info,

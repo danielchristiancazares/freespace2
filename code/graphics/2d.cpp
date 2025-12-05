@@ -1691,6 +1691,10 @@ static bool gr_init_sub(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, i
 }
 
 static void init_window_icon() {
+	if (running_unittests) {
+		return;
+	}
+
 	auto view = os::getMainViewport();
 
 	if (view == nullptr) {
@@ -3004,6 +3008,9 @@ static void uniform_buffer_managers_retire_buffers()
 
 graphics::util::UniformBuffer gr_get_uniform_buffer(uniform_block_type type, size_t num_elements, size_t element_size_override)
 {
+	if (!UniformBufferManager) {
+		uniform_buffer_managers_init();
+	}
 	return UniformBufferManager->getUniformBuffer(type, num_elements, element_size_override);
 }
 

@@ -88,7 +88,9 @@ endforeach()
 # Use the generate command to avoid rewriting the file if the contents did not actually change
 file(GENERATE OUTPUT "${_shaderHeaderPath}"
 	CONTENT "${_headerContent}")
-target_include_directories(code PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+# Generated shader structs live in the code build directory and are pulled in by public headers
+# (e.g., graphics/util/uniform_structs.h), so expose this include path to dependents like unittests.
+target_include_directories(code PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
 
 target_sources(code PRIVATE ${_structHeaderList} "${_shaderHeaderPath}")
 source_group("Graphics\\Shader structs" FILES ${_structHeaderList} "${_shaderHeaderPath}")

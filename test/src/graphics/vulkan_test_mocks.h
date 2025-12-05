@@ -13,7 +13,11 @@
 
 #include "globalincs/pstypes.h"
 #include "osapi/osapi.h"
+#include "graphics/2d.h"
+#include "graphics/grinternal.h"
 #include "graphics/vulkan/VulkanRenderer.h"
+#include "graphics/vulkan/gr_vulkan.h"
+#include "mod_table/mod_table.h"
 
 namespace graphics {
 namespace vulkan {
@@ -117,7 +121,7 @@ inline std::unique_ptr<os::Viewport> TestGraphicsOperations::createViewport(cons
  */
 class VulkanTestFixture : public ::testing::Test {
 protected:
-	std::unique_ptr<VulkanRenderer> m_renderer;
+	VulkanRenderer* m_renderer = nullptr;
 	bool m_initialized = false;
 	bool m_visible = false;
 
@@ -130,17 +134,23 @@ protected:
 			return;
 		}
 
-		// Create test graphics operations
+		// Full engine init path so shader loading and global systems are ready
 		auto graphicsOps = std::make_unique<TestGraphicsOperations>(m_visible);
-
-		// Create Vulkan renderer with test graphics ops
-		m_renderer = std::make_unique<VulkanRenderer>(std::move(graphicsOps));
-
-		// Initialize renderer
-		if (!m_renderer->initialize()) {
-			m_renderer.reset();
+		const int width = graphicsOps->m_width;
+		const int height = graphicsOps->m_height;
+		Window_icon_path = "app_icon_sse"; // avoid missing-icon warning/error during headless init
+		Cmdline_noshadercache = true;      // avoid filesystem cache lookups during tests
+		if (!gr_init(std::move(graphicsOps), GR_VULKAN, width, height, 32)) {
 			SDL_Quit();
-			GTEST_SKIP() << "VulkanRenderer::initialize failed - no Vulkan support?";
+			GTEST_SKIP() << "gr_init failed - no Vulkan support?";
+			return;
+		}
+
+		m_renderer = graphics::vulkan::getRendererInstance();
+		if (!m_renderer) {
+			gr_close();
+			SDL_Quit();
+			GTEST_SKIP() << "Vulkan renderer instance unavailable after initialize";
 			return;
 		}
 
@@ -149,15 +159,15 @@ protected:
 
 	void TearDown() override {
 		if (m_renderer) {
-			m_renderer->shutdown();
-			m_renderer.reset();
+			gr_close();
+			m_renderer = nullptr;
 		}
 		SDL_Quit();
 	}
 
 	bool isInitialized() const { return m_initialized; }
 
-	VulkanRenderer* renderer() { return m_renderer.get(); }
+	VulkanRenderer* renderer() { return m_renderer; }
 };
 
 /**
