@@ -24,3 +24,5 @@ In `freespace2/SDLGraphicsOperations.cpp`, guard the ImGui shutdown calls so the
 
 If a dedicated Vulkan ImGui backend is added later, revisit this section to ensure its init/shutdown are balanced.
 
+
+

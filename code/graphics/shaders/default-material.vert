@@ -8,12 +8,18 @@ layout (location = 2) in vec4 vertTexCoord;
 layout (location = 0) out vec4 fragTexCoord;
 layout (location = 1) out vec4 fragColor;
 
-layout (set = 0, binding = 6, std140) uniform matrixData {
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(binding = binding_id)
+#endif
+
+layout(std140) LAYOUT_SET_BINDING(0, 6) uniform matrixData {
 	mat4 modelViewMatrix;
 	mat4 projMatrix;
 };
 
-layout (set = 0, binding = 8, std140) uniform genericData {
+layout(std140) LAYOUT_SET_BINDING(0, 8) uniform genericData {
 	mat4 modelMatrix;
 
 	vec4 color;

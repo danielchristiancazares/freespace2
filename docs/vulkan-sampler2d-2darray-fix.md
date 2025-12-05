@@ -42,3 +42,5 @@ static bool shaderUsesArrayView(shader_type shaderType, uint32_t binding)
 
 Updated `bindMaterialDescriptors()` to use `mat->get_shader_type()` and call `shaderUsesArrayView()` instead of hardcoded binding list.
 
+
+

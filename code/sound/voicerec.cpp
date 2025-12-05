@@ -7,6 +7,12 @@
 */ 
 
 #ifdef _WIN32
+
+#if defined(FS2_VOICER) && !(defined(__has_include) && __has_include(<atlbase.h>))
+// Disable voice recognition if ATL headers are unavailable (sphelper.h requires atlbase.h)
+#undef FS2_VOICER
+#endif
+
 #ifndef FS2_VOICER
 
 #if NDEBUG

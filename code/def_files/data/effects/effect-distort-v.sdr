@@ -6,6 +6,12 @@ out vec4 fragTexCoord;
 out vec4 fragColor;
 out float fragOffset;
 
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
 layout (std140) uniform matrixData {
 	mat4 modelViewMatrix;
 	mat4 projMatrix;

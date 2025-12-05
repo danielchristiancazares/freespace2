@@ -8,7 +8,13 @@ layout (location = 1) in vec4 fragColor;
 
 layout (location = 0) out vec4 fragOut0;
 
-layout (set = 0, binding = 8, std140) uniform genericData {
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(binding = binding_id)
+#endif
+
+layout(std140) LAYOUT_SET_BINDING(0, 8) uniform genericData {
 	mat4 modelMatrix;
 
 	vec4 color;
@@ -25,7 +31,7 @@ layout (set = 0, binding = 8, std140) uniform genericData {
 	bool clipEnabled;
 };
 
-layout(set = 1, binding = 0) uniform sampler2DArray baseMap;
+LAYOUT_SET_BINDING(1, 0) uniform sampler2DArray baseMap;
 
 void main()
 {

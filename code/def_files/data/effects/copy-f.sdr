@@ -1,10 +1,16 @@
 in vec4 fragTexCoord;
 out vec4 fragOut0;
 
-#ifdef COPY_ARRAY
-layout(set = 1, binding = 0) uniform sampler2DArray tex;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
 #else
-layout(set = 1, binding = 1) uniform sampler2D tex;
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
+#ifdef COPY_ARRAY
+LAYOUT_SET_BINDING(1, 0) uniform sampler2DArray tex;
+#else
+LAYOUT_SET_BINDING(1, 1) uniform sampler2D tex;
 #endif
 
 void main()

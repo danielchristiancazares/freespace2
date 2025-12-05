@@ -16,9 +16,15 @@ in vec4 fragOffset[3];
 
 out vec4 fragOut0;
 
-layout(set = 1, binding = 0) uniform sampler2D edgesTex;
-layout(set = 1, binding = 1) uniform sampler2D areaTex;
-layout(set = 1, binding = 2) uniform sampler2D searchTex;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D edgesTex;
+LAYOUT_SET_BINDING(1, 1) uniform sampler2D areaTex;
+LAYOUT_SET_BINDING(1, 2) uniform sampler2D searchTex;
 
 void main() {
 	fragOut0 = SMAABlendingWeightCalculationPS(fragTexCoord, fragPixcoord, fragOffset, edgesTex, areaTex, searchTex, vec4(0.0));

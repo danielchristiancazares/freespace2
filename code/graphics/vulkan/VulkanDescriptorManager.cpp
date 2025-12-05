@@ -105,7 +105,9 @@ bool VulkanDescriptorManager::createPool()
 
 vk::DescriptorSet VulkanDescriptorManager::allocateSet(vk::DescriptorSetLayout layout, const SCP_string& debugName)
 {
-	vk_debugf("allocateSet entry layout=%p name=%s", static_cast<void*>(layout), debugName.c_str());
+	vk_debugf("allocateSet entry layout=%p name=%s",
+		reinterpret_cast<void*>(static_cast<VkDescriptorSetLayout>(layout)),
+		debugName.c_str());
 
 	if (!m_initialized) {
 		mprintf(("VulkanDescriptorManager: Cannot allocate - not initialized\n"));
@@ -139,7 +141,8 @@ vk::DescriptorSet VulkanDescriptorManager::allocateSet(vk::DescriptorSetLayout l
 
 		if (m_verboseTracking) {
 			mprintf(("DESC[%llu] ALLOC frame=%u site='%s' handle=%p\n",
-			         info.uniqueId, info.allocFrame, debugName.c_str(), static_cast<void*>(set)));
+			         info.uniqueId, info.allocFrame, debugName.c_str(),
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set))));
 		}
 
 		return set;
@@ -171,16 +174,16 @@ void VulkanDescriptorManager::freeSet(vk::DescriptorSet set)
 
 		// Check for free-while-bound-same-frame violation
 		if (info.state == DescriptorSetState::Bound && info.boundFrame == m_currentFrameNumber) {
-			mprintf(("DESC[%llu] ERROR: FREE SAME FRAME AS BIND! bound=%u free=%u handle=%p site='%s'\n",
+		mprintf(("DESC[%llu] ERROR: FREE SAME FRAME AS BIND! bound=%u free=%u handle=%p site='%s'\n",
 			         info.uniqueId, info.boundFrame, m_currentFrameNumber,
-			         static_cast<void*>(set), info.allocSite.c_str()));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str()));
 		}
 
 		if (m_verboseTracking) {
 			mprintf(("DESC[%llu] FREE frame=%u (alloc=%u update=%u bound=%u queued=%u) handle=%p site='%s'\n",
 			         info.uniqueId, m_currentFrameNumber,
 			         info.allocFrame, info.updateFrame, info.boundFrame, info.queuedFrame,
-			         static_cast<void*>(set), info.allocSite.c_str()));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str()));
 		}
 
 		m_tracking.erase(trackIt);
@@ -207,7 +210,7 @@ void VulkanDescriptorManager::updateUniformBuffer(vk::DescriptorSet set, uint32_
 		if (info.state == DescriptorSetState::Bound) {
 			mprintf(("DESC[%llu] ERROR: UPDATE AFTER BIND! frame=%u boundFrame=%u handle=%p site='%s' binding=%u\n",
 			         info.uniqueId, m_currentFrameNumber, info.boundFrame,
-			         static_cast<void*>(set), info.allocSite.c_str(), binding));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str(), binding));
 		}
 		info.state = DescriptorSetState::Updated;
 		info.updateFrame = m_currentFrameNumber;
@@ -245,7 +248,7 @@ void VulkanDescriptorManager::updateCombinedImageSampler(vk::DescriptorSet set, 
 		if (info.state == DescriptorSetState::Bound) {
 			mprintf(("DESC[%llu] ERROR: UPDATE AFTER BIND! frame=%u boundFrame=%u handle=%p site='%s' binding=%u\n",
 			         info.uniqueId, m_currentFrameNumber, info.boundFrame,
-			         static_cast<void*>(set), info.allocSite.c_str(), binding));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str(), binding));
 		}
 		info.state = DescriptorSetState::Updated;
 		info.updateFrame = m_currentFrameNumber;
@@ -281,7 +284,7 @@ void VulkanDescriptorManager::updateUniformTexelBuffer(vk::DescriptorSet set, ui
 		if (info.state == DescriptorSetState::Bound) {
 			mprintf(("DESC[%llu] ERROR: UPDATE AFTER BIND! frame=%u boundFrame=%u handle=%p site='%s' binding=%u\n",
 			         info.uniqueId, m_currentFrameNumber, info.boundFrame,
-			         static_cast<void*>(set), info.allocSite.c_str(), binding));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str(), binding));
 		}
 		info.state = DescriptorSetState::Updated;
 		info.updateFrame = m_currentFrameNumber;
@@ -313,7 +316,7 @@ void VulkanDescriptorManager::updateStorageBuffer(vk::DescriptorSet set, uint32_
 		if (info.state == DescriptorSetState::Bound) {
 			mprintf(("DESC[%llu] ERROR: UPDATE AFTER BIND! frame=%u boundFrame=%u handle=%p site='%s' binding=%u\n",
 			         info.uniqueId, m_currentFrameNumber, info.boundFrame,
-			         static_cast<void*>(set), info.allocSite.c_str(), binding));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str(), binding));
 		}
 		info.state = DescriptorSetState::Updated;
 		info.updateFrame = m_currentFrameNumber;
@@ -350,7 +353,7 @@ void VulkanDescriptorManager::updateStorageImage(vk::DescriptorSet set, uint32_t
 		if (info.state == DescriptorSetState::Bound) {
 			mprintf(("DESC[%llu] ERROR: UPDATE AFTER BIND! frame=%u boundFrame=%u handle=%p site='%s' binding=%u\n",
 			         info.uniqueId, m_currentFrameNumber, info.boundFrame,
-			         static_cast<void*>(set), info.allocSite.c_str(), binding));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str(), binding));
 		}
 		info.state = DescriptorSetState::Updated;
 		info.updateFrame = m_currentFrameNumber;
@@ -377,7 +380,7 @@ void VulkanDescriptorManager::bindDescriptorSet(vk::CommandBuffer cmd, vk::Pipel
                                                  uint32_t firstSet)
 {
 	vk_debugf("bindDescriptorSet entry set=%p firstSet=%u dynOffsets=%zu",
-		static_cast<void*>(set), firstSet, dynamicOffsets.size());
+		reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), firstSet, dynamicOffsets.size());
 
 	if (!cmd || !pipelineLayout || !set || !m_initialized) {
 		return;
@@ -393,7 +396,7 @@ void VulkanDescriptorManager::bindDescriptorSet(vk::CommandBuffer cmd, vk::Pipel
 		if (m_verboseTracking) {
 			mprintf(("DESC[%llu] BIND frame=%u set=%u handle=%p site='%s'\n",
 			         info.uniqueId, info.boundFrame, firstSet,
-			         static_cast<void*>(set), info.allocSite.c_str()));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str()));
 		}
 	}
 
@@ -411,7 +414,7 @@ void VulkanDescriptorManager::markQueuedForFree(vk::DescriptorSet set, uint32_t 
 		if (m_verboseTracking) {
 			mprintf(("DESC[%llu] QUEUED frame=%u (alloc=%u bound=%u) handle=%p site='%s'\n",
 			         info.uniqueId, frame, info.allocFrame, info.boundFrame,
-			         static_cast<void*>(set), info.allocSite.c_str()));
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set)), info.allocSite.c_str()));
 		}
 	}
 }
@@ -446,7 +449,8 @@ void VulkanDescriptorManager::resetTrackingForReuse(vk::DescriptorSet set, const
 
 		if (m_verboseTracking) {
 			mprintf(("DESC[%llu] REUSE frame=%u site='%s' handle=%p\n",
-			         oldId, m_currentFrameNumber, info.allocSite.c_str(), static_cast<void*>(set)));
+			         oldId, m_currentFrameNumber, info.allocSite.c_str(),
+			         reinterpret_cast<void*>(static_cast<VkDescriptorSet>(set))));
 		}
 	}
 }

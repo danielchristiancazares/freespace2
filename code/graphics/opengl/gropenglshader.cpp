@@ -24,6 +24,7 @@
 #include "graphics/opengl/gropengltnl.h"
 #include "graphics/util/ShaderPreprocessor.h"
 #include "graphics/util/uniform_structs.h"
+#include "graphics/vulkan/VulkanDebug.h"
 #include "lighting/lighting.h"
 #include "math/vecmat.h"
 #include "mod_table/mod_table.h"
@@ -716,6 +717,11 @@ void opengl_compile_shader_actual(shader_type sdr, const uint &flags, opengl_sha
 			program->linkProgram();
 		}
 		catch (const std::exception&) {
+			graphics::vulkan::vk_debugf("OpenGL shader compile failed: vert='%s' frag='%s'%s%s",
+				sdr_info->vert ? sdr_info->vert : "(null)",
+				sdr_info->frag ? sdr_info->frag : "(null)",
+				use_geo_sdr && sdr_info->geo ? " geo='" : "",
+				use_geo_sdr && sdr_info->geo ? sdr_info->geo : "");
 			// Since all shaders are required a compilation failure is a fatal error
 			Error(LOCATION, "A shader failed to compile! Check the debug log for more information.");
 		}

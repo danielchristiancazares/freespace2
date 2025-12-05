@@ -6,11 +6,16 @@
 // Note: shaderc defines VULKAN=1 when targeting Vulkan, not GL_KHR_vulkan_glsl
 #if defined(VULKAN) || defined(GL_KHR_vulkan_glsl)
 #extension GL_KHR_vulkan_glsl : enable
+#ifdef VULKAN
 #define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140, set = set_id, binding = binding_id)
 #define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
 #else
-#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140, binding = binding_id)
-#define LAYOUT_SET_BINDING(set_id, binding_id) layout(binding = binding_id)
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140)
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+#else
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140)
+#define LAYOUT_SET_BINDING(set_id, binding_id)
 #endif
 
 // Uniform block - set 0, binding 2 matches uniform_block_type::NanoVGData

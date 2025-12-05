@@ -1501,6 +1501,13 @@ void VulkanRenderer::drawScene(vk::Framebuffer /*destinationFb*/, vk::CommandBuf
 }
 void VulkanRenderer::beginScenePass()
 {
+	vk_logf("VulkanRenderer",
+		"beginScenePass CALLED frame=%u sceneActive=%d directActive=%d recorded=%d cmd=%p",
+		m_currentFrame,
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer));
 	logRenderState("beginScenePass entry");
 
 	if (m_scenePassActive) {
@@ -1736,6 +1743,15 @@ void VulkanRenderer::beginScenePass()
 	// Reset draw state for new scene pass
 	m_drawState.reset();
 
+	vk_logf("VulkanRenderer",
+		"beginScenePass: COMPLETED scenePassActive=%d cmd=%p colorFmt=%d depthFmt=%d extent=%ux%u frame=%u",
+		m_scenePassActive ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat),
+		targetExtent.width,
+		targetExtent.height,
+		m_currentFrame);
 	vk_debugf("beginScenePass: completed successfully scenePassActive=%d cmd=%p colorFmt=%d depthFmt=%d extent=%ux%u frame=%u",
 		m_scenePassActive ? 1 : 0,
 		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
@@ -1748,6 +1764,12 @@ void VulkanRenderer::beginScenePass()
 
 void VulkanRenderer::endScenePass()
 {
+	vk_logf("VulkanRenderer",
+		"endScenePass CALLED scene=%d direct=%d cmd=%p frame=%u",
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
+		m_currentFrame);
 	vk_debugf("endScenePass entry scene=%d direct=%d cmd=%p frame=%u",
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
@@ -1812,6 +1834,12 @@ void VulkanRenderer::endScenePass()
 	m_scenePassActive = false;
 	m_scenePassRecorded = true;
 
+	vk_logf("VulkanRenderer",
+		"endScenePass: COMPLETED scenePassActive=%d recorded=%d cmd=%p frame=%u (command buffer still open for blit)",
+		m_scenePassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
+		m_currentFrame);
 	vk_debugf("endScenePass: completed scenePassActive=%d cmd=%p frame=%u (command buffer still open for blit)",
 		m_scenePassActive ? 1 : 0,
 		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
@@ -1819,6 +1847,56 @@ void VulkanRenderer::endScenePass()
 
 	// Note: We don't end the command buffer here - recordBlitToSwapchain will continue using it
 	// and flip() will finalize and submit it
+}
+
+void VulkanRenderer::endDirectPass()
+{
+	vk_debugf("endDirectPass entry scene=%d direct=%d cmd=%p frame=%u",
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
+		m_currentFrame);
+
+	if (!m_directPassActive || !m_sceneCommandBuffer) {
+		vk_logf("VulkanRenderer",
+			"endDirectPass called but no direct pass is active (frame=%u direct=%d cmd=%p)",
+			m_currentFrame,
+			m_directPassActive ? 1 : 0,
+			static_cast<void*>(m_sceneCommandBuffer));
+		m_directPassActive = false;
+		return;
+	}
+
+	// Finish dynamic rendering for the direct pass (no layout transition; caller will start a new pass)
+	vk_debugf("endDirectPass endRendering cmd=%p",
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)));
+	m_sceneCommandBuffer.endRendering();
+
+	// Clear current attachment tracking
+	m_currentColorFormat = vk::Format::eUndefined;
+	m_currentDepthFormat = vk::Format::eUndefined;
+	m_currentColorView = nullptr;
+	m_currentDepthView = nullptr;
+	m_sceneColorInShaderReadLayout = false;
+
+	// End and schedule free of the command buffer; a new pass will allocate a fresh buffer
+	vk_logf("VulkanRenderer",
+		"endDirectPass: ending and freeing command buffer %p",
+		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)));
+	m_sceneCommandBuffer.end();
+	vk::CommandBuffer cmdToFree = m_sceneCommandBuffer;
+	m_frames[m_currentFrame]->onFrameFinished([this, cmdToFree]() {
+		m_device->freeCommandBuffers(m_graphicsCommandPool.get(), {cmdToFree});
+	});
+
+	m_sceneCommandBuffer = nullptr;
+	m_directPassActive = false;
+	m_scenePassRecorded = false;
+	m_drawState.reset();
+
+	vk_debugf("endDirectPass: completed direct=%d cmd=nullptr frame=%u",
+		m_directPassActive ? 1 : 0,
+		m_currentFrame);
 }
 
 bool VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, VulkanFramebuffer* framebuffer,
@@ -1985,6 +2063,7 @@ bool VulkanRenderer::beginAuxiliaryRenderPass(vk::RenderPass /*renderPass*/, Vul
 
 	m_sceneCommandBuffer.beginRendering(renderingInfo);
 	m_auxiliaryPassActive = true;
+	m_auxiliaryCommandsRecorded = true; // Track that auxiliary work exists on this command buffer
 	m_sceneCommandBuffer.setLineWidth(1.0f);
 
 	// Reset draw state for new pass
@@ -2030,6 +2109,18 @@ void VulkanRenderer::endAuxiliaryRenderPass()
 
 void VulkanRenderer::ensureRenderPassActive()
 {
+	// DIAGNOSTIC: Use vk_logf for critical state tracking
+	vk_logf("VulkanRenderer",
+		"ensureRenderPassActive ENTRY: scene=%d direct=%d aux=%d recorded=%d cmd=%p frame=%u swapImage=%u colorFmt=%d depthFmt=%d",
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		m_scenePassRecorded ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer),
+		m_currentFrame,
+		m_currentSwapChainImage,
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat));
 	vk_debugf("ensureRenderPassActive entry scene=%d direct=%d aux=%d recorded=%d cmd=%p frame=%u swapImage=%u colorFmt=%d depthFmt=%d",
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
@@ -2067,6 +2158,13 @@ void VulkanRenderer::ensureRenderPassActive()
 
 	// If scene pass or direct pass already active and we still have a command buffer, nothing to do
 	if ((m_scenePassActive || m_directPassActive) && m_sceneCommandBuffer) {
+		vk_logf("VulkanRenderer",
+			"ensureRenderPassActive: EARLY RETURN (pass already active) cmd=%p scene=%d direct=%d recorded=%d frame=%u",
+			static_cast<void*>(m_sceneCommandBuffer),
+			m_scenePassActive ? 1 : 0,
+			m_directPassActive ? 1 : 0,
+			m_scenePassRecorded ? 1 : 0,
+			m_currentFrame);
 		vk_debugf("ensureRenderPassActive early return (already active) cmd=%p scene=%d direct=%d recorded=%d",
 			static_cast<void*>(m_sceneCommandBuffer),
 			m_scenePassActive ? 1 : 0,
@@ -2123,9 +2221,13 @@ void VulkanRenderer::ensureRenderPassActive()
 	}
 
 	vk_logf("VulkanRenderer",
-		"ensureRenderPassActive: starting direct pass frame=%u swapImage=%u",
+		"ensureRenderPassActive: STARTING DIRECT PASS (no scene pass active) frame=%u swapImage=%u scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p",
 		m_currentFrame,
-		m_currentSwapChainImage);
+		m_currentSwapChainImage,
+		m_scenePassActive ? 1 : 0,
+		m_directPassActive ? 1 : 0,
+		m_auxiliaryPassActive ? 1 : 0,
+		static_cast<void*>(m_sceneCommandBuffer));
 	vk_debugf("ensureRenderPassActive: reason for direct pass - scenePassActive=%d directPassActive=%d auxPassActive=%d cmd=%p",
 		m_scenePassActive ? 1 : 0,
 		m_directPassActive ? 1 : 0,
@@ -2222,6 +2324,13 @@ void VulkanRenderer::ensureRenderPassActive()
 	m_directPassActive = true;
 	m_sceneExtent = m_swapChainExtent;
 	resetDrawState();
+	
+	vk_logf("VulkanRenderer",
+		"ensureRenderPassActive: DIRECT PASS STARTED cmd=%p colorFmt=%d depthFmt=%d (UNDEFINED - NO DEPTH) frame=%u",
+		static_cast<void*>(m_sceneCommandBuffer),
+		static_cast<int>(m_currentColorFormat),
+		static_cast<int>(m_currentDepthFormat),
+		m_currentFrame);
 }
 
 vk::CommandBuffer VulkanRenderer::getCurrentCommandBuffer() const
@@ -2406,6 +2515,12 @@ void VulkanRenderer::submitAuxiliaryCommandBuffer()
 		return; // Nothing recorded
 	}
 
+	// If no auxiliary work was recorded, do not end or free the command buffer (it may hold a recorded scene)
+	if (!m_auxiliaryCommandsRecorded) {
+		vk_debugf("submitAuxiliaryCommandBuffer: no auxiliary work recorded, skipping submit/free frame=%u", m_currentFrame);
+		return;
+	}
+
 	vk_logf("VulkanRenderer",
 		"submitAuxiliaryCommandBuffer: ending and submitting cmd=%p frame=%u",
 		reinterpret_cast<void*>(static_cast<VkCommandBuffer>(m_sceneCommandBuffer)),
@@ -2440,6 +2555,7 @@ void VulkanRenderer::submitAuxiliaryCommandBuffer()
 	// NOTE: Do NOT reset m_scenePassActive or m_directPassActive here - those are managed
 	// by their respective end functions (endScenePass, etc.)
 	m_auxiliaryPassActive = false;
+	m_auxiliaryCommandsRecorded = false;
 	m_currentColorFormat = vk::Format::eUndefined;
 	m_currentDepthFormat = vk::Format::eUndefined;
 	m_currentColorView = nullptr;

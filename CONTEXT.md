@@ -1,9 +1,5 @@
 # Vulkan Backend Context (FSO)
 
-> This file exists **only** to feed context to LLM-based tooling.
-
----
-
 ## Architecture
 
 - **API version**: Vulkan 1.4 (`VK_API_VERSION_1_4` in `VulkanRenderer.cpp`)
@@ -17,51 +13,6 @@
   - `VulkanDescriptorManager` – single descriptor pool, allocation/free, tracking
   - `VulkanPipelineManager` – pipeline creation/caching, descriptor set layouts
   - `VulkanBufferManager` – buffer allocation (vertex/index/uniform/staging)
-
----
-
-## Bug Fixes
-
-### Off-center reticle
-See [`docs/vulkan-off-center-reticle-fix.md`](../docs/vulkan-off-center-reticle-fix.md) for details.
-
-### ImGui SDL backend shutdown when using Vulkan
-See [`docs/vulkan-imgui-shutdown-fix.md`](../docs/vulkan-imgui-shutdown-fix.md) for details.
-
-### Null std::function `gf_calculate_irrmap`
-See [`docs/vulkan-gf-calculate-irrmap-fix.md`](../docs/vulkan-gf-calculate-irrmap-fix.md) for details.
-**Note**: This fix resolved the null crash, but there is a known timing issue that can corrupt render state. See the external doc and FAILED ATTEMPT sections below for details.
-
-### sampler2D bound to 2D_ARRAY views (VUID-07752)
-See [`docs/vulkan-sampler2d-2darray-fix.md`](../docs/vulkan-sampler2d-2darray-fix.md) for details.
-
-### `samplerCube` bound to non-cube view
-See [`docs/vulkan-samplercube-noncube-fix.md`](../docs/vulkan-samplercube-noncube-fix.md) for details.
-
-
----
-
-## Mistakes to avoid (DO NOT REPEAT)
-
-### Sampler type mismatch: `sampler2DArray` in default material
-
-- **Problem**: Changing `default-material.frag` to use `sampler2DArray` made all menus/UI invisible (black).
-- **Why**:
-  - Menu textures are 2D with `VK_IMAGE_VIEW_TYPE_2D` views.
-  - `sampler2DArray` expects `VK_IMAGE_VIEW_TYPE_2D_ARRAY`.
-  - Binding 2D views to a `sampler2DArray` uniform silently fails (no validation error, nothing rendered).
-- **DO NOT**:
-  - Change `code/def_files/data/effects/default-material.frag` to `sampler2DArray`.
-  - Add array-view accessors (e.g. `getImageViewArray()`) to `VulkanTexture` for default materials.
-  - Bind 2D-array views to descriptor slots intended for `sampler2D`.
-- **DO**:
-  - Keep default material shaders using `sampler2D`:
-    - `default-material.frag`: `layout(set = 1, binding = 0) uniform sampler2D baseMap;`
-    - `default-material.vert`: `fragColor = color;` (uniform only, no `vertColor` input).
-  - In `gr_vulkan.cpp` material binding:
-    - Use `texture->getImageView()` (2D views) for default materials.
-  - Treat NanoVG separately:
-    - NanoVG shaders (`nanovg-f.sdr`, `nanovg-v.sdr`) legitimately use `sampler2DArray` and need array textures.
 
 ---
 
@@ -95,12 +46,6 @@ See [`docs/vulkan-samplercube-noncube-fix.md`](../docs/vulkan-samplercube-noncub
 ---
 
 ## Testing & debugging
-
-### Running a Build (Must be done inside game folder)
-```cmd
-build\bin\Debug\fs2_26_0_0.exe -vulkan -window
-```
-
 ### Enable validation layers
 ```cmd
 set VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
@@ -108,73 +53,11 @@ set VK_LOADER_DEBUG=all
 build\bin\Debug\fs2_26_0_0.exe -vulkan -noshadercache
 ```
 
-### Crash dump analysis (CDB)
-```cmd
-cdbx64.exe -z "<dump>.mdmp" -c ".symfix; .sympath+ build\\bin\\Debug; .reload; !analyze -v; .ecxr; kv; q"
-```
-- Tip: `cdbx64.exe` ships with the Windows SDK under `C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\`. Add that directory to `PATH` or invoke the tool via its full path when running the command above.
-
-### Unit Tests
-
-```cmd
-cd build
-ctest -C Debug --output-on-failure -VV
-```
-
 ### Logfile Locations
-- Main log: `%APPDATA%\HardLightProductions\FreeSpaceOpen\data\fs2_open.log`
+- Main log: `C:\Users\danie\AppData\Roaming\HardLightProductions\FreeSpaceOpen\data\fs2_open.log`
 - Validation log: `vulkan_debug.log` (game directory, written by `debugReportCallback`) Note: Logs here should also be in the main `fs2_open.log` file 
 - HDR surface debug: `vulkan_hdr_debug.txt` (game directory)
 - The application does not stdout or stderr anything directly.
-
----
-
-## Historical validation errors (for pattern matching)
-
-### Descriptor pool exhaustion
-- Error: `vk::Device::allocateDescriptorSets: ErrorOutOfPoolMemory`
-- Likely site: `bindMaterialDescriptors` in `gr_vulkan.cpp` (label `"MaterialTextures"`)
-- Current pool is large (`POOL_SIZE_COMBINED_IMAGE_SAMPLER = 65536`, `POOL_MAX_SETS = 4096`), so this may not repro now.
-- If it does: consider caching/reusing per-material descriptor sets instead of allocating per draw.
-### Framebuffer attachment count mismatch (pre–dynamic rendering):
-- Error: `vkCreateFramebuffer(): pCreateInfo->attachmentCount 1 does not match attachmentCount of 2`
-- Came from old code that actually created `VkFramebuffer` objects for render targets.
-- With dynamic rendering, check `vkCmdBeginRendering` attachments instead (color/depth views + formats) if a similar error reappears.
-
----
-
-## FAILED ATTEMPT #7: Track recorded scene pass and reuse command buffer for HUD
-
-**Status**: FAILED (models still invisible)
-
-### Approach
-
-- Added `m_scenePassRecorded` flag set by `endScenePass()`.
-- `ensureRenderPassActive()` now detects a recorded scene, blits it to the swapchain without transitioning to present, then starts a direct pass with `loadOp = eLoad` so HUD draws over the blitted scene while reusing the same command buffer.
-- `recordBlitToSwapchain()` can skip the final present transition so the swapchain stays in color-attachment layout for the HUD direct pass.
-- `flip()` now presents whenever a scene pass was recorded (even if ended earlier) so the scene buffer is submitted.
-
-### Result
-
-- Reported as failed; scene/model visibility is still broken. Need log inspection to confirm state/layout correctness.
-
-### Notes / Suspicions
-
-- The blit + reload path may still be dropping the scene command buffer, or layouts may be invalid when the HUD direct pass begins.
-- More logging around `ensureRenderPassActive()`, `flip()`, and image layouts is needed to pinpoint where the scene content is lost.
-
----
-
-## Instrumentation (ongoing)
-
-- Added verbose vk_debugf/mprintf tracing for:
-  - `gr_vulkan_calculate_irrmap` entry, framebuffer/images per cubemap face, aux pass begin/end, and submit/skip decisions.
-  - `VulkanRenderer::ensureRenderPassActive` (includes `m_scenePassRecorded` and formats), HUD blit/direct path, and command buffer reuse.
-  - `VulkanRenderer::flip` (records `m_scenePassRecorded` state) and `submitAuxiliaryCommandBuffer` (state before/after).
-  - `beginAuxiliaryRenderPass` logs framebuffer image handles and rejection reasons when scene/direct passes are active.
-- Use these logs alongside validation output to pinpoint where images stay in `VK_IMAGE_LAYOUT_UNDEFINED` or where command buffers are dropped.
-
----
 
 ## CRITICAL BUG: No geometry rendering (models invisible)
 
@@ -227,6 +110,8 @@ ctest -C Debug --output-on-failure -VV
   - Clears `m_scenePassRecorded` once consumed; direct-pass submissions also clear it.
 - `flip()` now presents the scene path whenever either `m_scenePassActive` **or** `m_scenePassRecorded` is set, so scene content is submitted even if the pass ended earlier for HUD rendering.
 - Motivation: previously `m_scenePassActive` was cleared by `gr_scene_texture_end()`, HUD drew to a fresh direct-pass command buffer, and `flip()` skipped the scene blit entirely → models never appeared.
+
+- `submitAuxiliaryCommandBuffer()` now no-ops when no auxiliary work was recorded, preserving a recorded scene command buffer instead of freeing it.
 
 ### ATTEMPT #1
 
@@ -448,6 +333,223 @@ Attempted to fix the stale state issue by resetting all pass state flags in `sub
 
 ---
 
+## FAILED ATTEMPT #7: Track recorded scene pass and reuse command buffer for HUD
+
+**Status**: FAILED (models still invisible)
+
+### Approach
+
+- Added `m_scenePassRecorded` flag set by `endScenePass()`.
+- `ensureRenderPassActive()` now detects a recorded scene, blits it to the swapchain without transitioning to present, then starts a direct pass with `loadOp = eLoad` so HUD draws over the blitted scene while reusing the same command buffer.
+- `recordBlitToSwapchain()` can skip the final present transition so the swapchain stays in color-attachment layout for the HUD direct pass.
+- `flip()` now presents whenever a scene pass was recorded (even if ended earlier) so the scene buffer is submitted.
+
+### Result
+
+- Reported as failed; scene/model visibility is still broken. Need log inspection to confirm state/layout correctness.
+
+### Notes / Suspicions (UNCONFIRMED)
+
+---
+
+## FAILED ATTEMPT #8: Forcing scene pass from direct pass inside render_model
+
+**Status**: FAILED - regression (upside-down HUD, black screen, validation errors, crash)
+
+### Changes
+- In `render_model`, when detecting `directPassActive` or missing depth, called `endDirectPass()`, reset draw state, and immediately started `beginScenePass()` to force depthful rendering.
+- Added `VulkanRenderer::endDirectPass()` to end dynamic rendering, clear formats, end and free the command buffer, and reset flags/draw state.
+
+### Outcome / Symptoms
+- HUD appeared upside down; screen turned black; mission crashed on start.
+- Logs showed `scenePassActive=1` and `directPassActive=1` on the same command buffer after forcing, indicating both passes were effectively “active.”
+- Validation errors: color attachment format mismatch (scene pipeline expects HDR `R16G16B16A16_SFLOAT` but was bound to swapchain `A2B10G10R10_UNORM`), and missing dynamic viewport/scissor state—confirming we were still using the direct-pass attachments/command buffer for scene draws.
+
+### Lesson learned
+- Do **not** try to force a scene pass while a direct pass is active on the same command buffer. You must either end the direct pass cleanly and start a fresh command buffer with proper attachments/state, or skip the draw. Mixing passes mid-command buffer leads to attachment/state mismatches and crashes.
+
+---
+
+## FAILED ATTEMPT #9: Disable depth testing
+
+**Status**: FAILED - models still invisible
+
+### Approach
+
+Temporarily disabled depth testing to rule out depth-related issues:
+
+1. Modified `VulkanPipelineManager::convertDepthMode()` to set `compareOp = vk::CompareOp::eAlways`, `depthWrite = false`, `depthTest = false` for `ZBUFFER_TYPE_FULL`/`DEFAULT` modes
+2. Added diagnostic logging to confirm depth testing was disabled
+
+### Result
+
+Models remained invisible. This rules out depth testing as the cause - vertices are either not reaching the fragment shader, or fragments are being discarded/clipped by other means.
+
+### Key observation
+
+Draw calls are being issued (`ISSUING drawIndexed` in logs), scene pass is active (`sceneActive=1`), but no pixels appear. This suggests the issue is either:
+- Vertices outside clip space (wrong matrices/viewport)
+- Fragments being discarded (alpha test, clip planes, etc.)
+- Color write mask disabled
+- Wrong render target
+
+---
+
+## FAILED ATTEMPT #10: Force fragment shader to output solid red
+
+**Status**: FAILED - models still invisible
+
+### Approach
+
+Modified `main-f.sdr` fragment shader to force output solid red (`fragOut0 = vec4(1.0, 0.0, 0.0, 1.0)`) to verify shader execution:
+
+1. Changed `fragOut0 = baseColor;` to `fragOut0 = vec4(1.0, 0.0, 0.0, 1.0);` in `main-f.sdr` line 436
+2. Commented out original color calculation
+
+### Result
+
+Models remained invisible. This confirms fragments are either:
+- Not being generated (vertices outside clip space)
+- Being discarded before fragment shader execution
+- Not being written to the framebuffer (color write mask, blend mode, etc.)
+
+### Key observation
+
+Even with forced solid red output, nothing appears. This strongly suggests vertices are not in valid clip space, or fragments are being discarded before the shader runs.
+
+---
+
+## FAILED ATTEMPT #11: Enlarge scissor to disable clipping
+
+**Status**: FAILED - models still invisible
+
+### Approach
+
+Temporarily enlarged scissor rectangle to effectively disable scissor clipping:
+
+1. Modified `setViewportAndScissor()` to set `scissor.extent.width = 99999` and `scissor.extent.height = 99999`
+2. Added diagnostic logging for scissor values
+
+### Result
+
+Models remained invisible. Scissor clipping is not the issue.
+
+---
+
+## FAILED ATTEMPT #12: Flip Y in vertex shader clip space
+
+**Status**: FAILED - models still invisible
+
+### Approach
+
+Added Y-flip in vertex shader to compensate for Vulkan's flipped clip space Y-axis:
+
+1. Modified `main-v.sdr` to add `gl_Position.y = -gl_Position.y;` after projection matrix multiplication
+2. This tests if projection matrix/clip space coordinate system is the issue
+
+### Result
+
+Models remained invisible. Clip space Y-flip is not the issue (or the problem is more complex than a simple coordinate system mismatch).
+
+### Key observation
+
+Viewport already uses negative height (`viewport.height = -extent.height`) to flip Y-axis. The additional Y-flip in clip space didn't help, suggesting the issue is not a simple coordinate system problem.
+
+---
+
+## FAILED ATTEMPT #13: Disable face culling
+
+**Status**: FAILED - models still invisible
+
+### Approach
+
+Temporarily disabled face culling to rule out culling issues:
+
+1. Modified `VulkanPipelineManager::createRasterizationState()` to force `rasterizer.cullMode = vk::CullModeFlagBits::eNone`
+2. Added diagnostic logging for culling state
+
+### Result
+
+Models remained invisible. Face culling is not the issue.
+
+### Current state after diagnostic attempts (#9-#13)
+
+After all diagnostic attempts, models are still invisible despite:
+- Draw calls being issued (`ISSUING drawIndexed` in logs)
+- Scene pass active (`sceneActive=1`, `depthFmt=126`)
+- Depth testing disabled
+- Fragment shader forced to output solid red
+- Scissor enlarged (effectively disabled)
+- Y-flip in clip space
+- Culling disabled
+
+### Next steps to investigate
+
+1. **Check color write mask**: Verify `colorWriteMask` is enabled (should be `0xF` = all channels) - ✅ **CONFIRMED**: `colorWriteMask=0000000f` (all channels enabled)
+2. **Check pipeline binding**: Verify pipelines are actually being bound before draw calls - ✅ **CONFIRMED**: Pipelines are being bound (`bindPipeline: Binding pipeline=...`)
+3. **Check blend state**: Verify blend mode isn't causing everything to be transparent - ✅ **CONFIRMED**: `blendEnable=0` (no blending)
+4. **Check vertex data**: Verify vertices are valid and in reasonable coordinate ranges
+5. **Check render target**: Verify we're rendering to the correct framebuffer attachment - ✅ **CONFIRMED**: Scene framebuffer with correct attachments
+6. **Check viewport**: Verify viewport is set correctly (currently `y=2160.0 h=-2160.0`) - ✅ **CONFIRMED**: Viewport set correctly
+
+---
+
+## FAILED ATTEMPT #14: Fix getCurrentCommandBuffer to return command buffer after endScenePass
+
+**Status**: FAILED - HUD disappeared (regression)
+
+### Approach
+
+Modified `getCurrentCommandBuffer()` to return the command buffer even after `endScenePass()` is called, as long as `m_scenePassRecorded` is true. The theory was that models trying to render after `endScenePass()` couldn't access the command buffer.
+
+**Change made**:
+```cpp
+vk::CommandBuffer VulkanRenderer::getCurrentCommandBuffer() const
+{
+	// Return the scene command buffer if we're in an active pass (scene, direct, or auxiliary)
+	// OR if a scene pass was recorded (command buffer still open for blit, models can still render)
+	if ((m_scenePassActive || m_directPassActive || m_auxiliaryPassActive || m_scenePassRecorded) && m_sceneCommandBuffer) {
+		return m_sceneCommandBuffer;
+	}
+	return nullptr;
+}
+```
+
+### Result
+
+**REGRESSION**: Most of the HUD disappeared, except for the radar in the bottom center. Models remain invisible.
+
+### Analysis
+
+The change caused HUD rendering to break because:
+1. HUD renders in a direct pass (after scene pass ends)
+2. When `m_scenePassRecorded` is true, `getCurrentCommandBuffer()` now returns the scene command buffer
+3. But HUD needs to render in a direct pass with a different rendering state
+4. The direct pass may not be starting correctly, or the wrong command buffer is being used
+
+### Key observation
+
+The original issue is NOT about command buffer access - models ARE rendering with `sceneActive=1` before `gr_scene_texture_end()` is called. The problem is something else preventing fragments from being visible.
+
+### Root cause discovery
+
+**CRITICAL FINDING**: After `endScenePass()` calls `endRendering()`, `getCurrentCommandBuffer()` returns `nullptr` because it only checks `m_scenePassActive` (which becomes false), even though `m_sceneCommandBuffer` is still valid (kept open for blit). However, changing this breaks HUD rendering.
+
+**The real issue**: Models ARE rendering with `sceneActive=1` (line 60784 in logs), draw calls ARE being issued (`ISSUING drawIndexed`), pipelines ARE being bound, color write mask IS enabled, but models remain invisible. This suggests the issue is NOT about command buffer access or pipeline state, but something else preventing fragments from being written or visible.
+
+### Next steps
+
+1. Revert the `getCurrentCommandBuffer()` change (it breaks HUD)
+2. Investigate why fragments aren't visible even though:
+   - Draw calls are issued
+   - Scene pass is active
+   - Pipelines are bound
+   - Color write mask is enabled
+3. Check if there's a synchronization issue or validation error preventing fragment writes
+4. Verify the scene framebuffer is actually being written to (maybe check with RenderDoc or similar)
+
+---
+
 ## CURRENT BUG: Everything renders red/wrong colors
 
 **Status**: UNRESOLVED
@@ -573,6 +675,28 @@ Attempted to fix the stale state issue by resetting all pass state flags in `sub
 1. Add draw call logging to verify ships issue draws
 2. Log matrix values being written to uniform buffer
 3. Check vertex buffer binding (offset/stride)
+
+---
+
+## FAILED ATTEMPT #15: Bypass MVP in `main-v.sdr`
+
+**Status**: FAILED (tested; no visible geometry)
+
+### Idea
+- Override vertex shader output to skip all UBO transforms and force clip-space coords:
+  ```glsl
+  vec3 p = vertPosition.xyz * 0.001;
+  gl_Position = vec4(p.xy, 0.5, 1.0);
+  ```
+- Goal: if triangles appear as a cloud in NDC, vertex/index data is fine and matrix/UBO path is bad.
+
+### Outcome
+- Ran with the bypassed MVP; no ships/scene appeared. HUD flickered slightly.
+- Conclusive that this quick bypass didn’t reveal geometry; matrices may still be suspect, but vertex/index data are not proven good by this test.
+- Caution: scaling/depth may still clip; test wasn’t diagnostic.
+
+### Takeaway
+- Matrix-vs-data sanity check remains unresolved; consider a more controlled passthrough (ensure within clip cube, disable depth, solid color) if needed.
 
 ---
 

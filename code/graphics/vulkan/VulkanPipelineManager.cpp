@@ -211,7 +211,8 @@ vk::Pipeline VulkanPipelineManager::getOrCreatePipeline(const PipelineKey& key)
 
 	vk::Pipeline result = pipeline.get();
 	m_pipelineCache[key] = std::move(pipeline);
-	vk_debugf("getOrCreatePipeline created pipeline=%p", static_cast<void*>(result));
+	vk_debugf("getOrCreatePipeline created pipeline=%p",
+		reinterpret_cast<void*>(static_cast<VkPipeline>(result)));
 	return result;
 }
 
@@ -833,6 +834,19 @@ void VulkanPipelineManager::createColorBlendState(const PipelineKey& key,
 			(key.colorMask.y ? vk::ColorComponentFlagBits::eG : vk::ColorComponentFlags{}) |
 			(key.colorMask.z ? vk::ColorComponentFlagBits::eB : vk::ColorComponentFlags{}) |
 			(key.colorMask.w ? vk::ColorComponentFlagBits::eA : vk::ColorComponentFlags{});
+		
+		// DIAGNOSTIC: Log color write mask to verify it's enabled
+		if (i == 0) {  // Only log for first attachment to avoid spam
+			vk_logf("VulkanPipelineManager",
+				"createColorBlendState: colorWriteMask=%08x (r=%d g=%d b=%d a=%d) blendEnable=%d mode=%d",
+				static_cast<uint32_t>(attachment.colorWriteMask),
+				key.colorMask.x ? 1 : 0,
+				key.colorMask.y ? 1 : 0,
+				key.colorMask.z ? 1 : 0,
+				key.colorMask.w ? 1 : 0,
+				attachment.blendEnable ? 1 : 0,
+				static_cast<int>(mode));
+		}
 
 		attachment.blendEnable = (mode != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
 		attachment.srcColorBlendFactor = srcColor;
@@ -1013,8 +1027,8 @@ vk::PipelineLayout VulkanPipelineManager::getOrCreateLayout(shader_type type, ui
 
 	// VALIDATION: Log descriptor set layout state for debugging
 	vk_debugf("getOrCreateLayout: uniform=%p material=%p key=%s",
-		static_cast<void*>(m_uniformDescriptorSetLayout.get()),
-		static_cast<void*>(m_materialDescriptorSetLayout.get()),
+		reinterpret_cast<void*>(static_cast<VkDescriptorSetLayout>(m_uniformDescriptorSetLayout.get())),
+		reinterpret_cast<void*>(static_cast<VkDescriptorSetLayout>(m_materialDescriptorSetLayout.get())),
 		key.c_str());
 
 	// CRITICAL: Both layouts must exist - shaders expect Set 0 = uniforms, Set 1 = materials
@@ -1036,7 +1050,8 @@ vk::PipelineLayout VulkanPipelineManager::getOrCreateLayout(shader_type type, ui
 	setLayouts.push_back(m_materialDescriptorSetLayout.get());
 
 	vk_debugf("Creating pipeline layout - Set 0=%p (uniforms), Set 1=%p (materials)",
-		static_cast<void*>(setLayouts[0]), static_cast<void*>(setLayouts[1]));
+		reinterpret_cast<void*>(static_cast<VkDescriptorSetLayout>(setLayouts[0])),
+		reinterpret_cast<void*>(static_cast<VkDescriptorSetLayout>(setLayouts[1])));
 
 	layoutInfo.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 	layoutInfo.pSetLayouts = setLayouts.data();

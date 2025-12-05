@@ -3,12 +3,18 @@ in vec4 fragTexCoord;
 
 out vec4 fragOut0;
 
-layout (set = 1, binding = 0) uniform sampler2D composite;
-layout (set = 1, binding = 1) uniform sampler2D emissive;
-layout (set = 1, binding = 2) uniform sampler2D depth;
-layout (set = 1, binding = 3) uniform sampler3D volume_tex;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D composite;
+LAYOUT_SET_BINDING(1, 1) uniform sampler2D emissive;
+LAYOUT_SET_BINDING(1, 2) uniform sampler2D depth;
+LAYOUT_SET_BINDING(1, 3) uniform sampler3D volume_tex;
 #ifdef NOISE
-layout (set = 1, binding = 4) uniform sampler3D noise_volume_tex;
+LAYOUT_SET_BINDING(1, 4) uniform sampler3D noise_volume_tex;
 #endif
 
 layout (std140) uniform genericData {

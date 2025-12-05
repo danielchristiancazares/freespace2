@@ -133,6 +133,9 @@ void setViewportAndScissor(vk::CommandBuffer cmd, vk::Extent2D extent, VulkanRen
 		viewport.height = -static_cast<float>(extent.height);
 		viewport.minDepth = 0.0f;
 		viewport.maxDepth = 1.0f;
+		vk_logf("VulkanRenderer",
+			"setViewportAndScissor: Setting viewport x=%.1f y=%.1f w=%.1f h=%.1f (negative) extent=%ux%u",
+			viewport.x, viewport.y, viewport.width, viewport.height, extent.width, extent.height);
 		cmd.setViewport(0, viewport);
 		state.viewportSet = true;
 	}
@@ -191,6 +194,10 @@ void bindPipeline(vk::CommandBuffer cmd, vk::Pipeline pipeline, VulkanRenderer::
 		return;  // Already bound
 	}
 	
+	vk_logf("VulkanRenderer",
+		"bindPipeline: Binding pipeline=%p (was %p)",
+		static_cast<void*>(pipeline),
+		static_cast<void*>(state.boundPipeline));
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 	state.boundPipeline = pipeline;
 }
@@ -526,17 +533,33 @@ void gr_vulkan_setup_frame()
 
 void gr_vulkan_scene_texture_begin()
 {
+	vk_logf("VulkanRenderer",
+		"gr_vulkan_scene_texture_begin CALLED frame=%u",
+		renderer_instance ? renderer_instance->getCurrentFrameIndex() : 0);
 	if (renderer_instance) {
 		renderer_instance->logRenderState("gr_vulkan_scene_texture_begin (before beginScenePass)");
 		renderer_instance->beginScenePass();
 		renderer_instance->logRenderState("gr_vulkan_scene_texture_begin (after beginScenePass)");
+		vk_logf("VulkanRenderer",
+			"gr_vulkan_scene_texture_begin COMPLETE sceneActive=%d cmd=%p frame=%u",
+			renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+			renderer_instance->getCurrentFrameIndex());
 	}
 }
 
 void gr_vulkan_scene_texture_end()
 {
+	vk_logf("VulkanRenderer",
+		"gr_vulkan_scene_texture_end CALLED frame=%u",
+		renderer_instance ? renderer_instance->getCurrentFrameIndex() : 0);
 	if (renderer_instance) {
 		renderer_instance->endScenePass();
+		vk_logf("VulkanRenderer",
+			"gr_vulkan_scene_texture_end COMPLETE sceneActive=%d cmd=%p frame=%u",
+			renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+			static_cast<void*>(renderer_instance->getCurrentCommandBuffer()),
+			renderer_instance->getCurrentFrameIndex());
 	}
 }
 
@@ -860,6 +883,17 @@ void gr_vulkan_render_primitives(material* material_info,
 	if (colorFormat == vk::Format::eUndefined) {
 		return;  // No active rendering
 	}
+
+	// DIAGNOSTIC: log pipeline context for invisible-model investigation
+	vk_logf("VulkanRenderer",
+		"render_primitives DIAG cmd=%p scene=%d direct=%d recorded=%d colorFmt=%d depthFmt=%d frame=%u",
+		static_cast<void*>(cmdBuffer),
+		renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+		renderer_instance->getCurrentScenePassRecorded() ? 1 : 0,
+		static_cast<int>(colorFormat),
+		static_cast<int>(depthFormat),
+		renderer_instance->getCurrentFrameIndex());
 
 	// Get or create pipeline from material and layout
 	vk::Pipeline pipeline = g_vulkanPipelineManager->getOrCreatePipeline(
@@ -1262,6 +1296,17 @@ void gr_vulkan_render_model(model_material* material_info,
 		return;
 	}
 
+	// DIAGNOSTIC: Log entry state
+	vk_logf("VulkanRenderer",
+		"render_model ENTRY: shader=%d texi=%zu sceneActive=%d directActive=%d auxActive=%d recorded=%d cmd=%p frame=%u",
+		(int)material_info->get_shader_type(),
+		texi,
+		renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+		renderer_instance->getCurrentAuxPassActive() ? 1 : 0,
+		renderer_instance->getCurrentFrameIndex(),
+		static_cast<void*>(renderer_instance->getCurrentCommandBuffer()));
+
 	// Update uniform buffers before drawing
 	gr_matrix_set_uniforms();
 	vulkan_set_generic_uniforms(material_info);
@@ -1270,6 +1315,9 @@ void gr_vulkan_render_model(model_material* material_info,
 
 	auto cmdBuffer = renderer_instance->getCurrentCommandBuffer();
 	if (!cmdBuffer) {
+		vk_logf("VulkanRenderer",
+			"render_model: NO COMMAND BUFFER after beginScenePass - aborting frame=%u",
+			renderer_instance->getCurrentFrameIndex());
 		return;
 	}
 
@@ -1283,8 +1331,18 @@ void gr_vulkan_render_model(model_material* material_info,
 	    (int)colorFormat,
 	    (int)depthFormat);
 
-	if (colorFormat == vk::Format::eUndefined) {
-		return;  // No active rendering
+	// Guard: do not draw models in direct/no-depth; skip (avoids mixing passes on one command buffer)
+	if (colorFormat == vk::Format::eUndefined || depthFormat == vk::Format::eUndefined ||
+	    renderer_instance->getCurrentDirectPassActive()) {
+		vk_logf("VulkanRenderer",
+			"render_model: SKIP DRAW - invalid render state colorFmt=%d depthFmt=%d sceneActive=%d directActive=%d cmd=%p frame=%u",
+		          (int)colorFormat,
+		          (int)depthFormat,
+		          renderer_instance->getCurrentScenePassActive() ? 1 : 0,
+		          renderer_instance->getCurrentDirectPassActive() ? 1 : 0,
+		          static_cast<void*>(cmdBuffer),
+		          renderer_instance->getCurrentFrameIndex());
+		return;  // No active rendering / depthless direct pass
 	}
 
 	// Get vertex layout from vertex_buffer
@@ -1303,16 +1361,20 @@ void gr_vulkan_render_model(model_material* material_info,
 	setViewportAndScissor(cmdBuffer, renderer_instance->getSceneExtent(), state);
 	
 	// Bind vertex and index buffers
-	vk_debugf("render_model: vbuf=%u voffset=%zu ibuf=%u ioffset=%zu stride=%zu",
+	vk_debugf("render_model: vbuf=%u voffset=%zu base_voffset=%zu ibuf=%u ioffset=%zu stride=%zu",
 	    vert_source->Vbuffer_handle.value(),
 	    vert_source->Vertex_offset,
+	    vert_source->Base_vertex_offset,
 	    vert_source->Ibuffer_handle.isValid() ? vert_source->Ibuffer_handle.value() : 0,
 	    vert_source->Index_offset,
 	    bufferp->layout.get_vertex_stride());
 	bindVertexBuffer(cmdBuffer, vert_source->Vbuffer_handle, vert_source->Vertex_offset, state);
 
 	if (vert_source->Ibuffer_handle.isValid()) {
-		bindIndexBuffer(cmdBuffer, vert_source->Ibuffer_handle, vert_source->Index_offset, vk::IndexType::eUint32, state);
+		// Select index type based on buffer flags
+		const bool large_indices = (bufferp->flags & VB_FLAG_LARGE_INDEX) != 0;
+		const auto indexType = large_indices ? vk::IndexType::eUint32 : vk::IndexType::eUint16;
+		bindIndexBuffer(cmdBuffer, vert_source->Ibuffer_handle, vert_source->Index_offset, indexType, state);
 	}
 	auto pipelineLayout = getMaterialPipelineLayout(material_info);
 	bindUniformDescriptors(cmdBuffer, pipelineLayout, state);
@@ -1321,27 +1383,47 @@ void gr_vulkan_render_model(model_material* material_info,
 	// Get texture info for this draw
 	if (texi < bufferp->tex_buf.size()) {
 		auto& texBuf = bufferp->tex_buf[texi];
-		
+
 		// Draw indexed - use index_offset for first index, vertex_num_offset for vertex offset
 		if (vert_source->Ibuffer_handle.isValid()) {
-			vk_debugf("render_model: drawIndexed n_verts=%u index_offset=%u vertex_offset=%d cmd=%p",
-				static_cast<uint32_t>(texBuf.n_verts),
-				static_cast<uint32_t>(texBuf.index_offset),
-				static_cast<int32_t>(bufferp->vertex_num_offset),
-				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)));
+			const bool large_indices = (bufferp->flags & VB_FLAG_LARGE_INDEX) != 0;
+			const size_t indexSize = large_indices ? sizeof(uint32_t) : sizeof(uint16_t);
+			uint32_t firstIndex = static_cast<uint32_t>(texBuf.index_offset / indexSize);
+			const int32_t baseVertex = static_cast<int32_t>(vert_source->Base_vertex_offset + bufferp->vertex_num_offset);
+			vk_logf("VulkanRenderer",
+				"render_model: ISSUING drawIndexed n_verts=%u firstIndex=%u baseVertex=%d cmd=%p frame=%u",
+			          static_cast<uint32_t>(texBuf.n_verts),
+			          firstIndex,
+			          baseVertex,
+			          reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
+			          renderer_instance->getCurrentFrameIndex());
+			vk_debugf("render_model: drawIndexed n_verts=%u index_offset_bytes=%u firstIndex=%u vertex_offset=%d indexSize=%zu cmd=%p",
+			          static_cast<uint32_t>(texBuf.n_verts),
+			          static_cast<uint32_t>(texBuf.index_offset),
+			          firstIndex,
+			          baseVertex,
+			          indexSize,
+			          reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)));
 			cmdBuffer.drawIndexed(static_cast<uint32_t>(texBuf.n_verts),
 			                       1,
-			                       static_cast<uint32_t>(texBuf.index_offset),
-			                       static_cast<int32_t>(bufferp->vertex_num_offset),
+			                       firstIndex,
+			                       baseVertex,
 			                       0);
 		} else {
+			const uint32_t baseVertex = static_cast<uint32_t>(vert_source->Base_vertex_offset + bufferp->vertex_num_offset);
+			vk_logf("VulkanRenderer",
+				"render_model: ISSUING draw n_verts=%u baseVertex=%u cmd=%p frame=%u",
+				static_cast<uint32_t>(texBuf.n_verts),
+				baseVertex,
+				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)),
+				renderer_instance->getCurrentFrameIndex());
 			vk_debugf("render_model: draw n_verts=%u vertex_offset=%u cmd=%p",
 				static_cast<uint32_t>(texBuf.n_verts),
-				static_cast<uint32_t>(bufferp->vertex_num_offset),
+				baseVertex,
 				reinterpret_cast<void*>(static_cast<VkCommandBuffer>(cmdBuffer)));
 			cmdBuffer.draw(static_cast<uint32_t>(texBuf.n_verts),
 			               1,
-			               static_cast<uint32_t>(bufferp->vertex_num_offset),
+			               baseVertex,
 			               0);
 		}
 	} else {

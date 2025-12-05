@@ -9,8 +9,9 @@
 
 ## Build, Test, and Development Commands
 - Configure: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug` (add `-DSCP_RELEASE_LOGGING=ON` for release logs).
-- Build: `build.ps1
-- Tests: `ctest -C Debug --output-on-failure -VV` from `build/`.
+- Build: `build.ps1`
+- Tests: `ctest -C Debug --output-on-failure -VV` from `build/`; tests are registered as a single `unittests` binary, so pass gtest args after `--` (e.g., `ctest -C Debug -R unittests -- --gtest_filter=Vulkan*`).
+- Vulkan tests: configure/build with Vulkan enabled (default) via `.\build.ps1 -Config Debug -Target unittests`, then from `build/` run `ctest -C Debug -R unittests -- --gtest_filter=Vulkan*` (PowerShell).
 
 ## Coding Style & Naming Conventions
 - C++17 with project `.clang-format`; keep existing formatting and brace style.
@@ -33,7 +34,7 @@
   - When you change the architecture or behavior of systems described there (API version, dynamic rendering, key managers, etc.).
   - When you fix a non-trivial crash/bug or discover a pitfall that future LLM sessions should avoid (add to “Crash fix” or “Mistakes to avoid” sections).
   - When you add/remove important files, tools, or workflows that should be reflected in its “File map” or “Testing & debugging” sections.
-- Do not revert user changes. Avoid destructive git commands. Prefer `rg` for search and `cmake --build` for builds. Log and test before handing off.***
+- Do not revert user changes. Avoid destructive git commands. Prefer `rg` for search and `cmake --build` for builds. Log and test before handing off.
 - When running `git show`/`git diff` in this repo, always pass `--no-pager` (or set `GIT_PAGER=cat`) so automated tooling is not blocked by the interactive pager/“spacebar to continue” prompt.
 
 # **CRITICAL - NEVER SKIP**

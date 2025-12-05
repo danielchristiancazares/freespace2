@@ -2,15 +2,23 @@
 #include "gamma.sdr" //! #include "gamma.sdr"
 #define PI 3.1415926535897932384626433832795
 
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140, set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#define LAYOUT_STD140_SET_BINDING(set_id, binding_id) layout(std140)
+#endif
+
 #if defined(VULKAN)
-layout(set = 1, binding = 4) uniform samplerCube envmap;
-layout (std140, set = 0, binding = 8) uniform genericData {
-	int face;
+LAYOUT_SET_BINDING(1, 4) uniform samplerCube envmap;
+LAYOUT_STD140_SET_BINDING(0, 8) uniform genericData {
+int face;
 };
 #else
-layout(set = 1, binding = 0) uniform samplerCube envmap;
+LAYOUT_SET_BINDING(1, 0) uniform samplerCube envmap;
 layout (std140) uniform genericData {
-	int face;
+int face;
 };
 #endif
 

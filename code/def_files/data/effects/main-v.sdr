@@ -14,6 +14,14 @@ layout(location = 5) in float vertModelID;
 
 #define MAX_LIGHTS 8
 
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#define LAYOUT_STD140_BINDING(set_id, binding_id) layout(std140, set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#define LAYOUT_STD140_BINDING(set_id, binding_id) layout(std140)
+#endif
+
 struct model_light {
 	vec4 position;
 
@@ -26,7 +34,7 @@ struct model_light {
 	float ml_sourceRadius;
 };
 
-layout (set = 0, binding = 1, std140) uniform modelData {
+LAYOUT_STD140_BINDING(0, 1) uniform modelData {
 	mat4 modelViewMatrix;
 	mat4 modelMatrix;
 	mat4 viewMatrix;
@@ -97,7 +105,7 @@ layout (set = 0, binding = 1, std140) uniform modelData {
 };
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_TRANSFORM
-layout(set = 0, binding = 9) uniform samplerBuffer transform_tex;
+LAYOUT_SET_BINDING(0, 9) uniform samplerBuffer transform_tex;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_TRANSFORM
 
 layout(location = 0) out VertexOutput {

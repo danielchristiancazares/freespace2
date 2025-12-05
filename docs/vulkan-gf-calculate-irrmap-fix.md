@@ -33,3 +33,5 @@
 
 The null `gf_calculate_irrmap` crash is **fixed** (function is now assigned). However, there is a **known timing issue**: if `gr_vulkan_calculate_irrmap()` is called while a scene/direct pass is active, `beginAuxiliaryRenderPass()` returns early without doing anything, but the function continues executing. This can corrupt render state (see FAILED ATTEMPT sections in [`CONTEXT.md`](../CONTEXT.md)). The function should ideally be called before any scene/direct pass starts, but this timing constraint is not currently enforced.
 
+
+

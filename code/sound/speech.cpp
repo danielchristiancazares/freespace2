@@ -10,6 +10,11 @@
 
 
 
+#if defined(FS2_SPEECH) && !(defined(__has_include) && __has_include(<atlbase.h>))
+// Disable speech (SAPI) if ATL headers are unavailable (sphelper.h requires atlbase.h)
+#undef FS2_SPEECH
+#endif
+
 #ifndef FS2_SPEECH
 #if defined(_WIN32) || defined(__APPLE__)
 #if NDEBUG

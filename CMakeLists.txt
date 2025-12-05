@@ -109,6 +109,10 @@ OPTION(FSO_USE_OPENALSOFT "Download and build OpenAL Soft instead of using the s
 
 OPTION(FSO_FATAL_WARNINGS "Determines if warnings in the build are considered fatal errors, primarily used for CI" OFF)
 
+if(FSO_BUILD_TESTS)
+	enable_testing()
+endif()
+
 SET(FSO_FREESPACE_PATH "${CMAKE_INSTALL_PREFIX}" CACHE FILEPATH "The path of the FreeSpace directory you want to use. Please note that you will have to change CMAKE_INSTALL_PREFIX if you change this at some point.")
 
 SET(FSO_RUN_ARGUMENTS "" CACHE STRING "Additional arguments passed to a generated executable when run with the generated build files.")

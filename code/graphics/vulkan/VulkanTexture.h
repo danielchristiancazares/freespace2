@@ -15,6 +15,10 @@
 namespace graphics {
 namespace vulkan {
 
+namespace testing {
+class VulkanTextureManagerTestAccessor;
+}
+
 // Forward declarations
 class VulkanRenderer;
 class VulkanFramebuffer;
@@ -245,6 +249,8 @@ private:
  * - Non-blocking batched uploads (per-frame command buffer batching)
  */
 class VulkanTextureManager {
+	friend class testing::VulkanTextureManagerTestAccessor;
+
 public:
 	VulkanTextureManager() = default;
 	~VulkanTextureManager() { shutdown(); }

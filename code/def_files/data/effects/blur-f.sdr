@@ -2,7 +2,13 @@ out vec4 fragOut0;
 
 in vec4 fragTexCoord;
 
-layout(set = 1, binding = 0) uniform sampler2D tex;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D tex;
 
 const float TapSize = 1.0;
 

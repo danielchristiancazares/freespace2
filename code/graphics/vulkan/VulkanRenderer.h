@@ -21,6 +21,11 @@
 namespace graphics {
 namespace vulkan {
 
+namespace testing {
+class RendererReadbackHelper;
+class RendererStateAccessor;
+}
+
 struct QueueIndex {
 	// Poor mans std::optional
 	bool initialized = false;
@@ -67,7 +72,6 @@ class VulkanRenderer {
 		vk::DeviceSize boundIndexOffset = 0;
 		bool viewportSet = false;
 		bool scissorSet = false;
-		vk::Extent2D lastExtent = vk::Extent2D{0, 0};  // Track last extent to detect changes
 		
 		void reset() {
 			boundPipeline = nullptr;
@@ -78,7 +82,6 @@ class VulkanRenderer {
 			boundIndexOffset = 0;
 			viewportSet = false;
 			scissorSet = false;
-			lastExtent = vk::Extent2D{0, 0};
 		}
 	};
 
@@ -93,6 +96,7 @@ class VulkanRenderer {
 	// Scene pass control - called from gr_screen hooks
 	void beginScenePass();
 	void endScenePass();
+	void endDirectPass();  // Abort/finish direct pass recording without presenting
 
 	/**
 	 * @brief Begin an auxiliary render pass for off-screen rendering (e.g., cubemap faces)
@@ -105,7 +109,6 @@ class VulkanRenderer {
 	 * @param framebuffer The framebuffer to render to
 	 * @param extent The extent of the render area
 	 * @param clearColor Whether to clear the color attachment (default true)
-	 * @return true if auxiliary pass was started successfully, false if it was skipped (e.g., scene/direct pass active)
 	 */
 	bool beginAuxiliaryRenderPass(vk::RenderPass renderPass, VulkanFramebuffer* framebuffer,
 	                              vk::Extent2D extent, bool clearColor = true);
@@ -166,6 +169,7 @@ class VulkanRenderer {
 	bool getCurrentScenePassActive() const { return m_scenePassActive; }
 	bool getCurrentDirectPassActive() const { return m_directPassActive; }
 	bool getCurrentAuxPassActive() const { return m_auxiliaryPassActive; }
+	bool getCurrentScenePassRecorded() const { return m_scenePassRecorded; }
 	uint32_t getCurrentFrameIndex() const { return m_currentFrame; }
 	void logRenderState(const char* reason = nullptr) const;
 
@@ -361,10 +365,11 @@ class VulkanRenderer {
 
 	// Scene pass state
 	bool m_scenePassActive = false;
+	bool m_scenePassRecorded = false; // tracks if scene command buffer has recorded content
+	bool m_sceneColorInShaderReadLayout = false; // track if scene color image is in shader-read layout
 	bool m_directPassActive = false;  // Direct-to-swapchain pass (for menus)
 	bool m_auxiliaryPassActive = false;  // Auxiliary render pass (for off-screen rendering like cubemap faces)
-	bool m_scenePassRecorded = false; // Scene pass ended and needs to be blitted/presented
-	bool m_sceneColorInShaderReadLayout = false;  // Track scene color image layout across frames (DIAGNOSTIC)
+	bool m_auxiliaryCommandsRecorded = false; // Track if any auxiliary commands were recorded on the current command buffer
 	vk::CommandBuffer m_sceneCommandBuffer;  // Allocated per-frame for scene rendering
 	DrawState m_drawState;
 	vk::Extent2D m_sceneExtent = {0, 0};
@@ -382,6 +387,10 @@ class VulkanRenderer {
 	vk::UniquePipeline m_blitPipeline;
 	vk::UniqueDescriptorSetLayout m_blitDescriptorSetLayout;
 	vk::UniqueSampler m_blitSampler;
+
+	// Test-only utilities
+	friend class testing::RendererReadbackHelper;
+	friend class testing::RendererStateAccessor;
 
 	bool createBlitPipeline();
 	void recordBlitToSwapchain(vk::CommandBuffer cmdBuffer, bool transitionToPresent = true);

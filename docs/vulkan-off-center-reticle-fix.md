@@ -46,3 +46,5 @@ Failed approaches before finding root cause:
 
 The key insight was tracing the log to find `gr_set_viewport(0, 2048, 131, 112)` being called mid-frame, which corrupted the projection state used by HUD calculations.
 
+
+

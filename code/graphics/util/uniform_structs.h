@@ -58,18 +58,43 @@ struct deferred_light_data {
 	float pad0[1]; // Struct size must be 16-bytes aligned because we use vec3s
 };
 
+// std140-safe 3-component vector for uniform buffers (16-byte aligned, 16 bytes in size)
+struct alignas(16) std140_vec3 {
+	float x, y, z, _pad;
+
+	std140_vec3() = default;
+	explicit std140_vec3(const vec3d& v) : x(v.xyz.x), y(v.xyz.y), z(v.xyz.z), _pad(0.0f) {}
+
+	std140_vec3& operator=(const vec3d& v) {
+		x = v.xyz.x;
+		y = v.xyz.y;
+		z = v.xyz.z;
+		return *this;
+	}
+
+	operator vec3d() const {
+		vec3d v;
+		v.xyz.x = x;
+		v.xyz.y = y;
+		v.xyz.z = z;
+		return v;
+	}
+};
+static_assert(sizeof(std140_vec3) == 16, "std140_vec3 must be 16 bytes");
+
 struct model_light {
 	vec4 position;
 
-	vec3d diffuse_color;
+	std140_vec3 diffuse_color;
 	int light_type;
 
-	vec3d direction;
+	std140_vec3 direction;
 	float attenuation;
 
 	float ml_sourceRadius;
-	float pad0[3]; 
+	float _pad[2]; // pad to 80-byte std140 struct size
 };
+static_assert(sizeof(model_light) == 80, "model_light must match std140 size (80 bytes)");
 
 const size_t MAX_UNIFORM_LIGHTS = 8;
 
@@ -98,13 +123,13 @@ struct model_uniform_data {
 	int n_lights;
 	float defaultGloss;
 
-	vec3d ambientFactor;
+	std140_vec3 ambientFactor;
 	int desaturate;
 
-	vec3d diffuseFactor;
+	std140_vec3 diffuseFactor;
 	int blend_alpha;
 
-	vec3d emissionFactor;
+	std140_vec3 emissionFactor;
 	int alphaGloss;
 
 	int gammaSpec;
@@ -114,10 +139,10 @@ struct model_uniform_data {
 
 	vec4 fogColor;
 
-	vec3d base_color;
+	std140_vec3 base_color;
 	float anim_timer;
 
-	vec3d stripe_color;
+	std140_vec3 stripe_color;
 	float vpwidth;
 
 	float vpheight;

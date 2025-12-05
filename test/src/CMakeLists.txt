@@ -20,3 +20,6 @@ target_compile_definitions(unittests PRIVATE "TEST_DATA_PATH=\"${TEST_DATA_PATH}
 
 INCLUDE(util)
 COPY_FILES_TO_TARGET(unittests)
+
+# Register with CTest so filters like --tests-regex work
+add_test(NAME unittests COMMAND unittests)

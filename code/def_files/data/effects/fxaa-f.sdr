@@ -487,7 +487,13 @@ FxaaFloat4 FxaaPixelShader(
 		return FxaaFloat4(FxaaTexTop(tex, posM).xyz, lumaM);
 	#endif
 }
-layout(set = 1, binding = 0) uniform sampler2D tex0;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D tex0;
 in vec2 v_rcpFrame;
 noperspective in vec2 v_pos;
 out vec4 fragOut0;

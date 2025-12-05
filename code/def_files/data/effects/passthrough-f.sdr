@@ -5,7 +5,13 @@ in vec4 fragTexCoord;
 in vec4 fragColor;
 out vec4 fragOut0;
 
-layout(set = 1, binding = 0) uniform sampler2D baseMap;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
+
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D baseMap;
 
 layout (std140) uniform genericData {
 	int noTexturing;

@@ -16,12 +16,18 @@ flat in float normal_angle_cutoff;
 flat in float angle_fade_start;
 flat in float alpha_scale;
 
-layout(set = 1, binding = 0) uniform sampler2D gDepthBuffer;
-layout(set = 1, binding = 1) uniform sampler2D gNormalBuffer;
+#ifdef VULKAN
+#define LAYOUT_SET_BINDING(set_id, binding_id) layout(set = set_id, binding = binding_id)
+#else
+#define LAYOUT_SET_BINDING(set_id, binding_id)
+#endif
 
-layout(set = 1, binding = 2) uniform sampler2DArray diffuseMap;
-layout(set = 1, binding = 3) uniform sampler2DArray glowMap;
-layout(set = 1, binding = 4) uniform sampler2DArray normalMap;
+LAYOUT_SET_BINDING(1, 0) uniform sampler2D gDepthBuffer;
+LAYOUT_SET_BINDING(1, 1) uniform sampler2D gNormalBuffer;
+
+LAYOUT_SET_BINDING(1, 2) uniform sampler2DArray diffuseMap;
+LAYOUT_SET_BINDING(1, 3) uniform sampler2DArray glowMap;
+LAYOUT_SET_BINDING(1, 4) uniform sampler2DArray normalMap;
 
 layout (std140) uniform decalGlobalData {
 	mat4 viewMatrix;

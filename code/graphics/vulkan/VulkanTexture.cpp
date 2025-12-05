@@ -1204,7 +1204,9 @@ void* VulkanTextureManager::allocateStagingMemory(vk::DeviceSize size, vk::Devic
 
 uint32_t VulkanTextureManager::calculateMipLevelsStatic(uint32_t width, uint32_t height)
 {
-	return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+	// Guard against zero to avoid log2(0) UB; a 1x1 texture still has a single mip.
+	const uint32_t clamped = std::max<uint32_t>(1, std::max(width, height));
+	return static_cast<uint32_t>(std::floor(std::log2(clamped))) + 1;
 }
 
 size_t VulkanTextureManager::calculateMipSizeStatic(uint32_t width, uint32_t height, vk::Format format)
