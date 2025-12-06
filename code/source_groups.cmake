@@ -573,12 +573,32 @@ if (FSO_BUILD_WITH_VULKAN)
 	add_file_folder("Graphics\\\\Vulkan"
 		graphics/vulkan/gr_vulkan.cpp
 		graphics/vulkan/gr_vulkan.h
-		graphics/vulkan/RenderFrame.cpp
-		graphics/vulkan/RenderFrame.h
-		graphics/vulkan/vulkan_stubs.cpp
-		graphics/vulkan/vulkan_stubs.h
-		graphics/vulkan/VulkanRenderer.cpp
-		graphics/vulkan/VulkanRenderer.h
+		graphics/vulkan/VulkanFrame.cpp
+		graphics/vulkan/VulkanFrame.h
+		graphics/vulkan/FrameLifecycleTracker.cpp
+		graphics/vulkan/FrameLifecycleTracker.h
+		graphics/vulkan/VulkanDescriptorLayouts.cpp
+	graphics/vulkan/VulkanDescriptorLayouts.h
+	graphics/vulkan/VulkanLayoutContracts.cpp
+	graphics/vulkan/VulkanLayoutContracts.h
+	graphics/vulkan/VulkanRingBuffer.cpp
+	graphics/vulkan/VulkanRingBuffer.h
+	graphics/vulkan/VulkanDebug.cpp
+	graphics/vulkan/VulkanDebug.h
+	graphics/vulkan/VulkanPipelineManager.cpp
+	graphics/vulkan/VulkanPipelineManager.h
+graphics/vulkan/VulkanShaderManager.cpp
+graphics/vulkan/VulkanShaderManager.h
+graphics/vulkan/VulkanBufferManager.cpp
+	graphics/vulkan/VulkanBufferManager.h
+	graphics/vulkan/VulkanModelValidation.cpp
+	graphics/vulkan/VulkanModelValidation.h
+	graphics/vulkan/VulkanRenderer.cpp
+	graphics/vulkan/VulkanRenderer.h
+	graphics/vulkan/VulkanTextureManager.cpp
+	graphics/vulkan/VulkanTextureManager.h
+	graphics/vulkan/VulkanShaderReflection.cpp
+		graphics/vulkan/VulkanShaderReflection.h
 	)
 endif()
 
