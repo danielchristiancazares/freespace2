@@ -78,15 +78,16 @@ UniformBufferManager::~UniformBufferManager()
 	}
 
 	for (auto& buffer : _retired_buffers) {
-		gr_sync_delete(std::get<0>(buffer));
-		gr_delete_buffer(std::get<1>(buffer));
-		// The shadow buffer pointer will be deleted automatically
+		gr_delete_buffer(buffer.handle);
+		// Shadow buffer pointer will be deleted automatically when vector is cleared
 	}
 	_retired_buffers.clear();
 }
 void UniformBufferManager::onFrameEnd()
 {
 	GR_DEBUG_SCOPE("Performing uniform frame end operations");
+
+	++_currentFrame;
 
 	if (_segment_offset > _segment_size) {
 		// We needed more data than what is available in the segment
@@ -118,18 +119,16 @@ void UniformBufferManager::onFrameEnd()
 		}
 	}
 
-	while (!_retired_buffers.empty()) {
-		if (gr_sync_wait(std::get<0>(_retired_buffers.front()), 0)) {
-			// Fence was signaled => buffer is not in use anymore
-			// Delete the sync object since we don't need it anymore
-			gr_sync_delete(std::get<0>(_retired_buffers.front()));
-			gr_delete_buffer(std::get<1>(_retired_buffers.front()));
-
-			// This will automatically clean up the shadow buffer pointer
-			_retired_buffers.erase(_retired_buffers.begin());
+	// Delete retired buffers that are old enough (frame-counting approach)
+	// This works for both OpenGL and Vulkan (gr_sync_fence is a no-op stub for Vulkan)
+	auto it = _retired_buffers.begin();
+	while (it != _retired_buffers.end()) {
+		if (_currentFrame - it->retiredAtFrame >= FRAMES_BEFORE_DELETE) {
+			gr_delete_buffer(it->handle);
+			// Shadow buffer is automatically cleaned up when the unique_ptr is destroyed
+			it = _retired_buffers.erase(it);
 		} else {
-			// The first fence element was not signaled yet so all the other fences also haven't been signaled yet
-			break;
+			++it;
 		}
 	}
 }
@@ -169,8 +168,9 @@ UniformBuffer UniformBufferManager::getUniformBuffer(uniform_block_type type, si
 void UniformBufferManager::changeSegmentSize(size_t new_size)
 {
 	if (_active_uniform_buffer.isValid()) {
-		// Retire the old buffer first
-		_retired_buffers.emplace_back(gr_sync_fence(), _active_uniform_buffer, std::move(_shadow_uniform_buffer));
+		// Retire the old buffer using frame counting instead of gr_sync_fence
+		// (gr_sync_fence is a no-op stub for Vulkan, causing premature buffer deletion)
+		_retired_buffers.push_back({_active_uniform_buffer, std::move(_shadow_uniform_buffer), _currentFrame});
 	}
 
 	// The current fences are meaningless now so we need to delete them
@@ -182,13 +182,18 @@ void UniformBufferManager::changeSegmentSize(size_t new_size)
 	}
 
 	_active_buffer_size = new_size * NUM_SEGMENTS;
-	_shadow_uniform_buffer.reset(new uint8_t[_active_buffer_size]);
+	_shadow_uniform_buffer.reset(new uint8_t[_active_buffer_size]());
 	_active_uniform_buffer = gr_create_buffer(
 	    BufferType::Uniform, _use_persistent_mapping ? BufferUsageHint::PersistentMapping : BufferUsageHint::Dynamic);
 
-	gr_update_buffer_data(_active_uniform_buffer, _active_buffer_size, nullptr);
 	if (_use_persistent_mapping) {
+		// Persistently mapped buffers cannot be resized after creation; allocate storage once.
+		gr_update_buffer_data(_active_uniform_buffer, _active_buffer_size, nullptr);
 		_buffer_ptr = gr_map_buffer(_active_uniform_buffer);
+	} else {
+		// Dynamic path can freely resize and upload an initial zeroed buffer.
+		gr_resize_buffer(_active_uniform_buffer, _active_buffer_size);
+		gr_update_buffer_data(_active_uniform_buffer, _active_buffer_size, _shadow_uniform_buffer.get());
 	}
 
 	_active_segment = 0;

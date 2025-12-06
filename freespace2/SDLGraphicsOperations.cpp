@@ -154,13 +154,14 @@ SDLGraphicsOperations::SDLGraphicsOperations() {
 	}
 }
 SDLGraphicsOperations::~SDLGraphicsOperations() {
-	SDL_QuitSubSystem(SDL_INIT_VIDEO);
-	
-	ImGui_ImplSDL2_Shutdown();
-
+	// Shut down ImGui backends BEFORE SDL video subsystem
+	// Only shut down backends that were initialized (OpenGL path only)
 	if (!Cmdline_vulkan) {
 		ImGui_ImplOpenGL3_Shutdown();
+		ImGui_ImplSDL2_Shutdown();
 	}
+
+	SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 std::unique_ptr<os::Viewport> SDLGraphicsOperations::createViewport(const os::ViewPortProperties& props)
 {

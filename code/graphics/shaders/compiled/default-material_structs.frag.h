@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstdint>
-#include <array>
 
 struct genericData_default_material_frag {
 	SPIRV_FLOAT_MAT_4x4 modelMatrix;
