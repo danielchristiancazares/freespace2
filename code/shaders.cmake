@@ -3,17 +3,40 @@ set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/graphics/shaders")
 # This is the legacy location of shader code. To avoid duplicating included files, this is added as an include directory
 set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 
-set(SHADERS
-	${SHADER_DIR}/default-material.frag
-	${SHADER_DIR}/default-material.vert
+set(VULKAN_SHADERS
 	${SHADER_DIR}/vulkan.frag
 	${SHADER_DIR}/vulkan.vert
 )
+
+set(SHADERS
+	${SHADER_DIR}/default-material.frag
+	${SHADER_DIR}/default-material.vert
+)
+
+if (FSO_BUILD_WITH_VULKAN)
+	list(APPEND SHADERS ${VULKAN_SHADERS})
+endif()
 
 target_sources(code PRIVATE ${SHADERS})
 source_group("Graphics\\Shaders" FILES ${SHADERS})
 
 set(_structHeaderList)
+
+# Vulkan-only shaders can use latest Vulkan features
+set(GLSLC_TARGET_ENV_VULKAN "vulkan1.4")
+# Cross-backend shaders need vulkan1.2 to avoid features that can't be translated to OpenGL
+# (e.g., vulkan1.3+ converts discard to OpDemoteToHelperInvocation which has no OpenGL equivalent)
+set(GLSLC_TARGET_ENV_COMPAT "vulkan1.2")
+
+set(GLSLC_COMMON_FLAGS
+	-O
+	-g
+	"-I${SHADER_DIR}"
+	"-I${LEGACY_SHADER_DIR}"
+	-Werror
+	-x
+	glsl
+)
 
 foreach (_shader ${SHADERS})
 	if ("${_shader}" MATCHES "\\.glsl$")
@@ -36,6 +59,14 @@ foreach (_shader ${SHADERS})
 		set(_depFile "${_depFileDir}/${_fileName}.spv.d")
 		file(RELATIVE_PATH _relativeSpirvPath "${CMAKE_BINARY_DIR}" "${_spirvFile}")
 
+		set(_glslc_defines)
+		if (_shader IN_LIST VULKAN_SHADERS)
+			list(APPEND _glslc_defines "-DFSO_VULKAN=1")
+			set(_glslc_target_env "${GLSLC_TARGET_ENV_VULKAN}")
+		else()
+			set(_glslc_target_env "${GLSLC_TARGET_ENV_COMPAT}")
+		endif()
+
 		set(DEPFILE_PARAM)
 		if (CMAKE_GENERATOR STREQUAL "Ninja")
 			set(DEPFILE_PARAM DEPFILE "${_depFile}")
@@ -43,10 +74,10 @@ foreach (_shader ${SHADERS})
 
 		add_custom_command(OUTPUT "${_spirvFile}"
 			COMMAND ${CMAKE_COMMAND} -E make_directory "${_depFileDir}"
-			COMMAND glslc "${_shader}" -o "${_spirvFile}" --target-env=vulkan1.0 -O -g "-I${SHADER_DIR}"
-				"-I${LEGACY_SHADER_DIR}" -MD -MF "${_depFile}" -MT "${_relativeSpirvPath}" -Werror -x glsl
-			MAIN_DEPENDENCY "${shader}"
-			COMMENT "Compiling shader ${_fileName}"
+			COMMAND glslc "${_shader}" -o "${_spirvFile}" --target-env=${_glslc_target_env} ${GLSLC_COMMON_FLAGS} ${_glslc_defines}
+				-MD -MF "${_depFile}" -MT "${_relativeSpirvPath}"
+			MAIN_DEPENDENCY "${_shader}"
+			COMMENT "Compiling shader ${_fileName} (${_glslc_target_env})"
 			${DEPFILE_PARAM}
 			)
 
@@ -57,14 +88,30 @@ foreach (_shader ${SHADERS})
 
 		list(APPEND _structHeaderList "${_structOutput}")
 
-		add_custom_command(OUTPUT "${_glslOutput}" "${_structOutput}"
-			COMMAND shadertool --glsl "--glsl-output=${_glslOutput}" --structs "--structs-output=${_structOutput}" ${_spirvFile}
-			MAIN_DEPENDENCY "${_spirvFile}"
-			COMMENT "Processing shader ${_spirvFile}"
-			)
+		# Vulkan-only shaders: generate struct headers but skip GLSL output
+		# (Vulkan-specific features like demote_to_helper_invocation can't be translated to OpenGL GLSL)
+		if (_shader IN_LIST VULKAN_SHADERS)
+			add_custom_command(OUTPUT "${_structOutput}"
+				COMMAND shadertool --structs "--structs-output=${_structOutput}" "${_spirvFile}"
+				MAIN_DEPENDENCY "${_spirvFile}"
+				COMMENT "Processing Vulkan shader ${_spirvFile} (structs only)"
+				)
+		else()
+			add_custom_command(OUTPUT "${_glslOutput}" "${_structOutput}"
+				COMMAND shadertool --glsl "--glsl-output=${_glslOutput}" --structs "--structs-output=${_structOutput}" "${_spirvFile}"
+				MAIN_DEPENDENCY "${_spirvFile}"
+				COMMENT "Processing shader ${_spirvFile}"
+				)
 
-		target_embed_files(code FILES "${_glslOutput}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
+			target_embed_files(code FILES "${_glslOutput}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
+		endif()
 	else()
+		# Validate pre-compiled shader exists when shader compilation is disabled
+		if (NOT EXISTS "${_spirvFile}")
+			message(WARNING "Pre-compiled shader '${_spirvFile}' not found and shader compilation is disabled. "
+				"Enable SHADERS_ENABLE_COMPILATION and install glslc, or ensure pre-compiled shaders are present.")
+		endif()
+
 		target_embed_files(code FILES "${_spirvFile}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
 
 		set(_glslOutput "${_spirvFile}.glsl")
@@ -72,7 +119,10 @@ foreach (_shader ${SHADERS})
 
 		list(APPEND _structHeaderList "${_structOutput}")
 
-		target_embed_files(code FILES "${_glslOutput}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
+		# Vulkan-only shaders don't have GLSL output
+		if (NOT _shader IN_LIST VULKAN_SHADERS)
+			target_embed_files(code FILES "${_glslOutput}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
+		endif()
 	endif()
 endforeach ()
 
