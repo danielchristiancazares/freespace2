@@ -183,6 +183,16 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release" AND FSO_USE_LTO AND LTO_AVAILABLE)
 	set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif (CMAKE_BUILD_TYPE STREQUAL "Release" AND FSO_USE_LTO AND LTO_AVAILABLE)
 
+# Early Vulkan detection - must happen before lib targets are configured
+# (imgui needs Vulkan_FOUND to be set when it processes its Vulkan backend)
+if (FSO_BUILD_WITH_VULKAN)
+	find_package(Vulkan)
+	if (NOT Vulkan_FOUND)
+		message(WARNING "FSO_BUILD_WITH_VULKAN was set, but the Vulkan package was unable to be found. Forcing OFF.")
+		set(FSO_BUILD_WITH_VULKAN OFF CACHE BOOL "Enable compilation of the Vulkan renderer" FORCE)
+	endif()
+endif()
+
 # This includes source code for some tools, either used in the build or also for something else
 ADD_SUBDIRECTORY(tools)
 

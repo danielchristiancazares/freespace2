@@ -23,7 +23,7 @@ namespace {
 #if SDL_SUPPORTS_VULKAN
 const char* EngineName = "FreeSpaceOpen";
 
-const gameversion::version MinVulkanVersion(1, 1, 0, 0);
+const gameversion::version MinVulkanVersion(1, 4, 0, 0);
 
 VkBool32 VKAPI_PTR debugReportCallback(
 #if VK_HEADER_VERSION >= 304
@@ -135,6 +135,17 @@ bool isDeviceUnsuitable(PhysicalDeviceValues& values, const vk::UniqueSurfaceKHR
 		mprintf(("Rejecting %s (%d) because the device swap chain was not compatible.\n",
 			values.properties.deviceName.data(),
 			values.properties.deviceID));
+		return true;
+	}
+
+	if (values.properties.apiVersion < VK_API_VERSION_1_4) {
+		mprintf(("Rejecting %s (%d) because device Vulkan version %d.%d.%d is below required %s.\n",
+			values.properties.deviceName.data(),
+			values.properties.deviceID,
+			VK_VERSION_MAJOR(values.properties.apiVersion),
+			VK_VERSION_MINOR(values.properties.apiVersion),
+			VK_VERSION_PATCH(values.properties.apiVersion),
+			gameversion::format_version(MinVulkanVersion).c_str()));
 		return true;
 	}
 
@@ -407,7 +418,7 @@ bool VulkanRenderer::initializeInstance()
 		}
 	}
 
-	vk::ApplicationInfo appInfo(Window_title.c_str(), 1, EngineName, 1, VK_API_VERSION_1_1);
+	vk::ApplicationInfo appInfo(Window_title.c_str(), 1, EngineName, 1, VK_API_VERSION_1_4);
 
 	// Now we can make the Vulkan instance
 	vk::InstanceCreateInfo createInfo(vk::Flags<vk::InstanceCreateFlagBits>(), &appInfo);

@@ -1,5 +1,9 @@
 
-find_program(GLSLC_PATH glslc)
+find_program(GLSLC_PATH glslc
+	HINTS
+		"$ENV{VULKAN_SDK}/Bin"
+		"$ENV{VULKAN_SDK}/bin"
+)
 
 # Add an option for this so that this can be disabled locally when not needed
 option(SHADERS_ENABLE_COMPILATION "Enable compilation of shaders to SPIR-V" OFF)

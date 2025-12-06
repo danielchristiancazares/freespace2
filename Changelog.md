@@ -3,6 +3,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+- Vulkan renderer now targets Vulkan 1.4 API baseline
+- Shader compilation distinguishes Vulkan-only vs cross-backend shaders
+  - Vulkan-only shaders compile to vulkan1.4 target and skip GLSL generation
+  - Cross-backend shaders compile to vulkan1.2 for OpenGL GLSL compatibility
+- `FSO_VULKAN` preprocessor define available in Vulkan-only shaders
+- Warning when pre-compiled shaders are missing and shader compilation is disabled
+- Windows build helper script (`build.ps1`)
+
+### Changed
+- Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
+- Early Vulkan SDK detection in CMake before library targets are configured
+- imgui Vulkan backend uses `Vulkan_FOUND` guard instead of implicit require
+- glslc detection now searches `VULKAN_SDK` environment variable paths
+
+### Fixed
+- imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
+- Shader cmake dependency variable name (`_shader` not `shader`)
+
 ## [23.2.0] - 2023-06-16
 ### Changes
 
