@@ -25,6 +25,9 @@ struct PhysicalDeviceValues {
 	vk::PhysicalDevice device;
 	vk::PhysicalDeviceProperties properties;
 	vk::PhysicalDeviceFeatures features;
+	vk::PhysicalDeviceVulkan13Features features13{};
+	vk::PhysicalDeviceVulkan14Features features14{};
+	vk::PhysicalDevicePushDescriptorPropertiesKHR pushDescriptorProps{};
 
 	std::vector<vk::ExtensionProperties> extensions;
 
@@ -82,11 +85,13 @@ class VulkanRenderer {
 	std::unique_ptr<os::GraphicsOperations> m_graphicsOps;
 
 	vk::UniqueInstance m_vkInstance;
-	vk::UniqueDebugReportCallbackEXT m_debugReport;
+	vk::UniqueDebugUtilsMessengerEXT m_debugMessenger;
 
 	vk::UniqueSurfaceKHR m_vkSurface;
 
+	vk::PhysicalDevice m_physicalDevice;
 	vk::UniqueDevice m_device;
+	vk::UniquePipelineCache m_pipelineCache;
 
 	vk::Queue m_graphicsQueue;
 	vk::Queue m_transferQueue;
@@ -110,10 +115,6 @@ class VulkanRenderer {
 	std::array<std::unique_ptr<RenderFrame>, MAX_FRAMES_IN_FLIGHT> m_frames;
 
 	vk::UniqueCommandPool m_graphicsCommandPool;
-
-#if SDL_SUPPORTS_VULKAN
-	bool m_debugReportEnabled = false;
-#endif
 };
 
 } // namespace vulkan

@@ -13,12 +13,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `FSO_VULKAN` preprocessor define available in Vulkan-only shaders
 - Warning when pre-compiled shaders are missing and shader compilation is disabled
 - Windows build helper script (`build.ps1`)
+- Shader compilation controls: `SHADER_FORCE_PREBUILT` (force prebuilts), `SHADER_DEBUG_INFO` (gate `-g`)
+- Required Vulkan 1.4 device extensions: `VK_KHR_push_descriptor`, `VK_KHR_maintenance5`
+- Optional device extensions support: `VK_KHR_maintenance6`, `VK_EXT_extended_dynamic_state3`, `VK_EXT_dynamic_rendering_local_read`
+- Portability enumeration extension (`VK_KHR_portability_enumeration`) support for better cross-platform compatibility
 
 ### Changed
 - Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
 - Early Vulkan SDK detection in CMake before library targets are configured
 - imgui Vulkan backend uses `Vulkan_FOUND` guard instead of implicit require
 - glslc detection now searches `VULKAN_SDK` environment variable paths
+- Shader compilation outputs go to build tree (`generated_shaders`) when enabled; prebuilts used otherwise with hard validation
+- glslc/shadertool checks now fail fast without silent fallback; Vulkan shaders target 1.4, compat shaders target 1.2
+- Removed unused Vulkan GLSL prebuilts (`vulkan.*.spv.glsl`)
+- Modernized Vulkan debug infrastructure: replaced `VK_EXT_debug_report` with `VK_EXT_debug_utils` for better error reporting
+- Switched validation layer from `VK_LAYER_LUNARG_core_validation` to `VK_LAYER_KHRONOS_validation` (modern standard)
 
 ### Fixed
 - imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)

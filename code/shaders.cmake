@@ -38,6 +38,21 @@ set(GLSLC_COMMON_FLAGS
 	glsl
 )
 
+# Decide where to place outputs
+set(_prebuiltShaderDir "${SHADER_DIR}/compiled")
+set(_shaderOutputDir "${_prebuiltShaderDir}")
+set(_useBuildOutputs FALSE)
+if (SHADERS_ENABLE_COMPILATION AND NOT SHADER_FORCE_PREBUILT AND TARGET glslc)
+	set(_shaderOutputDir "${CMAKE_BINARY_DIR}/generated_shaders")
+	set(_useBuildOutputs TRUE)
+endif()
+
+# Include dependencies: glob and re-run configure when includes change (requires CMake 3.12+)
+file(GLOB CONFIGURE_DEPENDS _shader_include_deps
+	"${SHADER_DIR}/*.glsl"
+	"${LEGACY_SHADER_DIR}/*.glsl"
+)
+
 foreach (_shader ${SHADERS})
 	if ("${_shader}" MATCHES "\\.glsl$")
 		# Ignore include files since they will only be used but not compiled
@@ -46,15 +61,12 @@ foreach (_shader ${SHADERS})
 
 	get_filename_component(_fileName "${_shader}" NAME)
 
-	# We write the compiled/generated shader files to the source directory so that they can be included in the VCS
-	# This way, it is not necessary to have the tools for compiling shaders when doing non-shader related work
-	set(_shaderOutputDir "${CMAKE_CURRENT_SOURCE_DIR}/graphics/shaders/compiled")
 	set(_spirvFile "${_shaderOutputDir}/${_fileName}.spv")
 
 	get_filename_component(_baseShaderName "${_shader}" NAME_WE)
 	get_filename_component(_shaderExt "${_shader}" EXT)
 
-	if (TARGET glslc)
+	if (_useBuildOutputs)
 		set(_depFileDir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 		set(_depFile "${_depFileDir}/${_fileName}.spv.d")
 		file(RELATIVE_PATH _relativeSpirvPath "${CMAKE_BINARY_DIR}" "${_spirvFile}")
@@ -77,6 +89,7 @@ foreach (_shader ${SHADERS})
 			COMMAND glslc "${_shader}" -o "${_spirvFile}" --target-env=${_glslc_target_env} ${GLSLC_COMMON_FLAGS} ${_glslc_defines}
 				-MD -MF "${_depFile}" -MT "${_relativeSpirvPath}"
 			MAIN_DEPENDENCY "${_shader}"
+			DEPENDS ${_shader_include_deps}
 			COMMENT "Compiling shader ${_fileName} (${_glslc_target_env})"
 			${DEPFILE_PARAM}
 			)
@@ -106,10 +119,9 @@ foreach (_shader ${SHADERS})
 			target_embed_files(code FILES "${_glslOutput}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
 		endif()
 	else()
-		# Validate pre-compiled shader exists when shader compilation is disabled
+		# Validate pre-compiled shader exists when shader compilation is disabled or forced-prebuilt
 		if (NOT EXISTS "${_spirvFile}")
-			message(WARNING "Pre-compiled shader '${_spirvFile}' not found and shader compilation is disabled. "
-				"Enable SHADERS_ENABLE_COMPILATION and install glslc, or ensure pre-compiled shaders are present.")
+			message(FATAL_ERROR "Pre-compiled shader '${_spirvFile}' not found. Enable SHADERS_ENABLE_COMPILATION (and disable SHADER_FORCE_PREBUILT) to regenerate, or restore prebuilts.")
 		endif()
 
 		target_embed_files(code FILES "${_spirvFile}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
@@ -117,10 +129,16 @@ foreach (_shader ${SHADERS})
 		set(_glslOutput "${_spirvFile}.glsl")
 		set(_structOutput "${_shaderOutputDir}/${_baseShaderName}_structs${_shaderExt}.h")
 
+		if (NOT EXISTS "${_structOutput}")
+			message(FATAL_ERROR "Pre-compiled shader struct header '${_structOutput}' not found. Enable compilation or restore prebuilts.")
+		endif()
 		list(APPEND _structHeaderList "${_structOutput}")
 
 		# Vulkan-only shaders don't have GLSL output
 		if (NOT _shader IN_LIST VULKAN_SHADERS)
+			if (NOT EXISTS "${_glslOutput}")
+				message(FATAL_ERROR "Pre-compiled shader GLSL '${_glslOutput}' not found. Enable compilation or restore prebuilts.")
+			endif()
 			target_embed_files(code FILES "${_glslOutput}" RELATIVE_TO "${_shaderOutputDir}" PATH_TYPE_PREFIX "data/effects")
 		endif()
 	endif()

@@ -9,6 +9,8 @@
 #include "graphics/2d.h"
 #include "libs/renderdoc/renderdoc.h"
 #include "mod_table/mod_table.h"
+#include <filesystem>
+#include <fstream>
 
 #if SDL_VERSION_ATLEAST(2, 0, 6)
 #include <SDL_vulkan.h>
@@ -25,28 +27,33 @@ const char* EngineName = "FreeSpaceOpen";
 
 const gameversion::version MinVulkanVersion(1, 4, 0, 0);
 
-VkBool32 VKAPI_PTR debugReportCallback(
-#if VK_HEADER_VERSION >= 304
-	vk::DebugReportFlagsEXT /*flags*/,
-	vk::DebugReportObjectTypeEXT /*objectType*/,
-#else
-	VkDebugReportFlagsEXT /*flags*/,
-	VkDebugReportObjectTypeEXT /*objectType*/,
-#endif
-	uint64_t /*object*/,
-	size_t /*location*/,
-	int32_t /*messageCode*/,
-	const char* pLayerPrefix,
-	const char* pMessage,
+VkBool32 VKAPI_PTR debugReportCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+	VkDebugUtilsMessageTypeFlagsEXT /*messageTypes*/,
+	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 	void* /*pUserData*/)
 {
-	mprintf(("Vulkan message: [%s]: %s\n", pLayerPrefix, pMessage));
+	// Keep logging simple; add filtering if needed
+	mprintf(("Vulkan message: [%d] %s\n", static_cast<int>(messageSeverity), pCallbackData->pMessage));
 	return VK_FALSE;
 }
 #endif
 
 const SCP_vector<const char*> RequiredDeviceExtensions = {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+	VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+	VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+};
+
+const SCP_vector<const char*> OptionalDeviceExtensions = {
+#ifdef VK_KHR_MAINTENANCE_6_EXTENSION_NAME
+	VK_KHR_MAINTENANCE_6_EXTENSION_NAME,
+#endif
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
+	VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,
+#endif
+#ifdef VK_EXT_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME
+	VK_EXT_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME,
+#endif
 };
 
 bool checkDeviceExtensionSupport(PhysicalDeviceValues& values)
@@ -393,11 +400,15 @@ bool VulkanRenderer::initializeInstance()
 	for (const auto& ext : supportedExtensions) {
 		mprintf(("  Found support for %s version %" PRIu32 "\n", ext.extensionName.data(), ext.specVersion));
 		if (FSO_DEBUG || Cmdline_graphics_debug_output) {
-			if (!stricmp(ext.extensionName, VK_EXT_DEBUG_REPORT_EXTENSION_NAME)) {
-				extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-				m_debugReportEnabled = true;
+			if (!stricmp(ext.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
+				extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 			}
 		}
+#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+		if (!stricmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+			extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+		}
+#endif
 	}
 
 	std::vector<const char*> layers;
@@ -412,8 +423,8 @@ bool VulkanRenderer::initializeInstance()
 			VK_VERSION_PATCH(layer.specVersion),
 			layer.implementationVersion));
 		if (FSO_DEBUG || Cmdline_graphics_debug_output) {
-			if (!stricmp(layer.layerName, "VK_LAYER_LUNARG_core_validation")) {
-				layers.push_back("VK_LAYER_LUNARG_core_validation");
+			if (!stricmp(layer.layerName, "VK_LAYER_KHRONOS_validation")) {
+				layers.push_back("VK_LAYER_KHRONOS_validation");
 			}
 		}
 	}
@@ -426,17 +437,26 @@ bool VulkanRenderer::initializeInstance()
 	createInfo.ppEnabledExtensionNames = extensions.data();
 	createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
 	createInfo.ppEnabledLayerNames = layers.data();
+#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+	if (std::find_if(extensions.begin(), extensions.end(), [](const char* ext) {
+			return !stricmp(ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+		}) != extensions.end()) {
+		createInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+	}
+#endif
 
-	vk::DebugReportCallbackCreateInfoEXT createInstanceReportInfo(vk::DebugReportFlagBitsEXT::eError |
-																  vk::DebugReportFlagBitsEXT::eWarning |
-																  vk::DebugReportFlagBitsEXT::ePerformanceWarning);
-	createInstanceReportInfo.pfnCallback = debugReportCallback;
+	vk::DebugUtilsMessengerCreateInfoEXT createInstanceDebugInfo(
+		{},
+		vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError,
+		vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+			vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+		debugReportCallback);
 
-	vk::StructureChain<vk::InstanceCreateInfo, vk::DebugReportCallbackCreateInfoEXT> createInstanceChain(createInfo,
-		createInstanceReportInfo);
+	vk::StructureChain<vk::InstanceCreateInfo, vk::DebugUtilsMessengerCreateInfoEXT> createInstanceChain(createInfo,
+		createInstanceDebugInfo);
 
-	if (!m_debugReportEnabled) {
-		createInstanceChain.unlink<vk::DebugReportCallbackCreateInfoEXT>();
+	if (!(FSO_DEBUG || Cmdline_graphics_debug_output)) {
+		createInstanceChain.unlink<vk::DebugUtilsMessengerCreateInfoEXT>();
 	}
 
 	vk::UniqueInstance instance = vk::createInstanceUnique(createInstanceChain.get<vk::InstanceCreateInfo>(), nullptr);
@@ -446,13 +466,8 @@ bool VulkanRenderer::initializeInstance()
 
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance.get());
 
-	if (m_debugReportEnabled) {
-		vk::DebugReportCallbackCreateInfoEXT reportCreateInfo(vk::DebugReportFlagBitsEXT::eError |
-															  vk::DebugReportFlagBitsEXT::eWarning |
-															  vk::DebugReportFlagBitsEXT::ePerformanceWarning);
-		reportCreateInfo.pfnCallback = debugReportCallback;
-
-		m_debugReport = instance->createDebugReportCallbackEXTUnique(reportCreateInfo);
+	if (FSO_DEBUG || Cmdline_graphics_debug_output) {
+		m_debugMessenger = instance->createDebugUtilsMessengerEXTUnique(createInstanceDebugInfo);
 	}
 
 	m_vkInstance = std::move(instance);
@@ -499,8 +514,21 @@ bool VulkanRenderer::pickPhysicalDevice(PhysicalDeviceValues& deviceValues)
 	std::transform(devices.cbegin(), devices.cend(), std::back_inserter(values), [](const vk::PhysicalDevice& dev) {
 		PhysicalDeviceValues vals;
 		vals.device = dev;
-		vals.properties = dev.getProperties2().properties;
-		vals.features = dev.getFeatures2().features;
+
+		vk::PhysicalDeviceProperties2 props;
+		dev.getProperties2(&props);
+		vals.properties = props.properties;
+
+		vk::PhysicalDeviceFeatures2 feats;
+		vals.features13 = vk::PhysicalDeviceVulkan13Features{};
+		vals.features14 = vk::PhysicalDeviceVulkan14Features{};
+		vals.pushDescriptorProps = vk::PhysicalDevicePushDescriptorPropertiesKHR{};
+		feats.pNext = &vals.features13;
+		vals.features13.pNext = &vals.features14;
+		vals.features14.pNext = &vals.pushDescriptorProps;
+		dev.getFeatures2(&feats);
+		vals.features = feats.features;
+
 		vals.queueProperties = dev.getQueueFamilyProperties();
 		return vals;
 	});
@@ -534,6 +562,8 @@ bool VulkanRenderer::pickPhysicalDevice(PhysicalDeviceValues& deviceValues)
 
 bool VulkanRenderer::createLogicalDevice(const PhysicalDeviceValues& deviceValues)
 {
+	m_physicalDevice = deviceValues.device;
+
 	float queuePriority = 1.0f;
 
 	std::vector<vk::DeviceQueueCreateInfo> queueInfos;
@@ -546,15 +576,55 @@ bool VulkanRenderer::createLogicalDevice(const PhysicalDeviceValues& deviceValue
 		queueInfos.emplace_back(vk::DeviceQueueCreateFlags(), index, 1, &queuePriority);
 	}
 
+	// Enable required/optional extensions
+	std::vector<const char*> enabledExtensions(RequiredDeviceExtensions.begin(), RequiredDeviceExtensions.end());
+	for (const auto& opt : OptionalDeviceExtensions) {
+		auto it = std::find_if(deviceValues.extensions.begin(),
+			deviceValues.extensions.end(),
+			[&opt](const vk::ExtensionProperties& prop) { return std::strcmp(prop.extensionName.data(), opt) == 0; });
+		if (it != deviceValues.extensions.end()) {
+			enabledExtensions.push_back(opt);
+		}
+	}
+
+	// Chain features for 1.3/1.4 and enable only what we need (currently mirror supported bits)
+	vk::PhysicalDeviceFeatures2 enabledFeatures;
+	enabledFeatures.features = deviceValues.features;
+	vk::PhysicalDeviceVulkan13Features enabled13 = deviceValues.features13;
+	vk::PhysicalDeviceVulkan14Features enabled14 = deviceValues.features14;
+	enabledFeatures.pNext = &enabled13;
+	enabled13.pNext = &enabled14;
+
 	vk::DeviceCreateInfo deviceCreate;
 	deviceCreate.pQueueCreateInfos = queueInfos.data();
 	deviceCreate.queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size());
-	deviceCreate.pEnabledFeatures = &deviceValues.features;
+	deviceCreate.pEnabledFeatures = nullptr;
+	deviceCreate.pNext = &enabledFeatures;
 
-	deviceCreate.ppEnabledExtensionNames = RequiredDeviceExtensions.data();
-	deviceCreate.enabledExtensionCount = static_cast<uint32_t>(RequiredDeviceExtensions.size());
+	deviceCreate.ppEnabledExtensionNames = enabledExtensions.data();
+	deviceCreate.enabledExtensionCount = static_cast<uint32_t>(enabledExtensions.size());
 
 	m_device = deviceValues.device.createDeviceUnique(deviceCreate);
+
+	// Initialize default dispatcher for device-level functions
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(m_device.get());
+
+	// Pipeline cache: attempt to load from disk
+	std::vector<char> cacheData;
+	const std::filesystem::path cachePath("vulkan_pipeline.cache");
+	if (std::filesystem::exists(cachePath)) {
+		std::ifstream cacheFile(cachePath, std::ios::binary | std::ios::ate);
+		if (cacheFile) {
+			auto size = cacheFile.tellg();
+			cacheFile.seekg(0);
+			cacheData.resize(static_cast<size_t>(size));
+			cacheFile.read(cacheData.data(), size);
+		}
+	}
+	vk::PipelineCacheCreateInfo cacheInfo;
+	cacheInfo.initialDataSize = cacheData.size();
+	cacheInfo.pInitialData = cacheData.empty() ? nullptr : cacheData.data();
+	m_pipelineCache = m_device->createPipelineCacheUnique(cacheInfo);
 
 	// Create queues
 	m_graphicsQueue = m_device->getQueue(deviceValues.graphicsQueueIndex.index, 0);
@@ -820,7 +890,7 @@ void VulkanRenderer::createGraphicsPipeline()
 	pipelineInfo.basePipelineHandle = nullptr;
 	pipelineInfo.basePipelineIndex = -1;
 
-	m_graphicsPipeline = m_device->createGraphicsPipelineUnique(nullptr, pipelineInfo).value;
+	m_graphicsPipeline = m_device->createGraphicsPipelineUnique(m_pipelineCache.get(), pipelineInfo).value;
 }
 void VulkanRenderer::createCommandPool(const PhysicalDeviceValues& values)
 {
@@ -914,6 +984,16 @@ void VulkanRenderer::shutdown()
 	}
 	// For good measure, also wait until the device is idle
 	m_device->waitIdle();
+
+	// Persist pipeline cache to speed up future startups
+	if (m_pipelineCache) {
+		auto data = m_device->getPipelineCacheData(m_pipelineCache.get());
+		std::filesystem::path cachePath("vulkan_pipeline.cache");
+		std::ofstream cacheFile(cachePath, std::ios::binary | std::ios::trunc);
+		if (cacheFile) {
+			cacheFile.write(reinterpret_cast<const char*>(data.data()), data.size());
+		}
+	}
 }
 
 } // namespace vulkan

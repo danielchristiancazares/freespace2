@@ -5,20 +5,27 @@ find_program(GLSLC_PATH glslc
 		"$ENV{VULKAN_SDK}/bin"
 )
 
-# Add an option for this so that this can be disabled locally when not needed
+# Shader compilation controls
 option(SHADERS_ENABLE_COMPILATION "Enable compilation of shaders to SPIR-V" OFF)
+option(SHADER_FORCE_PREBUILT "Force using prebuilt shaders (skip tool checks/compilation)" OFF)
+option(SHADER_DEBUG_INFO "Emit debug info (-g) when compiling shaders" OFF)
 
-mark_as_advanced(SHADERS_ENABLE_COMPILATION)
+mark_as_advanced(SHADERS_ENABLE_COMPILATION SHADER_FORCE_PREBUILT SHADER_DEBUG_INFO)
 
-if (SHADERS_ENABLE_COMPILATION AND GLSLC_PATH)
+# Tool checks (only when Vulkan is enabled and we actually compile)
+if (FSO_BUILD_WITH_VULKAN AND SHADERS_ENABLE_COMPILATION AND NOT SHADER_FORCE_PREBUILT)
+	if (NOT GLSLC_PATH)
+		message(FATAL_ERROR "glslc not found. Install/enable the Vulkan SDK or set GLSLC_PATH, or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
+	endif()
+endif()
+
+if (SHADERS_ENABLE_COMPILATION AND NOT SHADER_FORCE_PREBUILT)
 	if(PLATFORM_WINDOWS)
 		set(SHADERTOOL_FILENAME "shadertool-windows.tar.gz")
 	elseif(PLATFORM_LINUX)
 		set(SHADERTOOL_FILENAME "shadertool-linux.tar.gz")
 	else()
-		# Platform not supported for compiling shaders
-		message("Found glslc program but platform has no shadertool binaries. Not doing shader compilation...")
-		return()
+		message(FATAL_ERROR "SHADERS_ENABLE_COMPILATION is ON but shadertool binaries are unavailable on this platform. Set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
 	endif()
 
 	# The existence of glslc indicated whether we can compile our shaders or not
@@ -85,4 +92,19 @@ if (SHADERS_ENABLE_COMPILATION AND GLSLC_PATH)
 
 	add_executable(shadertool IMPORTED GLOBAL)
 	set_target_properties(shadertool PROPERTIES IMPORTED_LOCATION "${SHADERTOOL_PATH}")
+	if (NOT SHADERTOOL_PATH)
+		message(FATAL_ERROR "shadertool not found after download/extract. Verify SHADERTOOL_PATH or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
+	else()
+		execute_process(
+			COMMAND "${SHADERTOOL_PATH}" --version
+			RESULT_VARIABLE _shadertool_res
+			OUTPUT_VARIABLE _shadertool_out
+			ERROR_VARIABLE _shadertool_err
+		)
+		if (NOT _shadertool_res EQUAL 0 AND _shadertool_out STREQUAL "" AND _shadertool_err STREQUAL "")
+			message(FATAL_ERROR "shadertool invocation failed (exit ${_shadertool_res}) with no output. Verify SHADERTOOL_PATH or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
+		elseif (NOT _shadertool_res EQUAL 0)
+			message(STATUS "shadertool reported a non-zero exit (${_shadertool_res}); continuing since it produced output. Output:\n${_shadertool_out}\n${_shadertool_err}")
+		endif()
+	endif()
 endif ()
