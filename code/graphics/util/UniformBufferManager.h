@@ -24,6 +24,11 @@ class UniformBufferManager {
 	// Sets how many buffers should be used. This effectively means that the uniforms are triple-buffered
 	static const size_t NUM_SEGMENTS = 3;
 
+	// Number of frames to wait before deleting retired buffers.
+	// With double-buffering (MAX_FRAMES_IN_FLIGHT=2), a buffer could be referenced by frame N and N+1.
+	// Waiting 3 frames ensures all references are complete.
+	static const uint32_t FRAMES_BEFORE_DELETE = 3;
+
 	std::array<gr_sync, NUM_SEGMENTS> _segment_fences;
 
 	gr_buffer_handle _active_uniform_buffer;
@@ -37,13 +42,23 @@ class UniformBufferManager {
 	int _offset_alignment        = -1;
 	bool _use_persistent_mapping = false;
 
+	uint32_t _currentFrame = 0;
+
+	/**
+	 * @brief Retired buffer tracking for deferred deletion
+	 */
+	struct RetiredBuffer {
+		gr_buffer_handle handle;
+		std::unique_ptr<uint8_t[]> shadow;
+		uint32_t retiredAtFrame;
+	};
+
 	/**
 	 * @brief A list of retired uniform buffers that might still be in use by the GPU
-	 * Once the sync fence is signaled it means that the buffer is not in use anymore by the GPU and can be deleted.
-	 * The byte array is the associated shadow buffer which will ensure that the pointer stays valid until the buffer is
-	 * deleted at which point any reference to it will surely be removed.
+	 * Buffers are deleted after FRAMES_BEFORE_DELETE frames have passed since retirement.
+	 * This frame-counting approach works for both OpenGL and Vulkan backends.
 	 */
-	SCP_vector<std::tuple<gr_sync, gr_buffer_handle, std::unique_ptr<uint8_t[]>>> _retired_buffers;
+	SCP_vector<RetiredBuffer> _retired_buffers;
 
 	/**
 	 * @brief This is a pointer to an array which is a shadow of the uniform buffer

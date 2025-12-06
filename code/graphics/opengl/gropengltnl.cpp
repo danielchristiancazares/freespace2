@@ -294,6 +294,30 @@ void gr_opengl_update_buffer_data_offset(gr_buffer_handle handle, size_t offset,
 
 	glBufferSubData(buffer_obj.type, offset, size, data);
 }
+
+void gr_opengl_resize_buffer(gr_buffer_handle handle, size_t size)
+{
+	GR_DEBUG_SCOPE("Resize buffer");
+
+	Assert(handle.isValid());
+	Assert((size_t)handle.value() < GL_buffer_objects.size());
+
+	opengl_buffer_object& buffer_obj = GL_buffer_objects[handle.value()];
+
+	opengl_bind_buffer_object(handle);
+
+	// Recreate storage; for persistent mapping this is forbidden, so skip.
+	if (buffer_obj.usage == BufferUsageHint::PersistentMapping) {
+		Assertion(false, "Cannot resize persistent mapped buffer in OpenGL backend.");
+		return;
+	}
+
+	glBufferData(buffer_obj.type, size, nullptr, buffer_obj.gl_usage);
+
+	GL_vertex_data_in -= buffer_obj.size;
+	buffer_obj.size = size;
+	GL_vertex_data_in += buffer_obj.size;
+}
 void* gr_opengl_map_buffer(gr_buffer_handle handle)
 {
 	GR_DEBUG_SCOPE("Map buffer");

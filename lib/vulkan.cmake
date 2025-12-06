@@ -1,30 +1,45 @@
 
-find_program(GLSLC_PATH glslc)
+find_program(GLSLC_PATH glslc
+	HINTS
+		"$ENV{VULKAN_SDK}/Bin"
+		"$ENV{VULKAN_SDK}/bin"
+)
 
-# Add an option for this so that this can be disabled locally when not needed
+# Shader compilation controls
 option(SHADERS_ENABLE_COMPILATION "Enable compilation of shaders to SPIR-V" OFF)
+option(SHADER_FORCE_PREBUILT "Force using prebuilt shaders (skip tool checks/compilation)" OFF)
+option(SHADER_DEBUG_INFO "Emit debug info (-g) when compiling shaders" OFF)
 
-mark_as_advanced(SHADERS_ENABLE_COMPILATION)
+mark_as_advanced(SHADERS_ENABLE_COMPILATION SHADER_FORCE_PREBUILT SHADER_DEBUG_INFO)
 
-if (SHADERS_ENABLE_COMPILATION AND GLSLC_PATH)
-	if(PLATFORM_WINDOWS)
-		set(SHADERTOOL_FILENAME "shadertool-windows.tar.gz")
-	elseif(PLATFORM_LINUX)
-		set(SHADERTOOL_FILENAME "shadertool-linux.tar.gz")
-	else()
-		# Platform not supported for compiling shaders
-		message("Found glslc program but platform has no shadertool binaries. Not doing shader compilation...")
-		return()
+# Tool checks (only when Vulkan is enabled and we actually compile)
+if (FSO_BUILD_WITH_VULKAN AND SHADERS_ENABLE_COMPILATION AND NOT SHADER_FORCE_PREBUILT)
+	if (NOT GLSLC_PATH)
+		message(FATAL_ERROR "glslc not found. Install/enable the Vulkan SDK or set GLSLC_PATH, or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
 	endif()
+endif()
 
+if (SHADERS_ENABLE_COMPILATION AND NOT SHADER_FORCE_PREBUILT)
 	# The existence of glslc indicated whether we can compile our shaders or not
 	message(STATUS "Found glslc program. Shaders will be compiled during the build.")
 
-	set(SHADERTOOL_VERSION "v1.0")
-	set(SHADERTOOL_DIR "${CMAKE_CURRENT_BINARY_DIR}/shadertool/${SHADERTOOL_VERSION}")
+	# Skip download if user provided SHADERTOOL_PATH
+	if (SHADERTOOL_PATH)
+		message(STATUS "Using user-provided shadertool: ${SHADERTOOL_PATH}")
+	else()
+		if(PLATFORM_WINDOWS)
+			set(SHADERTOOL_FILENAME "shadertool-windows.tar.gz")
+		elseif(PLATFORM_LINUX)
+			set(SHADERTOOL_FILENAME "shadertool-linux.tar.gz")
+		else()
+			message(FATAL_ERROR "SHADERS_ENABLE_COMPILATION is ON but shadertool binaries are unavailable on this platform. Set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
+		endif()
 
-	# Download correct shadertool version if we do not have it already
-	if (NOT IS_DIRECTORY "${SHADERTOOL_DIR}")
+		set(SHADERTOOL_VERSION "v1.0")
+		set(SHADERTOOL_DIR "${CMAKE_CURRENT_BINARY_DIR}/shadertool/${SHADERTOOL_VERSION}")
+
+		# Download correct shadertool version if we do not have it already
+		if (NOT IS_DIRECTORY "${SHADERTOOL_DIR}")
 		set(DOWNLOAD_URL "https://github.com/scp-fs2open/fso-shadertool/releases/download/${SHADERTOOL_VERSION}/${SHADERTOOL_FILENAME}")
 		set(DOWNLOAD_FILE "${CMAKE_CURRENT_BINARY_DIR}/${SHADERTOOL_FILENAME}")
 
@@ -69,15 +84,20 @@ if (SHADERS_ENABLE_COMPILATION AND GLSLC_PATH)
 		endif()
 
 		file(REMOVE "${DOWNLOAD_FILE}")
+		endif()
+
+		# Just use CMake for finding the shadertool binaries to avoid platform specific code here
+		find_program(SHADERTOOL_PATH shadertool
+			PATHS "${SHADERTOOL_DIR}/bin"
+			NO_DEFAULT_PATH)
+
+		if (NOT SHADERTOOL_PATH)
+			message(FATAL_ERROR "shadertool not found after download/extract. Verify SHADERTOOL_PATH or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
+		endif()
 	endif()
 
 	add_executable(glslc IMPORTED GLOBAL)
 	set_target_properties(glslc PROPERTIES IMPORTED_LOCATION "${GLSLC_PATH}")
-
-	# Just use CMake for finding the shadertool binaries to avoid platform specific code here
-	find_program(SHADERTOOL_PATH shadertool
-		PATHS "${SHADERTOOL_DIR}/bin"
-		NO_DEFAULT_PATH)
 
 	add_executable(shadertool IMPORTED GLOBAL)
 	set_target_properties(shadertool PROPERTIES IMPORTED_LOCATION "${SHADERTOOL_PATH}")
