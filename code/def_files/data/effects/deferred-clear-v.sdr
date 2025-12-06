@@ -1,4 +1,6 @@
-in vec4 vertPosition;
+//? #version 330
+
+layout(location = 0) in vec4 vertPosition;
 void main()
 {
 	gl_Position = vertPosition;

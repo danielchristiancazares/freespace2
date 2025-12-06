@@ -24,6 +24,11 @@ namespace util {
 GPUMemoryHeap::GPUMemoryHeap(GpuHeap heap_type) {
 	_bufferHandle = gr_create_buffer(getBufferType(heap_type), BufferUsageHint::Static);
 
+	// Register model vertex heap with renderer for descriptor binding
+	if (heap_type == GpuHeap::ModelVertex) {
+		gr_register_model_vertex_heap(_bufferHandle);
+	}
+
 	_allocator.reset(new ::util::HeapAllocator([this](size_t n) { resizeBuffer(n); }));
 }
 GPUMemoryHeap::~GPUMemoryHeap() {

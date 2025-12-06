@@ -38,11 +38,31 @@ static void gr_flash_internal(int r, int g, int b, int a, bool alpha_flash)
 
 	int glVertices[8] = { x1, y1, x1, y2, x2, y1, x2, y2 };
 
+	struct FlashVertex {
+		float x, y;
+		float u, v;
+		float r, g, b, a;
+	};
+
+	FlashVertex verts[4];
+	for (int i = 0; i < 4; ++i) {
+		verts[i].x = static_cast<float>(glVertices[i * 2 + 0]);
+		verts[i].y = static_cast<float>(glVertices[i * 2 + 1]);
+		verts[i].u = 0.0f;
+		verts[i].v = 0.0f;
+		verts[i].r = r / 255.0f;
+		verts[i].g = g / 255.0f;
+		verts[i].b = b / 255.0f;
+		verts[i].a = a / 255.0f;
+	}
+
 	vertex_layout vert_def;
+	vert_def.add_vertex_component(vertex_format_data::POSITION2, sizeof(FlashVertex), offsetof(FlashVertex, x));
+	vert_def.add_vertex_component(vertex_format_data::TEX_COORD2, sizeof(FlashVertex), offsetof(FlashVertex, u));
+	vert_def.add_vertex_component(vertex_format_data::COLOR4F, sizeof(FlashVertex), offsetof(FlashVertex, r));
 
-	vert_def.add_vertex_component(vertex_format_data::SCREEN_POS, sizeof(int) * 2, 0);
-
-	gr_render_primitives_2d_immediate(&render_material, PRIM_TYPE_TRISTRIP, &vert_def, 4, glVertices, sizeof(int) * 8);
+	gr_render_primitives_2d_immediate(
+		&render_material, PRIM_TYPE_TRISTRIP, &vert_def, 4, verts, sizeof(verts));
 }
 
 void gr_flash(int r, int g, int b) {
@@ -73,17 +93,28 @@ static void
 draw_textured_quad(material* mat, float x1, float y1, float u1, float v1, float x2, float y2, float u2, float v2) {
 	GR_DEBUG_SCOPE("Draw textured quad");
 
-	float glVertices[4][4] = {{ x1, y1, u1, v1 },
-							  { x1, y2, u1, v2 },
-							  { x2, y1, u2, v1 },
-							  { x2, y2, u2, v2 }};
+	struct QuadVertex {
+		float x, y;
+		float u, v;
+		float r, g, b, a;
+	};
+
+	const vec4& clr = mat->get_color();
+
+	QuadVertex glVertices[4] = {
+		{ x1, y1, u1, v1, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w },
+		{ x1, y2, u1, v2, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w },
+		{ x2, y1, u2, v1, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w },
+		{ x2, y2, u2, v2, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w },
+	};
 
 	vertex_layout vert_def;
 
-	vert_def.add_vertex_component(vertex_format_data::POSITION2, sizeof(float) * 4, 0);
-	vert_def.add_vertex_component(vertex_format_data::TEX_COORD2, sizeof(float) * 4, sizeof(float) * 2);
+	vert_def.add_vertex_component(vertex_format_data::POSITION2, sizeof(QuadVertex), offsetof(QuadVertex, x));
+	vert_def.add_vertex_component(vertex_format_data::TEX_COORD2, sizeof(QuadVertex), offsetof(QuadVertex, u));
+	vert_def.add_vertex_component(vertex_format_data::COLOR4F, sizeof(QuadVertex), offsetof(QuadVertex, r));
 
-	gr_render_primitives_immediate(mat, PRIM_TYPE_TRISTRIP, &vert_def, 4, glVertices, sizeof(float) * 4 * 4);
+	gr_render_primitives_immediate(mat, PRIM_TYPE_TRISTRIP, &vert_def, 4, glVertices, sizeof(glVertices));
 }
 
 static void bitmap_ex_internal(int x,
@@ -525,6 +556,7 @@ void gr_bitmap_ex(int x, int y, int w, int h, int sx, int sy, int resize_mode, b
 #define MAX_VERTS_PER_DRAW 300
 struct v4 {
 	float x, y, u, v;
+	float r, g, b, a;
 };
 static v4 String_render_buff[MAX_VERTS_PER_DRAW];
 
@@ -584,6 +616,7 @@ static void gr_string_old(float sx,
 
 	vert_def.add_vertex_component(vertex_format_data::POSITION2, sizeof(v4), (int)offsetof(v4, x));
 	vert_def.add_vertex_component(vertex_format_data::TEX_COORD2, sizeof(v4), (int)offsetof(v4, u));
+	vert_def.add_vertex_component(vertex_format_data::COLOR4F, sizeof(v4), (int)offsetof(v4, r));
 
 	gr_set_2d_matrix();
 
@@ -664,12 +697,17 @@ static void gr_string_old(float sx,
 		float v1 = (v + char_height) / bh;
 
 		// Add vertices for the character
-		String_render_buff[buffer_offset++] = {x1, y1, u0, v0};
-		String_render_buff[buffer_offset++] = {x1, y2, u0, v1};
-		String_render_buff[buffer_offset++] = {x2, y1, u1, v0};
-		String_render_buff[buffer_offset++] = {x1, y2, u0, v1};
-		String_render_buff[buffer_offset++] = {x2, y1, u1, v0};
-		String_render_buff[buffer_offset++] = {x2, y2, u1, v1};
+		const float cr = GR_CURRENT_COLOR.red / 255.f;
+		const float cg = GR_CURRENT_COLOR.green / 255.f;
+		const float cb = GR_CURRENT_COLOR.blue / 255.f;
+		const float ca = GR_CURRENT_COLOR.alpha / 255.f;
+
+		String_render_buff[buffer_offset++] = {x1, y1, u0, v0, cr, cg, cb, ca};
+		String_render_buff[buffer_offset++] = {x1, y2, u0, v1, cr, cg, cb, ca};
+		String_render_buff[buffer_offset++] = {x2, y1, u1, v0, cr, cg, cb, ca};
+		String_render_buff[buffer_offset++] = {x1, y2, u0, v1, cr, cg, cb, ca};
+		String_render_buff[buffer_offset++] = {x2, y1, u1, v0, cr, cg, cb, ca};
+		String_render_buff[buffer_offset++] = {x2, y2, u1, v1, cr, cg, cb, ca};
 
 		// If the buffer is full, render it now
 		if (buffer_offset == MAX_VERTS_PER_DRAW) {
@@ -1208,7 +1246,7 @@ size_t gr_add_to_immediate_buffer(size_t size, void* data) {
 		immediate_buffer_offset = 0;
 		immediate_buffer_size += MAX(IMMEDIATE_BUFFER_RESIZE_BLOCK_SIZE, size);
 
-		gr_update_buffer_data(gr_immediate_buffer_handle, immediate_buffer_size, NULL);
+		gr_resize_buffer(gr_immediate_buffer_handle, immediate_buffer_size);
 	}
 
 	// only update a section of the immediate vertex buffer
@@ -1231,7 +1269,7 @@ void gr_reset_immediate_buffer() {
 	}
 
 	// orphan the immediate buffer so we can start fresh in a new frame
-	gr_update_buffer_data(gr_immediate_buffer_handle, immediate_buffer_size, NULL);
+	gr_resize_buffer(gr_immediate_buffer_handle, immediate_buffer_size);
 
 	// bring our offset to the beginning of the immediate buffer
 	immediate_buffer_offset = 0;

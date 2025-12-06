@@ -45,11 +45,11 @@
 
 #include <glad/glad.h>
 
-// minimum GL version we can reliably support is 3.2
-static const int MIN_REQUIRED_GL_VERSION = 32;
+// minimum GL version we can reliably support is 3.3 (for explicit attrib locations)
+static const int MIN_REQUIRED_GL_VERSION = 33;
 
-// minimum GLSL version we can reliably support is 110
-static const int MIN_REQUIRED_GLSL_VERSION = 150;
+// minimum GLSL version we can reliably support is 330
+static const int MIN_REQUIRED_GLSL_VERSION = 330;
 
 int GL_version = 0;
 int GLSL_version = 0;
@@ -941,7 +941,7 @@ int opengl_init_display_device()
 		return 1;
 	}
 
-	const int gl_versions[] = { 45, 44, 43, 42, 41, 40, 33, 32 };
+	const int gl_versions[] = { 45, 44, 43, 42, 41, 40, 33 };
 
 	// find the latest and greatest OpenGL context
 	for (auto ver : gl_versions)
@@ -1029,6 +1029,7 @@ void gr_opengl_init_function_pointers()
 	gr_screen.gf_delete_buffer		= gr_opengl_delete_buffer;
 	gr_screen.gf_update_buffer_data		= gr_opengl_update_buffer_data;
 	gr_screen.gf_update_buffer_data_offset	= gr_opengl_update_buffer_data_offset;
+	gr_screen.gf_resize_buffer             = gr_opengl_resize_buffer;
 	gr_screen.gf_map_buffer                 = gr_opengl_map_buffer;
 	gr_screen.gf_flush_mapped_buffer        = gr_opengl_flush_mapped_buffer;
 	gr_screen.gf_bind_uniform_buffer = gr_opengl_bind_uniform_buffer;

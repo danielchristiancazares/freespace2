@@ -15,6 +15,7 @@ namespace graphics {
 class line_draw_list {
 	struct line_vertex {
 		vec2d position;
+		vec2d texcoord;
 		vec4 color;
 	};
 	SCP_vector<line_vertex> _line_vertices;
@@ -56,4 +57,3 @@ class line_draw_list {
 };
 
 }
-
