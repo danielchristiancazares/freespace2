@@ -48,6 +48,7 @@ gr_buffer_handle gr_opengl_create_buffer(BufferType type, BufferUsageHint usage)
 void opengl_bind_buffer_object(gr_buffer_handle handle);
 void gr_opengl_update_buffer_data(gr_buffer_handle handle, size_t size, const void* data);
 void gr_opengl_update_buffer_data_offset(gr_buffer_handle handle, size_t offset, size_t size, const void* data);
+void gr_opengl_resize_buffer(gr_buffer_handle handle, size_t size);
 void gr_opengl_delete_buffer(gr_buffer_handle handle);
 void gr_opengl_bind_uniform_buffer(uniform_block_type bind_point, size_t offset, size_t size, gr_buffer_handle buffer);
 void* gr_opengl_map_buffer(gr_buffer_handle handle);
