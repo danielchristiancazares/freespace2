@@ -1,0 +1,134 @@
+Param(
+    [string]$Config = "Debug",
+    [string]$BuildDir = "build",
+    [string]$Vulkan = "true",
+    [string]$ShaderCompilation = "true",
+    [string]$Clean = "false",
+    [string]$Target = "",
+    [string]$ShaderToolPath = "",
+    [string]$Tests = "false",
+    [string]$Verbose = "false"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+# Convert string params to booleans (handles "true", "false", "1", "0", etc.)
+function ConvertTo-Bool([string]$value) {
+    switch ($value.ToLower()) {
+        { $_ -in "true", "1", "yes", "on" } { return $true }
+        { $_ -in "false", "0", "no", "off" } { return $false }
+        default { return [bool]$value }
+    }
+}
+
+# Run a command, capturing output. Show output only on failure (unless verbose).
+function Invoke-Quietly {
+    param(
+        [string]$Description,
+        [string]$Command,
+        [string[]]$Arguments,
+        [bool]$ShowOutput = $false
+    )
+
+    Write-Host "$Description... " -NoNewline
+
+    $output = & $Command @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        Write-Host "FAILED" -ForegroundColor Red
+        Write-Host ""
+        $output | ForEach-Object { Write-Host $_ }
+        return $exitCode
+    }
+
+    if ($ShowOutput) {
+        Write-Host "OK" -ForegroundColor Green
+        $output | ForEach-Object { Write-Host $_ }
+    } else {
+        Write-Host "OK" -ForegroundColor Green
+    }
+
+    return 0
+}
+
+$EnableVulkan = ConvertTo-Bool $Vulkan
+$EnableShaderCompilation = ConvertTo-Bool $ShaderCompilation
+$EnableClean = ConvertTo-Bool $Clean
+$EnableTests = ConvertTo-Bool $Tests
+$EnableVerbose = ConvertTo-Bool $Verbose
+
+# Auto-enable tests if we're explicitly building the test target
+if (-not $EnableTests -and $Target -match "unittests") {
+    $EnableTests = $true
+}
+
+$ResolvedShaderToolPath = $null
+if ($ShaderToolPath -and $ShaderToolPath.Trim()) {
+    if (-not (Test-Path $ShaderToolPath)) {
+        Write-Error "Provided ShaderToolPath '$ShaderToolPath' does not exist."
+        exit 1
+    }
+    $ResolvedShaderToolPath = (Resolve-Path -LiteralPath $ShaderToolPath).Path
+} else {
+    $defaultShaderToolPath = Join-Path ([Environment]::GetFolderPath('UserProfile')) "Documents/fso-shadertool/build/shadertool/Release/shadertool.exe"
+    if (Test-Path $defaultShaderToolPath) {
+        $ResolvedShaderToolPath = (Resolve-Path -LiteralPath $defaultShaderToolPath).Path
+    }
+}
+
+# Clean build directory if requested
+if ($EnableClean -and (Test-Path $BuildDir)) {
+    Write-Host "Cleaning... " -NoNewline
+    Remove-Item -Recurse -Force $BuildDir
+    Write-Host "OK" -ForegroundColor Green
+}
+
+# Configure
+$configureArgs = @(
+    "-S", ".",
+    "-B", $BuildDir,
+    "-DCMAKE_BUILD_TYPE=$Config"
+)
+if ($EnableVulkan) {
+    $configureArgs += "-DFSO_BUILD_WITH_VULKAN=ON"
+} else {
+    $configureArgs += "-DFSO_BUILD_WITH_VULKAN=OFF"
+}
+if ($EnableTests) {
+    $configureArgs += "-DFSO_BUILD_TESTS=ON"
+} else {
+    $configureArgs += "-DFSO_BUILD_TESTS=OFF"
+}
+if ($EnableShaderCompilation) {
+    $configureArgs += "-DSHADERS_ENABLE_COMPILATION=ON"
+} else {
+    $configureArgs += "-DSHADERS_ENABLE_COMPILATION=OFF"
+}
+if ($ResolvedShaderToolPath -and $EnableShaderCompilation) {
+    $configureArgs += "-DSHADERTOOL_PATH=$ResolvedShaderToolPath"
+}
+
+$result = Invoke-Quietly -Description "Configuring" -Command "cmake" -Arguments $configureArgs -ShowOutput $EnableVerbose
+if ($result -ne 0) {
+    exit $result
+}
+
+# Build
+$buildArgs = @(
+    "--build", $BuildDir,
+    "--config", $Config,
+    "--parallel"
+)
+if ($Target -ne "") {
+    $buildArgs += @("--target", $Target)
+}
+
+$result = Invoke-Quietly -Description "Building" -Command "cmake" -Arguments $buildArgs -ShowOutput $EnableVerbose
+if ($result -ne 0) {
+    exit $result
+}
+
+Write-Host ""
+Write-Host "Build succeeded." -ForegroundColor Green

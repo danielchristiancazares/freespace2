@@ -3,6 +3,86 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+- `SDR_TYPE_MODEL` shader path in `VulkanShaderManager` that loads unified `model.vert.spv`/`model.frag.spv` and ignores variant flags
+- `VulkanModelValidation` stub helpers for descriptor-indexing feature validation and push-constant budget checks (not yet implemented)
+- Unit tests for model shader path: unified modules, variant-flag independence, layout-hash ignore, plus failing tests for descriptor-indexing and push-constant validation
+- Shader compilation system distinguishes Vulkan-only vs cross-backend shaders
+  - Vulkan-only shaders compile to vulkan1.4 target and skip GLSL generation
+  - Cross-backend shaders compile to vulkan1.2 SPIR-V target for OpenGL GLSL compatibility (requires OpenGL 3.3+)
+- `FSO_VULKAN` preprocessor define available in Vulkan-only shaders
+- Warning when pre-compiled shaders are missing and shader compilation is disabled
+- Windows build helper script (`build.ps1`)
+- Shader compilation controls: `SHADER_FORCE_PREBUILT` (force prebuilts), `SHADER_DEBUG_INFO` (gate `-g`)
+- Required Vulkan 1.4 device extensions: `VK_KHR_push_descriptor`, `VK_KHR_maintenance5`
+- Optional device extensions support: `VK_KHR_maintenance6`, `VK_EXT_extended_dynamic_state3`, `VK_EXT_dynamic_rendering_local_read`
+- Portability enumeration extension (`VK_KHR_portability_enumeration`) support for better cross-platform compatibility
+- Separate vertex staging ring buffer (1MB) in `VulkanFrame` for immediate-mode rendering
+- Error handling for timeline semaphore wait operations
+- Vertex buffer alignment storage and getter method in VulkanRenderer for ring buffer allocations
+- Modular Vulkan renderer architecture with dedicated manager classes
+  - `VulkanBufferManager` for unified buffer lifecycle management
+  - `VulkanDescriptorLayouts` for descriptor set layout management
+  - `VulkanPipelineManager` for pipeline creation and caching
+  - `VulkanShaderManager` for shader module management
+- `FrameLifecycleTracker` for tracking command recording state across frames
+- `VulkanFrame` class replacing `RenderFrame` with improved frame resource management
+- `VulkanVertexTypes.h` for centralized vertex type definitions
+- Unit tests for Vulkan pipeline manager, frame lifecycle, and dynamic state
+- Architecture documentation (`ARCHITECTURE.md`, `AGENTS.md`, `CLAUDE.md`)
+- `VulkanTextureManager` for GPU texture lifecycle management
+  - On-demand texture uploads via per-frame texture staging ring buffer (12MB) in `VulkanFrame`
+  - Sampler caching with configurable filter and address modes
+  - Support for texture arrays, compressed formats (DXT1/3/5, BC7), and single-channel textures
+  - Frame-based upload scheduling to avoid pipeline stalls
+- `VulkanShaderReflection` for SPIR-V descriptor binding validation
+- `gr_resize_buffer` graphics API for resizing GPU buffers without full recreation
+  - Implemented for OpenGL, Vulkan, and stub backends
+- Embedded shader module loading from `def_files` in VulkanShaderManager
+- Extended dynamic state feature queries (`VK_EXT_extended_dynamic_state`, `VK_EXT_extended_dynamic_state2`, `VK_EXT_extended_dynamic_state3`)
+- Vulkan 1.2 features chain in device creation
+
+### Changed
+- `PipelineKey` equality and hash now ignore `layout_hash` when `type == SDR_TYPE_MODEL` (vertex-pulling path uses zero vertex inputs)
+- Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
+- Early Vulkan SDK detection in CMake before library targets are configured
+- imgui Vulkan backend uses `Vulkan_FOUND` guard instead of implicit require
+- glslc detection now searches `VULKAN_SDK` environment variable paths
+- OpenGL renderer minimum version raised to 3.3 (was lower) to support explicit vertex attribute locations
+- All GLSL shaders updated from `#version 150` to `#version 330` with explicit `layout(location = X)` declarations for vertex inputs, varyings, and fragment outputs (required for Vulkan compatibility)
+- Shader compilation outputs go to build tree (`generated_shaders`) when enabled; prebuilts used otherwise with hard validation
+- glslc/shadertool checks now fail fast without silent fallback
+- Removed unused Vulkan GLSL prebuilts (`vulkan.*.spv.glsl`)
+- Modernized Vulkan debug infrastructure: replaced `VK_EXT_debug_report` with `VK_EXT_debug_utils` for better error reporting
+- Switched validation layer from `VK_LAYER_LUNARG_core_validation` to `VK_LAYER_KHRONOS_validation` (modern standard)
+- Refactored `VulkanUniformRingBuffer` to generic `VulkanRingBuffer` with configurable usage flags
+- `VulkanFrame` now maintains separate ring buffers with independent budgets:
+  - Uniform ring buffer (512KB) for uniform data
+  - Vertex ring buffer (1MB) for vertex data
+  - Texture staging ring buffer (12MB) for texture uploads
+- `.clang-format` Standard updated from Cpp11 to Cpp17 to match codebase target
+- Refactored Vulkan renderer to use modular manager architecture
+  - `VulkanRenderer` now delegates to specialized manager classes for buffers, pipelines, shaders, and descriptors
+  - Frame management consolidated into `VulkanFrame` class
+  - Improved separation of concerns and testability
+- `UniformBufferManager` initialization path split for persistent-mapped vs dynamic buffers
+  - Persistent: single allocation via `gr_update_buffer_data`
+  - Dynamic: resize + zero-initialize via new `gr_resize_buffer` API
+- `VulkanBufferManager::updateBufferData` now zero-initializes when data pointer is null
+
+### Removed
+- `RenderFrame` class (replaced by `VulkanFrame`)
+- `vulkan_stubs.cpp` and `vulkan_stubs.h` (no longer needed)
+
+### Fixed
+- imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
+- Shader cmake dependency variable name (`_shader` not `shader`)
+- Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory
+- Clear flags now properly reset after being consumed in Vulkan renderer to prevent persistent clear state
+- Uninitialized memory in dynamic uniform buffers (shadow buffer now zero-initialized)
+
 ## [23.2.0] - 2023-06-16
 ### Changes
 
