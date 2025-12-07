@@ -6,7 +6,8 @@ Param(
     [string]$Clean = "false",
     [string]$Target = "",
     [string]$ShaderToolPath = "",
-    [string]$Tests = "false"
+    [string]$Tests = "false",
+    [string]$Verbose = "false"
 )
 
 Set-StrictMode -Version Latest
@@ -21,10 +22,42 @@ function ConvertTo-Bool([string]$value) {
     }
 }
 
+# Run a command, capturing output. Show output only on failure (unless verbose).
+function Invoke-Quietly {
+    param(
+        [string]$Description,
+        [string]$Command,
+        [string[]]$Arguments,
+        [bool]$ShowOutput = $false
+    )
+
+    Write-Host "$Description... " -NoNewline
+
+    $output = & $Command @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        Write-Host "FAILED" -ForegroundColor Red
+        Write-Host ""
+        $output | ForEach-Object { Write-Host $_ }
+        return $exitCode
+    }
+
+    if ($ShowOutput) {
+        Write-Host "OK" -ForegroundColor Green
+        $output | ForEach-Object { Write-Host $_ }
+    } else {
+        Write-Host "OK" -ForegroundColor Green
+    }
+
+    return 0
+}
+
 $EnableVulkan = ConvertTo-Bool $Vulkan
 $EnableShaderCompilation = ConvertTo-Bool $ShaderCompilation
 $EnableClean = ConvertTo-Bool $Clean
 $EnableTests = ConvertTo-Bool $Tests
+$EnableVerbose = ConvertTo-Bool $Verbose
 
 # Auto-enable tests if we're explicitly building the test target
 if (-not $EnableTests -and $Target -match "unittests") {
@@ -34,7 +67,8 @@ if (-not $EnableTests -and $Target -match "unittests") {
 $ResolvedShaderToolPath = $null
 if ($ShaderToolPath -and $ShaderToolPath.Trim()) {
     if (-not (Test-Path $ShaderToolPath)) {
-        throw "Provided ShaderToolPath '$ShaderToolPath' does not exist."
+        Write-Error "Provided ShaderToolPath '$ShaderToolPath' does not exist."
+        exit 1
     }
     $ResolvedShaderToolPath = (Resolve-Path -LiteralPath $ShaderToolPath).Path
 } else {
@@ -44,13 +78,14 @@ if ($ShaderToolPath -and $ShaderToolPath.Trim()) {
     }
 }
 
-# Clean build directory if requested (default: yes)
+# Clean build directory if requested
 if ($EnableClean -and (Test-Path $BuildDir)) {
-    Write-Host "Cleaning build directory: $BuildDir"
+    Write-Host "Cleaning... " -NoNewline
     Remove-Item -Recurse -Force $BuildDir
+    Write-Host "OK" -ForegroundColor Green
 }
 
-# Configure (idempotent; re-runs CMake to pick up changes)
+# Configure
 $configureArgs = @(
     "-S", ".",
     "-B", $BuildDir,
@@ -72,16 +107,15 @@ if ($EnableShaderCompilation) {
     $configureArgs += "-DSHADERS_ENABLE_COMPILATION=OFF"
 }
 if ($ResolvedShaderToolPath -and $EnableShaderCompilation) {
-    Write-Host "Using shadertool at $ResolvedShaderToolPath"
     $configureArgs += "-DSHADERTOOL_PATH=$ResolvedShaderToolPath"
 }
 
-cmake @configureArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "CMake configure failed with exit code $LASTEXITCODE"
+$result = Invoke-Quietly -Description "Configuring" -Command "cmake" -Arguments $configureArgs -ShowOutput $EnableVerbose
+if ($result -ne 0) {
+    exit $result
 }
 
-# Build (optionally with an explicit target, e.g., -Target clean or -Target unittests)
+# Build
 $buildArgs = @(
     "--build", $BuildDir,
     "--config", $Config,
@@ -91,7 +125,10 @@ if ($Target -ne "") {
     $buildArgs += @("--target", $Target)
 }
 
-cmake @buildArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "CMake build failed with exit code $LASTEXITCODE"
+$result = Invoke-Quietly -Description "Building" -Command "cmake" -Arguments $buildArgs -ShowOutput $EnableVerbose
+if ($result -ne 0) {
+    exit $result
 }
+
+Write-Host ""
+Write-Host "Build succeeded." -ForegroundColor Green

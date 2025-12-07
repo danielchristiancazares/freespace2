@@ -11,6 +11,7 @@
 #include "VulkanShaderManager.h"
 #include "VulkanTextureManager.h"
 #include "FrameLifecycleTracker.h"
+#include "VulkanDebug.h"
 
 #include "graphics/2d.h"
 
@@ -75,13 +76,38 @@ class VulkanRenderer {
 	bool isRecording() const { return m_frameLifecycle.isRecording(); }
 
 	// Helper methods for rendering
-	vk::Sampler getDummySampler() const { return m_dummySampler.get(); }
-	vk::ImageView getDummyImageView() const { return m_dummyImageView.get(); }
 	vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd,
 		const VulkanTextureManager::SamplerKey& samplerKey);
+	void setModelUniformBinding(VulkanFrame& frame,
+		gr_buffer_handle handle,
+		size_t offset,
+		size_t size);
+	void updateModelDescriptors(vk::DescriptorSet set,
+		vk::Buffer vertexBuffer,
+		vk::DeviceSize vertexOffset,
+		vk::DeviceSize vertexRange,
+		const std::vector<std::pair<uint32_t, int>>& textures,
+		VulkanFrame& frame,
+		vk::CommandBuffer cmd);
+	bool isRenderPassActive() const { return m_renderPassActive; }
+
+	// Frame sync for model descriptors - called at frame start after fence wait
+	// vertexHeapBuffer must be valid (caller is responsible for checking)
+	void beginModelDescriptorSync(VulkanFrame& frame, uint32_t frameIndex, vk::Buffer vertexHeapBuffer);
+
+	// For debug asserts in draw path
+	vk::Buffer getModelVertexHeapBuffer() const { return m_modelVertexHeapBuffer; }
+	void ensureRenderingStarted(vk::CommandBuffer cmd);
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
+	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
+	size_t getMinUniformOffsetAlignment() const { return m_minUboAlignment; }
+
+	// Per-frame instrumentation
+	void incrementModelDraw();
+	void incrementPrimDraw();
+
 	VkFormat getSwapChainImageFormat() const { return static_cast<VkFormat>(m_swapChainImageFormat); }
 	VkFormat getDepthFormat() const { return static_cast<VkFormat>(m_depthFormat); }
 	vk::SampleCountFlagBits getSampleCount() const { return m_sampleCount; }
@@ -107,6 +133,10 @@ class VulkanRenderer {
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
 	int preloadTexture(int bitmapHandle, bool isAABitmap);
 
+	// Model vertex heap registration (called from GPUMemoryHeap when ModelVertex heap is created)
+	void setModelVertexHeapHandle(gr_buffer_handle handle);
+	vk::Buffer queryModelVertexHeapBuffer() const;
+
   private:
 	static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 	static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
@@ -125,7 +155,6 @@ class VulkanRenderer {
 	void createUploadCommandPool();
 	void createDescriptorResources();
 	void createFrames();
-	void createDummyTexture();
 	void createVertexBuffer();
 	void createDepthResources();
 	vk::Format findDepthFormat() const;
@@ -134,9 +163,15 @@ class VulkanRenderer {
 	void beginFrame(VulkanFrame& frame, uint32_t imageIndex);
 	void endFrame(VulkanFrame& frame, uint32_t imageIndex);
 	void submitFrame(VulkanFrame& frame, uint32_t imageIndex);
+	void logFrameCounters();
 
 	void immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder);
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
+
+	// Descriptor sync helpers
+	void writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer);
+	void writeTextureDescriptor(vk::DescriptorSet set, uint32_t arrayIndex, int textureHandle);
+	void writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex);
 
 	std::unique_ptr<os::GraphicsOperations> m_graphicsOps;
 
@@ -147,6 +182,8 @@ class VulkanRenderer {
 	vk::PhysicalDevice m_physicalDevice;
 	vk::PhysicalDeviceMemoryProperties m_memoryProperties{};
 	vk::PhysicalDeviceProperties m_deviceProperties{};
+	vk::PhysicalDeviceVulkan13Features m_deviceFeatures13{};
+	vk::PhysicalDeviceVulkan14Features m_deviceFeatures14{};
 	vk::UniqueDevice m_device;
 	vk::UniquePipelineCache m_pipelineCache;
 
@@ -184,13 +221,17 @@ class VulkanRenderer {
 
 	vk::UniqueCommandPool m_uploadCommandPool;
 
-	vk::UniqueImage m_dummyImage;
-	vk::UniqueDeviceMemory m_dummyImageMemory;
-	vk::UniqueImageView m_dummyImageView;
-	vk::UniqueSampler m_dummySampler;
-
 	vk::UniqueBuffer m_vertexBuffer;
 	vk::UniqueDeviceMemory m_vertexBufferMemory;
+
+	// Per-frame draw counters
+	uint32_t m_frameModelDraws = 0;
+	uint32_t m_framePrimDraws = 0;
+	uint32_t m_frameCounter = 0;
+
+	// Model vertex heap buffer - set via setModelVertexHeapHandle when ModelVertex heap is created
+	vk::Buffer m_modelVertexHeapBuffer;
+	gr_buffer_handle m_modelVertexHeapHandle;  // Handle for querying the buffer
 
 	std::array<float, 4> m_clearColor = {0.f, 0.f, 0.f, 1.f};
 	float m_clearDepth = 1.f;
@@ -207,6 +248,9 @@ class VulkanRenderer {
 	bool m_supportsVertexAttributeDivisor = false;
 	ExtendedDynamicState3Caps m_extDyn3Caps;
 	uint32_t m_vertexBufferAlignment = static_cast<uint32_t>(sizeof(float)); // Alignment for vertex buffer ring allocations (bytes)
+	bool m_renderPassActive = false;
+
+	size_t m_minUboAlignment = 0;
 };
 
 } // namespace vulkan

@@ -1,6 +1,8 @@
-in vec4 fragTexCoord;
+//? #version 330
 
-out vec4 fragOut0;
+layout(location = 0) in vec4 fragTexCoord;
+
+layout(location = 0) out vec4 fragOut0;
 
 uniform sampler2D tex;
 uniform sampler2D depth_tex;

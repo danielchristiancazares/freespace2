@@ -1,10 +1,14 @@
 #pragma once
 
+#include "VulkanConstants.h"
 #include "VulkanFrame.h"
 
 #include <vulkan/vulkan.hpp>
+#include <array>
 #include <unordered_map>
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 namespace graphics {
 namespace vulkan {
@@ -23,6 +27,7 @@ struct VulkanTexture {
 	vk::UniqueDeviceMemory memory;
 	vk::UniqueImageView imageView;
 	vk::Sampler sampler; // Borrowed from sampler cache
+	vk::ImageLayout currentLayout = vk::ImageLayout::eUndefined;
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint32_t layers = 1;
@@ -37,13 +42,26 @@ class VulkanTextureManager {
 		vk::Queue transferQueue,
 		uint32_t transferQueueIndex);
 
-	enum class TextureState { Missing, Uploading, Resident, Failed };
+	enum class TextureState {
+		Missing,
+		Queued,
+		Uploading,
+		Resident,
+		Failed,
+		Retired // Marked for destruction, awaiting frame drainage
+	};
+
+	struct TextureBindingState {
+		uint32_t arrayIndex = 0;
+		std::array<bool, kFramesInFlight> descriptorWritten = {false, false, false};
+	};
 
 	struct TextureRecord {
 		VulkanTexture gpu;
 		TextureState state = TextureState::Missing;
 		uint32_t pendingFrameIndex = 0; // Frame that recorded the upload
 		uint32_t lastUsedFrame = 0;
+		TextureBindingState bindingState;
 	};
 
 	struct SamplerKey {
@@ -56,14 +74,15 @@ class VulkanTextureManager {
 		}
 	};
 
-	// Get descriptor for a bitmap; schedules upload if needed. Returns dummy when pending/failed.
+	// Get descriptor for a bitmap; schedules upload if needed. Refuses to return dummy fallbacks.
 	vk::DescriptorImageInfo getDescriptor(int bitmapHandle,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd,
 		uint32_t currentFrameIndex,
-		const SamplerKey& samplerKey,
-		vk::ImageView dummyView,
-		vk::Sampler dummySampler);
+		bool renderPassActive,
+		const SamplerKey& samplerKey);
+	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
+	void markUploadsCompleted(uint32_t completedFrameIndex);
 
 	// Preload uploads immediately; returns true on success.
 	bool preloadTexture(int bitmapHandle, bool isAABitmap);
@@ -73,6 +92,22 @@ class VulkanTextureManager {
 
 	// Cleanup all resources
 	void cleanup();
+
+	// Descriptor binding management
+	void onTextureResident(int textureHandle, uint32_t arrayIndex);
+	void retireTexture(int textureHandle);
+
+	const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
+	void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
+	int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
+	void processPendingDestructions(uint64_t currentFrame);
+	void setCurrentFrame(uint64_t frame) { m_currentFrame = frame; }
+
+	// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
+	std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
+
+	// Get texture descriptor info without frame/cmd (for already-resident textures)
+	vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey& samplerKey);
 
   private:
 	vk::Device m_device;
@@ -84,6 +119,7 @@ class VulkanTextureManager {
 
 	std::unordered_map<int, TextureRecord> m_textures; // keyed by base frame
 	std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
+	std::vector<int> m_pendingUploads; // base frame handles queued for upload
 
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
 	void createDefaultSampler();
@@ -97,9 +133,29 @@ class VulkanTextureManager {
 		const SamplerKey& samplerKey,
 		bool& usedStaging,
 		bool& uploadQueued);
+	bool isUploadQueued(int baseFrame) const;
+
+	// Slots that need fallback descriptor written (original slot indices)
+	std::vector<uint32_t> m_retiredSlots;
+
+	// Counter for tracking when all frames have processed retired slots
+	uint32_t m_retiredSlotsFrameCounter = 0;
+
+	// Fallback "black" texture for retired slots (initialized at startup)
+	int m_fallbackTextureHandle = -1;
+
+	// Pending destructions: {textureHandle, safeFrame}
+	std::vector<std::pair<int, uint64_t>> m_pendingDestructions;
+
+	// Current frame counter for deferred destruction tracking
+	uint64_t m_currentFrame = 0;
 };
 
 } // namespace vulkan
 } // namespace graphics
+
+
+
+
 
 

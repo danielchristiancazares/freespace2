@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VulkanShaderManager.h"
+#include "VulkanLayoutContracts.h"
 
 #include "graphics/2d.h"
 
@@ -24,10 +25,14 @@ struct PipelineKey {
 
 	bool operator==(const PipelineKey& other) const
 	{
-		return type == other.type && variant_flags == other.variant_flags && color_format == other.color_format &&
+		if (type != other.type) {
+			return false;
+		}
+		const bool ignoreLayout = usesVertexPulling(type);
+		return variant_flags == other.variant_flags && color_format == other.color_format &&
 		       depth_format == other.depth_format && sample_count == other.sample_count &&
 		       color_attachment_count == other.color_attachment_count && blend_mode == other.blend_mode &&
-		       layout_hash == other.layout_hash;
+		       (ignoreLayout || layout_hash == other.layout_hash);
 	}
 };
 
@@ -41,7 +46,9 @@ struct PipelineKeyHasher {
 		h ^= static_cast<std::size_t>(key.sample_count + 0x9e3779b9 + (h << 6) + (h >> 2));
 		h ^= static_cast<std::size_t>(key.color_attachment_count + 0x9e3779b9 + (h << 6) + (h >> 2));
 		h ^= static_cast<std::size_t>(key.blend_mode + 0x9e3779b9 + (h << 6) + (h >> 2));
-		h ^= key.layout_hash;
+		if (!usesVertexPulling(key.type)) {
+			h ^= key.layout_hash;
+		}
 		return h;
 	}
 };
@@ -50,7 +57,7 @@ struct PipelineKeyHasher {
 struct VertexInputState {
 	std::vector<vk::VertexInputBindingDescription> bindings;
 	std::vector<vk::VertexInputAttributeDescription> attributes;
-	std::vector<vk::VertexInputBindingDivisorDescriptionEXT> divisors;
+	std::vector<vk::VertexInputBindingDivisorDescription> divisors;
 };
 
 // Capabilities we care about from VK_EXT_extended_dynamic_state3
@@ -67,12 +74,14 @@ class VulkanPipelineManager {
   public:
 	VulkanPipelineManager(vk::Device device,
 		vk::PipelineLayout pipelineLayout,
+		vk::PipelineLayout modelPipelineLayout,
 		vk::PipelineCache pipelineCache,
 		bool supportsExtendedDynamicState,
 		bool supportsExtendedDynamicState2,
 		bool supportsExtendedDynamicState3,
 		const ExtendedDynamicState3Caps& extDyn3Caps,
-		bool supportsVertexAttributeDivisor);
+		bool supportsVertexAttributeDivisor,
+		bool dynamicRenderingEnabled);
 
 	vk::Pipeline getPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout);
 	static std::vector<vk::DynamicState> BuildDynamicStateList(bool supportsExtendedDynamicState3,
@@ -81,12 +90,14 @@ class VulkanPipelineManager {
   private:
 	vk::Device m_device;
 	vk::PipelineLayout m_pipelineLayout;
+	vk::PipelineLayout m_modelPipelineLayout;
 	vk::PipelineCache m_pipelineCache;
 	bool m_supportsExtendedDynamicState = false;
 	bool m_supportsExtendedDynamicState2 = false;
 	bool m_supportsExtendedDynamicState3 = false;
 	ExtendedDynamicState3Caps m_extDyn3Caps{};
 	bool m_supportsVertexAttributeDivisor = false;
+	bool m_dynamicRenderingEnabled = false;
 
 	std::unordered_map<PipelineKey, vk::UniquePipeline, PipelineKeyHasher> m_pipelines;
 	// Cache vertex input state conversions

@@ -1,20 +1,21 @@
+//? #version 330
 
-in vec4 vertPosition;
-in vec4 vertTexCoord;
-in vec4 vertColor;
-in float vertRadius;
+layout(location = 0) in vec4 vertPosition;
+layout(location = 2) in vec4 vertTexCoord;
+layout(location = 1) in vec4 vertColor;
+layout(location = 6) in float vertRadius;
 
 #ifdef FLAG_EFFECT_GEOMETRY
- in vec3 vertUvec;
- out vec3 geoUvec;
- out float geoRadius;
- out vec4 geoColor;
- out float geoArrayIndex;
+layout(location = 7) in vec3 vertUvec;
+layout(location = 0) out vec3 geoUvec;
+layout(location = 1) out float geoRadius;
+layout(location = 2) out vec4 geoColor;
+layout(location = 3) out float geoArrayIndex;
 #else
- out float fragRadius;
- out vec4 fragPosition;
- out vec4 fragTexCoord;
- out vec4 fragColor;
+layout(location = 0) out float fragRadius;
+layout(location = 1) out vec4 fragPosition;
+layout(location = 2) out vec4 fragTexCoord;
+layout(location = 3) out vec4 fragColor;
 #endif
 
 layout (std140) uniform matrixData {

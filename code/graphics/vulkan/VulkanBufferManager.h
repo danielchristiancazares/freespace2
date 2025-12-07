@@ -18,6 +18,12 @@ struct VulkanBuffer {
 	bool isPersistentMapped = false;
 };
 
+struct RetiredBuffer {
+	vk::UniqueBuffer buffer;
+	vk::UniqueDeviceMemory memory;
+	uint32_t retiredAtFrame;
+};
+
 class VulkanBufferManager {
   public:
 	VulkanBufferManager(vk::Device device,
@@ -38,6 +44,9 @@ class VulkanBufferManager {
 
 	void cleanup();
 
+	// Called each frame to process deferred deletions
+	void onFrameEnd();
+
   private:
 	vk::Device m_device;
 	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
@@ -45,6 +54,9 @@ class VulkanBufferManager {
 	uint32_t m_transferQueueIndex;
 
 	std::vector<VulkanBuffer> m_buffers;
+	std::vector<RetiredBuffer> m_retiredBuffers;
+	uint32_t m_currentFrame = 0;
+	static constexpr uint32_t FRAMES_BEFORE_DELETE = 3;
 
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
 	vk::BufferUsageFlags getVkUsageFlags(BufferType type) const;

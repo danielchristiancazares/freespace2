@@ -1,4 +1,4 @@
-#version 150
+#version 330
 
 layout(std140) uniform genericData
 {
@@ -16,9 +16,10 @@ layout(std140) uniform genericData
 
 uniform sampler2DArray baseMap;
 
-in vec4 fragTexCoord;
-in vec4 fragColor;
-out vec4 fragOut0;
+layout(location = 0) in vec4 fragTexCoord;
+layout(location = 1) in vec4 fragColor;
+
+layout(location = 0) out vec4 fragOut0;
 
 void main()
 {
@@ -51,4 +52,3 @@ void main()
     }
     fragOut0 = mix(mix(_48 * _162, vec4(_162.xyz, _160.x * _162.w), vec4(float(_39.alphaTexture))), _162, vec4(float(_39.noTexturing))) * _39.intensity;
 }
-

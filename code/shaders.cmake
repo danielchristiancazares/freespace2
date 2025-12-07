@@ -6,6 +6,8 @@ set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 set(VULKAN_SHADERS
 	${SHADER_DIR}/vulkan.frag
 	${SHADER_DIR}/vulkan.vert
+	${SHADER_DIR}/model.frag
+	${SHADER_DIR}/model.vert
 )
 
 set(SHADERS

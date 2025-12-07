@@ -1,7 +1,8 @@
+//? #version 330
 
 #include "lighting.sdr"
 
-in vec4 vertPosition;
+layout(location = 0) in vec4 vertPosition;
 
 layout (std140) uniform matrixData {
 	mat4 modelViewMatrix;

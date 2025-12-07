@@ -1,12 +1,18 @@
 #include "VulkanPipelineManager.h"
 
+#include "VulkanRenderer.h"
 #include "VulkanVertexTypes.h"
+#include "cmdline/cmdline.h"
+#include "globalincs/systemvars.h"
 
 #include <array>
 #include <cstddef>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#include <string>
+#include <algorithm>
 
 namespace graphics {
 namespace vulkan {
@@ -55,6 +61,34 @@ static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatM
 	// Matrix4 -> locations 8-11 (4 vec4s)
 	{vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}}, // handled specially
 };
+
+// Vulkan allows gaps in vertex attribute locations - a layout with position (0) and
+// texcoord (2) but no color (1) is valid. The shader simply won't receive data for
+// unused locations. Validation layer warnings about mismatched locations indicate
+// shader/layout incompatibility, not an invalid layout.
+
+static const char* vertexFormatToString(vertex_format_data::vertex_format fmt)
+{
+	using vf = vertex_format_data::vertex_format;
+	switch (fmt) {
+	case vf::POSITION4: return "POSITION4";
+	case vf::POSITION3: return "POSITION3";
+	case vf::POSITION2: return "POSITION2";
+	case vf::SCREEN_POS: return "SCREEN_POS";
+	case vf::COLOR3: return "COLOR3";
+	case vf::COLOR4: return "COLOR4";
+	case vf::COLOR4F: return "COLOR4F";
+	case vf::TEX_COORD2: return "TEX_COORD2";
+	case vf::TEX_COORD4: return "TEX_COORD4";
+	case vf::NORMAL: return "NORMAL";
+	case vf::TANGENT: return "TANGENT";
+	case vf::MODEL_ID: return "MODEL_ID";
+	case vf::RADIUS: return "RADIUS";
+	case vf::UVEC: return "UVEC";
+	case vf::MATRIX4: return "MATRIX4";
+	default: return "UNKNOWN";
+	}
+}
 
 static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend mode)
 {
@@ -161,10 +195,9 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 		// Create attributes for each component
 		for (const auto* component : components) {
 			auto it = VERTEX_FORMAT_MAP.find(component->format_type);
-			if (it == VERTEX_FORMAT_MAP.end()) {
-				// Unknown format - skip or use default
-				continue;
-			}
+			Assertion(it != VERTEX_FORMAT_MAP.end(),
+			          "Unknown vertex format type %d - add to VERTEX_FORMAT_MAP",
+			          static_cast<int>(component->format_type));
 
 			const auto& mapping = it->second;
 
@@ -191,7 +224,7 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 	}
 
 	for (const auto& kv : divisorsByBinding) {
-		vk::VertexInputBindingDivisorDescriptionEXT desc{};
+		vk::VertexInputBindingDivisorDescription desc{};
 		desc.binding = kv.first;
 		desc.divisor = kv.second;
 		result.divisors.push_back(desc);
@@ -202,21 +235,28 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 
 VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
 	vk::PipelineLayout pipelineLayout,
+	vk::PipelineLayout modelPipelineLayout,
 	vk::PipelineCache pipelineCache,
 	bool supportsExtendedDynamicState,
 	bool supportsExtendedDynamicState2,
 	bool supportsExtendedDynamicState3,
 	const ExtendedDynamicState3Caps& extDyn3Caps,
-	bool supportsVertexAttributeDivisor)
+	bool supportsVertexAttributeDivisor,
+	bool dynamicRenderingEnabled)
 	: m_device(device),
 	  m_pipelineLayout(pipelineLayout),
+	  m_modelPipelineLayout(modelPipelineLayout),
 	  m_pipelineCache(pipelineCache),
 	  m_supportsExtendedDynamicState(supportsExtendedDynamicState),
 	  m_supportsExtendedDynamicState2(supportsExtendedDynamicState2),
 	  m_supportsExtendedDynamicState3(supportsExtendedDynamicState3),
 	  m_extDyn3Caps(extDyn3Caps),
-	  m_supportsVertexAttributeDivisor(supportsVertexAttributeDivisor)
+	  m_supportsVertexAttributeDivisor(supportsVertexAttributeDivisor),
+	  m_dynamicRenderingEnabled(dynamicRenderingEnabled)
 {
+	if (!m_dynamicRenderingEnabled) {
+		throw std::runtime_error("Vulkan dynamicRendering feature must be enabled when using renderPass=VK_NULL_HANDLE.");
+	}
 }
 
 std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool supportsExtendedDynamicState3,
@@ -259,6 +299,12 @@ vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const Sh
 		return it->second.get();
 	}
 
+	// Pipeline not found, need to create it
+	vkprintf("Creating new pipeline - type=%d, blend=%d, layout_hash=0x%x, vert=%p, frag=%p\n",
+		static_cast<int>(key.type), static_cast<int>(key.blend_mode), 
+		static_cast<unsigned int>(key.layout_hash),
+		static_cast<const void*>(modules.vert), static_cast<const void*>(modules.frag));
+
 	auto pipeline = createPipeline(key, modules, layout);
 	auto handle = pipeline.get();
 	m_pipelines.emplace(key, std::move(pipeline));
@@ -289,21 +335,66 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 	shaderStages[1].module = modules.frag;
 	shaderStages[1].pName = "main";
 
-	// Convert vertex_layout to Vulkan vertex input state
-	const VertexInputState& vertexInputState = getVertexInputState(layout);
-
+	// Vertex input state: VertexPulling types use no vertex attributes,
+	// all other shader types use traditional vertex attributes from the layout.
 	vk::PipelineVertexInputStateCreateInfo vertexInput{};
-	vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputState.bindings.size());
-	vertexInput.pVertexBindingDescriptions = vertexInputState.bindings.data();
-	vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputState.attributes.size());
-	vertexInput.pVertexAttributeDescriptions = vertexInputState.attributes.data();
-	vk::PipelineVertexInputDivisorStateCreateInfoEXT divisorInfo{};
-	if (m_supportsVertexAttributeDivisor && !vertexInputState.divisors.empty()) {
-		divisorInfo.vertexBindingDivisorCount = static_cast<uint32_t>(vertexInputState.divisors.size());
-		divisorInfo.pVertexBindingDivisors = vertexInputState.divisors.data();
-		vertexInput.pNext = &divisorInfo;
-	} else if (!vertexInputState.divisors.empty() && !m_supportsVertexAttributeDivisor) {
-		throw std::runtime_error("VK_EXT_vertex_attribute_divisor not available but divisor > 1 requested in vertex layout.");
+	vk::PipelineVertexInputDivisorStateCreateInfo divisorInfo{};
+	const auto& layoutSpec = getShaderLayoutSpec(key.type);
+	const bool useVertexPulling = layoutSpec.vertexInput == VertexInputMode::VertexPulling;
+
+	if (useVertexPulling) {
+		// Vertex pulling: no vertex input attributes. Data is fetched from a storage
+		// buffer in the vertex shader using gl_VertexIndex.
+		vertexInput.vertexBindingDescriptionCount = 0;
+		vertexInput.pVertexBindingDescriptions = nullptr;
+		vertexInput.vertexAttributeDescriptionCount = 0;
+		vertexInput.pVertexAttributeDescriptions = nullptr;
+
+		vkprintf("Vulkan: creating pipeline type %d (vertex pulling) variant 0x%x\n",
+		         static_cast<int>(key.type), key.variant_flags);
+		vkprintf("  Vertex inputs: none (vertex pulling from storage buffer)\n");
+	} else {
+		// Traditional vertex attributes from layout
+		const VertexInputState& vertexInputState = getVertexInputState(layout);
+
+		vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputState.bindings.size());
+		vertexInput.pVertexBindingDescriptions = vertexInputState.bindings.data();
+		vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputState.attributes.size());
+		vertexInput.pVertexAttributeDescriptions = vertexInputState.attributes.data();
+
+		vkprintf("Vulkan: creating pipeline type %d variant 0x%x layout_hash %zu\n",
+		         static_cast<int>(key.type), key.variant_flags, key.layout_hash);
+		vkprintf("  Vertex bindings (%zu):\n", vertexInputState.bindings.size());
+		for (const auto& b : vertexInputState.bindings) {
+			vkprintf("    binding %u stride %u rate %s\n",
+			         b.binding,
+			         b.stride,
+			         b.inputRate == vk::VertexInputRate::eInstance ? "instance" : "vertex");
+		}
+		vkprintf("  Vertex attributes (%zu):\n", vertexInputState.attributes.size());
+		for (const auto& a : vertexInputState.attributes) {
+			vkprintf("    loc %u bind %u fmt %d offset %u\n",
+			         a.location, a.binding, static_cast<int>(a.format), a.offset);
+		}
+		// Also log the original layout components for cross-checking
+		vkprintf("  Vertex layout components (%zu):\n", layout.get_num_vertex_components());
+		for (size_t i = 0; i < layout.get_num_vertex_components(); ++i) {
+			const auto* comp = layout.get_vertex_component(i);
+			vkprintf("    %s buffer %zu offset %zu stride %zu divisor %zu\n",
+			         vertexFormatToString(comp->format_type),
+			         comp->buffer_number,
+			         comp->offset,
+			         layout.get_vertex_stride(comp->buffer_number),
+			         comp->divisor);
+		}
+
+		if (m_supportsVertexAttributeDivisor && !vertexInputState.divisors.empty()) {
+			divisorInfo.vertexBindingDivisorCount = static_cast<uint32_t>(vertexInputState.divisors.size());
+			divisorInfo.pVertexBindingDivisors = vertexInputState.divisors.data();
+			vertexInput.pNext = &divisorInfo;
+		} else if (!vertexInputState.divisors.empty() && !m_supportsVertexAttributeDivisor) {
+			throw std::runtime_error("vertexAttributeInstanceRateDivisor not enabled but divisor > 1 requested in vertex layout.");
+		}
 	}
 
 	vk::PipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -377,14 +468,29 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 	pipelineInfo.pDepthStencilState = &depthStencil;
 	pipelineInfo.pColorBlendState = &colorBlending;
 	pipelineInfo.pDynamicState = &dynamicState;
-	pipelineInfo.layout = m_pipelineLayout;
+
+	switch (layoutSpec.pipelineLayout) {
+	case PipelineLayoutKind::Model:
+		pipelineInfo.layout = m_modelPipelineLayout;
+		break;
+	case PipelineLayoutKind::Standard:
+		pipelineInfo.layout = m_pipelineLayout;
+		break;
+	}
+
 	pipelineInfo.renderPass = VK_NULL_HANDLE;
 	pipelineInfo.pNext = &renderingInfo;
 
 	auto pipelineResult = m_device.createGraphicsPipelineUnique(m_pipelineCache, pipelineInfo);
 	if (pipelineResult.result != vk::Result::eSuccess) {
+		vkprintf("Vulkan: ERROR - Failed to create graphics pipeline! result=%s, type=%d\n",
+			vk::to_string(pipelineResult.result).c_str(), static_cast<int>(key.type));
 		throw std::runtime_error("Failed to create Vulkan graphics pipeline.");
 	}
+
+	vkprintf("Pipeline created successfully - type=%d, blend=%d, pipeline=%p\n",
+		static_cast<int>(key.type), static_cast<int>(key.blend_mode),
+		static_cast<const void*>(pipelineResult.value.get()));
 
 	return std::move(pipelineResult.value);
 }

@@ -1,11 +1,12 @@
+//? #version 330
 
-in vec2 vertPosition;
-in vec4 vertColor;
-in vec2 vertTexCoord;
+layout(location = 0) in vec2 vertPosition;
+layout(location = 1) in vec4 vertColor;
+layout(location = 2) in vec2 vertTexCoord;
 
-out vec2 fragTexCoord;
-out vec4 fragColor;
-out vec2 fragScreenPosition;
+layout(location = 0) out vec2 fragTexCoord;
+layout(location = 1) out vec4 fragColor;
+layout(location = 2) out vec2 fragScreenPosition;
 
 layout (std140) uniform genericData {
 	mat4 projMatrix;

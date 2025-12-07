@@ -1,3 +1,5 @@
+//? #version 330
+
 #define FXAA_EARLY_EXIT 1
 #define FXAA_DISCARD 1
 #define FXAA_FAST_PIXEL_OFFSET 1 // With OpenGL 3.2 we can always do this
@@ -488,9 +490,9 @@ FxaaFloat4 FxaaPixelShader(
 	#endif
 }
 uniform sampler2D tex0;
-in vec2 v_rcpFrame;
-noperspective in vec2 v_pos;
-out vec4 fragOut0;
+layout(location = 0) in vec2 v_rcpFrame;
+layout(location = 1) noperspective in vec2 v_pos;
+layout(location = 0) out vec4 fragOut0;
 void main() {
 	fragOut0 = FxaaPixelShader(v_pos, tex0, v_rcpFrame, FXAA_QUALITY_SUBPIX, FXAA_QUALITY_EDGE_THRESHOLD, FXAA_QUALITY_EDGE_THRESHOLD_MIN);
 }

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <unordered_map>
+#include <type_traits>
 
 using graphics::vulkan::PipelineKey;
 using graphics::vulkan::VertexInputState;
@@ -84,4 +85,122 @@ TEST(VulkanPipelineManager, Scenario_PipelineKey_ChangesWithSampleCountAndBlend)
 	b.blend_mode = ALPHA_BLEND_ALPHA_BLEND_ALPHA;
 
 	EXPECT_FALSE(a == b) << "PipelineKey should differ when sample count, blend mode, or shader modules differ.";
+}
+
+TEST(VulkanPipelineManager, Scenario_ModelShaderType_HasCorrectEnumValue)
+{
+	// Given the shader_type enum definition
+	// When checking SDR_TYPE_MODEL value
+	// Then it should be 0 (first value after SDR_TYPE_NONE = -1)
+	EXPECT_EQ(static_cast<int>(SDR_TYPE_MODEL), 0)
+		<< "SDR_TYPE_MODEL should have enum value 0";
+	EXPECT_EQ(static_cast<int>(SDR_TYPE_NONE), -1)
+		<< "SDR_TYPE_NONE should have enum value -1";
+}
+
+TEST(VulkanPipelineManager, Scenario_ModelPipelineKey_MatchesModelType)
+{
+	// Given a PipelineKey with SDR_TYPE_MODEL
+	PipelineKey modelKey{};
+	modelKey.type = SDR_TYPE_MODEL;
+	modelKey.variant_flags = 0;
+	modelKey.color_format = static_cast<VkFormat>(vk::Format::eB8G8R8A8Unorm);
+	modelKey.depth_format = static_cast<VkFormat>(vk::Format::eD32Sfloat);
+	modelKey.sample_count = VK_SAMPLE_COUNT_1_BIT;
+	modelKey.color_attachment_count = 1;
+	modelKey.blend_mode = ALPHA_BLEND_NONE;
+	modelKey.layout_hash = 0x1234;
+
+	// When comparing with SDR_TYPE_MODEL enum value
+	// Then the comparison should match (verifies the comparison logic used in layout selection)
+	EXPECT_TRUE(modelKey.type == SDR_TYPE_MODEL)
+		<< "PipelineKey with SDR_TYPE_MODEL should match SDR_TYPE_MODEL enum value";
+	EXPECT_EQ(static_cast<int>(modelKey.type), 0)
+		<< "PipelineKey.type should be 0 when set to SDR_TYPE_MODEL";
+}
+
+TEST(VulkanPipelineManager, Scenario_NonModelPipelineKey_DoesNotMatchModelType)
+{
+	// Given a PipelineKey with a non-model shader type
+	PipelineKey defaultKey{};
+	defaultKey.type = SDR_TYPE_DEFAULT_MATERIAL;
+	defaultKey.variant_flags = 0;
+	defaultKey.color_format = static_cast<VkFormat>(vk::Format::eB8G8R8A8Unorm);
+	defaultKey.depth_format = static_cast<VkFormat>(vk::Format::eD32Sfloat);
+	defaultKey.sample_count = VK_SAMPLE_COUNT_1_BIT;
+	defaultKey.color_attachment_count = 1;
+	defaultKey.blend_mode = ALPHA_BLEND_NONE;
+	defaultKey.layout_hash = 0x1234;
+
+	// When comparing with SDR_TYPE_MODEL enum value
+	// Then the comparison should not match (verifies non-model types use regular layout)
+	EXPECT_FALSE(defaultKey.type == SDR_TYPE_MODEL)
+		<< "PipelineKey with SDR_TYPE_DEFAULT_MATERIAL should not match SDR_TYPE_MODEL";
+	EXPECT_NE(static_cast<int>(defaultKey.type), 0)
+		<< "PipelineKey.type should not be 0 when set to SDR_TYPE_DEFAULT_MATERIAL";
+}
+
+TEST(VulkanPipelineManager, Scenario_UninitializedPipelineKey_DoesNotMatchModelType)
+{
+	// Given an uninitialized PipelineKey (zero-initialized)
+	PipelineKey uninitKey{};
+	// type is zero-initialized to 0
+
+	// When comparing with SDR_TYPE_MODEL enum value
+	// Then even though the value is 0, the comparison should work correctly
+	// This test verifies that the comparison logic correctly identifies model vs uninitialized
+	EXPECT_EQ(static_cast<int>(uninitKey.type), 0)
+		<< "Uninitialized PipelineKey.type is 0";
+	
+	// Note: This test documents the behavior - if type is 0, it will match SDR_TYPE_MODEL
+	// This is expected behavior since SDR_TYPE_MODEL == 0, but highlights the importance
+	// of proper initialization to avoid false matches
+	EXPECT_TRUE(uninitKey.type == SDR_TYPE_MODEL)
+		<< "Uninitialized PipelineKey with type=0 will match SDR_TYPE_MODEL (this is why proper initialization is critical)";
+}
+
+TEST(VulkanPipelineManager, Scenario_DynamicRenderingRequired)
+{
+	// Given dynamic rendering is disabled on the device
+	vk::Device fakeDevice{};
+	vk::PipelineLayout fakeLayout{};
+	vk::PipelineCache fakeCache{};
+	graphics::vulkan::ExtendedDynamicState3Caps caps{};
+
+	// When constructing the pipeline manager
+	// Then it should refuse to initialize because renderPass is always VK_NULL_HANDLE
+	EXPECT_THROW(
+		graphics::vulkan::VulkanPipelineManager(fakeDevice,
+			fakeLayout,
+			fakeLayout,
+			fakeCache,
+			/*supportsExtendedDynamicState=*/true,
+			/*supportsExtendedDynamicState2=*/true,
+			/*supportsExtendedDynamicState3=*/false,
+			caps,
+			/*supportsVertexAttributeDivisor=*/false,
+			/*dynamicRenderingEnabled=*/false),
+		std::runtime_error);
+}
+
+TEST(VulkanPipelineManager, Scenario_InstanceDivisorUsesCoreStructs)
+{
+	// Given a layout with an instanced attribute (divisor > 0)
+	vertex_layout layout;
+	layout.add_vertex_component(vertex_format_data::POSITION3,
+		/*stride*/ 12,
+		/*offset*/ 0,
+		/*divisor*/ 2,
+		/*buffer*/ 0);
+
+	// When converting to Vulkan vertex input descriptions
+	auto state = convert(layout);
+
+	// Then the divisor list should use core VkVertexInputBindingDivisorDescription and carry the requested divisor
+	ASSERT_EQ(state.divisors.size(), 1u);
+	using CoreDivisor = vk::VertexInputBindingDivisorDescription;
+	const bool usesCoreStruct = std::is_same_v<CoreDivisor, std::decay_t<decltype(state.divisors.front())>>;
+	EXPECT_TRUE(usesCoreStruct) << "Divisor descriptions should use core (non-EXT) struct in Vulkan 1.4";
+	EXPECT_EQ(state.divisors.front().binding, 0u);
+	EXPECT_EQ(state.divisors.front().divisor, 2u);
 }

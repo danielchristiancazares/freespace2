@@ -1,4 +1,4 @@
-//? #version 150
+//? #version 330
 const int LT_DIRECTIONAL	= 0;		// A light like a sun
 const int LT_POINT			= 1;		// A point light, like an explosion
 const int LT_TUBE			= 2;		// A tube light, like a fluorescent light

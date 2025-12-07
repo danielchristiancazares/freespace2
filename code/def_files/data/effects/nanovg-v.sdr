@@ -1,4 +1,6 @@
 
+//? #version 330
+
 layout(std140) uniform NanoVGUniformData {
     mat3 scissorMat;
 
@@ -24,11 +26,11 @@ layout(std140) uniform NanoVGUniformData {
     int texArrayIndex;
 };
 
-in vec2 vertPosition;
-in vec2 vertTexCoord;
+layout(location = 0) in vec2 vertPosition;
+layout(location = 2) in vec2 vertTexCoord;
 
-out vec2 ftcoord;
-out vec2 fpos;
+layout(location = 0) out vec2 ftcoord;
+layout(location = 1) out vec2 fpos;
 
 void main(void) {
 	ftcoord = vertTexCoord;

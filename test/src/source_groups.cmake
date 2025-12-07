@@ -25,6 +25,7 @@ add_file_folder("Globalincs"
 
 add_file_folder("Graphics"
 	   graphics/test_font.cpp
+	   graphics/test_post_processing_null_safety.cpp
 )
 
 if(FSO_BUILD_WITH_VULKAN)
@@ -32,6 +33,12 @@ add_file_folder("Graphics"
 	   graphics/test_vulkan_dynstate.cpp
 	   graphics/test_vulkan_pipeline_manager.cpp
 	   graphics/test_vulkan_frame_lifecycle.cpp
+	   graphics/test_vulkan_shader_manager_model.cpp
+	   graphics/test_vulkan_texture_contract.cpp
+	   graphics/test_vulkan_renderer_shutdown.cpp
+	   graphics/test_model_shader_spirv.cpp
+	   graphics/test_vulkan_descriptor_layouts.cpp
+	   graphics/test_vulkan_shader_layout_contracts.cpp
 )
 endif()
 

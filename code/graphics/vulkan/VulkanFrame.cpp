@@ -36,6 +36,10 @@ VulkanFrame::VulkanFrame(vk::Device device,
 	cmdAlloc.commandBufferCount = 1;
 	m_commandBuffer = m_device.allocateCommandBuffers(cmdAlloc).front();
 
+	vk::FenceCreateInfo fenceInfo;
+	fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled; // allow first frame without waiting
+	m_inflightFence = m_device.createFenceUnique(fenceInfo);
+
 	vk::SemaphoreTypeCreateInfo timelineType;
 	timelineType.semaphoreType = vk::SemaphoreType::eTimeline;
 	timelineType.initialValue = m_timelineValue;
@@ -51,20 +55,17 @@ VulkanFrame::VulkanFrame(vk::Device device,
 
 void VulkanFrame::wait_for_gpu()
 {
-	if (m_timelineValue == 0) {
+	auto fence = m_inflightFence.get();
+	if (!fence) {
 		return;
 	}
 
-	vk::SemaphoreWaitInfo waitInfo;
-	waitInfo.semaphoreCount = 1;
-	auto semaphore = m_timelineSemaphore.get();
-	waitInfo.pSemaphores = &semaphore;
-	waitInfo.pValues = &m_timelineValue;
-
-	auto result = m_device.waitSemaphores(waitInfo, std::numeric_limits<uint64_t>::max());
-	if (result != vk::Result::eSuccess && result != vk::Result::eTimeout) {
-		throw std::runtime_error("Timeline semaphore wait failed");
+	auto result = m_device.waitForFences(1, &fence, VK_TRUE, std::numeric_limits<uint64_t>::max());
+	if (result != vk::Result::eSuccess) {
+		throw std::runtime_error("Fence wait failed for Vulkan frame");
 	}
+	auto resetResult = m_device.resetFences(1, &fence);
+	Assertion(resetResult == vk::Result::eSuccess, "Failed to reset fence for Vulkan frame");
 }
 
 void VulkanFrame::reset()

@@ -1,4 +1,4 @@
-//? #version 150
+//? #version 330
 #extension GL_ARB_gpu_shader5: enable
 
 #include "shadows.sdr"
@@ -6,11 +6,11 @@
 #conditional_include +"LARGE_SHADER" "main_large.sdr"
 #conditional_include -"LARGE_SHADER" "main_small.sdr"
 
-in vec4 vertPosition;
-in vec4 vertTexCoord;
-in vec3 vertNormal;
-in vec4 vertTangent;
-in float vertModelID;
+layout(location = 0) in vec4 vertPosition;
+layout(location = 2) in vec4 vertTexCoord;
+layout(location = 3) in vec3 vertNormal;
+layout(location = 4) in vec4 vertTangent;
+layout(location = 5) in float vertModelID;
 
 #define MAX_LIGHTS 8
 
@@ -100,7 +100,7 @@ layout (std140) uniform modelData {
 uniform samplerBuffer transform_tex;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_TRANSFORM
 
-out VertexOutput {
+layout(location = 0) out VertexOutput {
 	mat3 tangentMatrix;
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_FOG

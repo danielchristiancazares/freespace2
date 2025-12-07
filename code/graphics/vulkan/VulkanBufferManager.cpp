@@ -34,7 +34,7 @@ vk::BufferUsageFlags VulkanBufferManager::getVkUsageFlags(BufferType type) const
 {
 	switch (type) {
 	case BufferType::Vertex:
-		return vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst;
+		return vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst;
 	case BufferType::Index:
 		return vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst;
 	case BufferType::Uniform:
@@ -78,9 +78,8 @@ gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageH
 
 void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return;
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in deleteBuffer", handle.value());
 
 	auto& buffer = m_buffers[handle.value()];
 	
@@ -97,60 +96,11 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 	buffer.size = 0;
 }
 
-void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
-{
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return;
-	}
-
-	auto& buffer = m_buffers[handle.value()];
-
-	// Unmap old buffer if mapped
-	if (buffer.mapped) {
-		m_device.unmapMemory(buffer.memory.get());
-		buffer.mapped = nullptr;
-	}
-
-	// Destroy old buffer
-	buffer.buffer.reset();
-	buffer.memory.reset();
-	buffer.size = 0;
-
-	if (size == 0) {
-		return;
-	}
-
-	// Create new buffer with requested size
-	vk::BufferCreateInfo bufferInfo;
-	bufferInfo.size = size;
-	bufferInfo.usage = getVkUsageFlags(buffer.type);
-	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-
-	buffer.buffer = m_device.createBufferUnique(bufferInfo);
-
-	auto memRequirements = m_device.getBufferMemoryRequirements(buffer.buffer.get());
-	vk::MemoryAllocateInfo allocInfo;
-	allocInfo.allocationSize = memRequirements.size;
-	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, getMemoryProperties(buffer.usage));
-
-	buffer.memory = m_device.allocateMemoryUnique(allocInfo);
-	m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
-
-	// Remap if host-visible (all our usage hints use host-visible memory)
-	buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
-
-	buffer.size = size;
-}
-
 void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size, const void* data)
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return;
-	}
-
-	if (size == 0) {
-		return; // Can't create buffer with zero size
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in updateBufferData", handle.value());
+	Assertion(size > 0, "Buffer size must be > 0 in updateBufferData");
 
 	auto& buffer = m_buffers[handle.value()];
 
@@ -188,33 +138,23 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 		buffer.size = size;
 	}
 
-	// Upload data (if provided)
+	// Upload data
 	if (buffer.mapped) {
-		if (data != nullptr) {
-			// Host-visible: direct copy
-			memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
-		} else {
-			// Zero-initialize buffer when data is nullptr (safer than leaving uninitialized)
-			memset(buffer.mapped, 0, size);
-		}
+		// Host-visible: direct copy
+		memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
 		// Host-coherent memory doesn't need explicit flush
-	} else if (data != nullptr) {
+	} else {
 		// Device-local: need staging buffer (TODO: implement staging buffer upload)
 		// For now, this is an error - device-local buffers need staging
 		// In practice, Static buffers should use staging, Dynamic/Streaming should be host-visible
 		UNREACHABLE("Cannot update device-local buffer without staging buffer!");
-	} else {
-		// data is nullptr and buffer is device-local - cannot zero-initialize without staging buffer
-		// This case should not occur in practice since all our usage hints use host-visible memory
-		UNREACHABLE("Cannot zero-initialize device-local buffer without staging buffer!");
 	}
 }
 
 void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t offset, size_t size, const void* data)
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return;
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in updateBufferDataOffset", handle.value());
 
 	auto& buffer = m_buffers[handle.value()];
 
@@ -241,15 +181,13 @@ void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t
 
 void* VulkanBufferManager::mapBuffer(gr_buffer_handle handle)
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return nullptr;
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in mapBuffer", handle.value());
 
 	auto& buffer = m_buffers[handle.value()];
 
-	if (buffer.usage != BufferUsageHint::PersistentMapping) {
-		return nullptr; // Only persistent mapping supports explicit mapping
-	}
+	Assertion(buffer.usage == BufferUsageHint::PersistentMapping,
+	          "mapBuffer called on non-persistent buffer");
 
 	return buffer.mapped;
 }
@@ -273,20 +211,86 @@ void VulkanBufferManager::flushMappedBuffer(gr_buffer_handle handle, size_t offs
 
 vk::Buffer VulkanBufferManager::getBuffer(gr_buffer_handle handle) const
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return vk::Buffer();
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in getBuffer", handle.value());
 
 	return m_buffers[handle.value()].buffer.get();
 }
 
 BufferType VulkanBufferManager::getBufferType(gr_buffer_handle handle) const
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return BufferType::Vertex; // Default
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in getBufferType", handle.value());
 
 	return m_buffers[handle.value()].type;
+}
+
+void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
+{
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in resizeBuffer", handle.value());
+	Assertion(size > 0, "Buffer size must be > 0 in resizeBuffer");
+
+	auto& buffer = m_buffers[handle.value()];
+
+	// If size is the same, nothing to do
+	if (size == buffer.size) {
+		return;
+	}
+
+	// Retire the old buffer if it exists
+	if (buffer.buffer) {
+		// Unmap if mapped
+		if (buffer.mapped) {
+			m_device.unmapMemory(buffer.memory.get());
+			buffer.mapped = nullptr;
+		}
+
+		// Move to retired buffers for deferred deletion
+		RetiredBuffer retired;
+		retired.buffer = std::move(buffer.buffer);
+		retired.memory = std::move(buffer.memory);
+		retired.retiredAtFrame = m_currentFrame;
+		m_retiredBuffers.push_back(std::move(retired));
+	}
+
+	// Create new buffer with the new size
+	vk::BufferCreateInfo bufferInfo;
+	bufferInfo.size = size;
+	bufferInfo.usage = getVkUsageFlags(buffer.type);
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+	buffer.buffer = m_device.createBufferUnique(bufferInfo);
+
+	auto memRequirements = m_device.getBufferMemoryRequirements(buffer.buffer.get());
+	vk::MemoryAllocateInfo allocInfo;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, getMemoryProperties(buffer.usage));
+
+	buffer.memory = m_device.allocateMemoryUnique(allocInfo);
+	m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
+
+	// Map if host-visible (all our usage hints use host-visible memory)
+	buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
+
+	buffer.size = size;
+}
+
+void VulkanBufferManager::onFrameEnd()
+{
+	// Increment frame counter
+	++m_currentFrame;
+
+	// Clean up retired buffers that are old enough
+	auto it = m_retiredBuffers.begin();
+	while (it != m_retiredBuffers.end()) {
+		if (m_currentFrame - it->retiredAtFrame >= FRAMES_BEFORE_DELETE) {
+			// Buffer will be automatically destroyed via UniqueBuffer/UniqueDeviceMemory
+			it = m_retiredBuffers.erase(it);
+		} else {
+			++it;
+		}
+	}
 }
 
 void VulkanBufferManager::cleanup()
@@ -300,6 +304,7 @@ void VulkanBufferManager::cleanup()
 	}
 
 	m_buffers.clear();
+	m_retiredBuffers.clear();
 }
 
 } // namespace vulkan

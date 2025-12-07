@@ -935,6 +935,9 @@ typedef struct screen {
 
 	std::function<void(bool set_override)> gf_override_fog;
 
+	// Model vertex heap registration (Vulkan only - for descriptor binding)
+	std::function<void(gr_buffer_handle handle)> gf_register_model_vertex_heap;
+
 	//OpenXR functions
 	std::function<SCP_vector<const char*>()> gf_openxr_get_extensions;
 	std::function<bool()> gf_openxr_test_capabilities;
@@ -1152,6 +1155,13 @@ inline void gr_flush_mapped_buffer(gr_buffer_handle handle, size_t offset, size_
 {
 	gr_screen.gf_flush_mapped_buffer(handle, offset, size);
 }
+inline void gr_register_model_vertex_heap(gr_buffer_handle handle)
+{
+	// No-op if backend doesn't support model vertex heap registration (OpenGL)
+	if (gr_screen.gf_register_model_vertex_heap) {
+		gr_screen.gf_register_model_vertex_heap(handle);
+	}
+}
 #define gr_update_transform_buffer GR_CALL(gr_screen.gf_update_transform_buffer)
 
 #define gr_scene_texture_begin GR_CALL(gr_screen.gf_scene_texture_begin)
@@ -1202,6 +1212,21 @@ inline void gr_render_primitives(material* material_info,
 	gr_buffer_handle buffer_handle = gr_buffer_handle(),
 	size_t buffer_offset = 0)
 {
+	static uint64_t gr_render_primitives_calls = 0;
+	gr_render_primitives_calls++;
+		if (gr_render_primitives_calls <= 5 || (gr_render_primitives_calls & 0xFF) == 0) {
+			if (FSO_DEBUG || Cmdline_graphics_debug_output) {
+				mprintf(("gr_render_primitives() entry #%llu material=%p prim_type=%d layout=%p offset=%d n_verts=%d buffer=%d buf_offset=%zu\n",
+					static_cast<unsigned long long>(gr_render_primitives_calls),
+					static_cast<void*>(material_info),
+					static_cast<int>(prim_type),
+					static_cast<void*>(layout),
+					vert_offset,
+					n_verts,
+					buffer_handle.value(),
+					buffer_offset));
+			}
+		}
 	gr_screen
 		.gf_render_primitives(material_info, prim_type, layout, vert_offset, n_verts, buffer_handle, buffer_offset);
 }
@@ -1213,6 +1238,20 @@ inline void gr_render_primitives_particle(particle_material* material_info,
 	int n_verts,
 	gr_buffer_handle buffer_handle = gr_buffer_handle())
 {
+	static uint64_t gr_render_primitives_particle_calls = 0;
+	gr_render_primitives_particle_calls++;
+		if (gr_render_primitives_particle_calls <= 5 || (gr_render_primitives_particle_calls & 0xFF) == 0) {
+			if (FSO_DEBUG || Cmdline_graphics_debug_output) {
+				mprintf(("gr_render_primitives_particle() entry #%llu material=%p prim_type=%d layout=%p offset=%d n_verts=%d buffer=%d\n",
+					static_cast<unsigned long long>(gr_render_primitives_particle_calls),
+					static_cast<void*>(material_info),
+					static_cast<int>(prim_type),
+					static_cast<void*>(layout),
+					offset,
+					n_verts,
+					buffer_handle.value()));
+			}
+		}
 	gr_screen.gf_render_primitives_particle(material_info, prim_type, layout, offset, n_verts, buffer_handle);
 }
 
@@ -1243,6 +1282,20 @@ inline void gr_render_primitives_distortion(distortion_material* material_info,
 	int n_verts,
 	gr_buffer_handle buffer_handle = gr_buffer_handle())
 {
+	static uint64_t gr_render_primitives_distortion_calls = 0;
+	gr_render_primitives_distortion_calls++;
+		if (gr_render_primitives_distortion_calls <= 5 || (gr_render_primitives_distortion_calls & 0xFF) == 0) {
+			if (FSO_DEBUG || Cmdline_graphics_debug_output) {
+				mprintf(("gr_render_primitives_distortion() entry #%llu material=%p prim_type=%d layout=%p offset=%d n_verts=%d buffer=%d\n",
+					static_cast<unsigned long long>(gr_render_primitives_distortion_calls),
+					static_cast<void*>(material_info),
+					static_cast<int>(prim_type),
+					static_cast<void*>(layout),
+					offset,
+					n_verts,
+					buffer_handle.value()));
+			}
+		}
 	gr_screen.gf_render_primitives_distortion(material_info, prim_type, layout, offset, n_verts, buffer_handle);
 }
 
@@ -1258,6 +1311,18 @@ inline void gr_render_movie(movie_material* material_info,
 
 inline void gr_render_model(model_material* material_info, indexed_vertex_source *vert_source, vertex_buffer* bufferp, size_t texi)
 {
+	static uint64_t gr_render_model_calls = 0;
+	gr_render_model_calls++;
+		if (gr_render_model_calls <= 5 || (gr_render_model_calls & 0xFF) == 0) {
+			if (FSO_DEBUG || Cmdline_graphics_debug_output) {
+				mprintf(("gr_render_model() entry #%llu material=%p vert_source=%p buffer=%p texi=%zu\n",
+				         static_cast<unsigned long long>(gr_render_model_calls),
+				         static_cast<void*>(material_info),
+				         static_cast<void*>(vert_source),
+				         static_cast<void*>(bufferp),
+				         texi));
+			}
+		}
 	gr_screen.gf_render_model(material_info, vert_source, bufferp, texi);
 }
 

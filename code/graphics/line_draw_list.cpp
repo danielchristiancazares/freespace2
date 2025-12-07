@@ -39,6 +39,7 @@ void line_draw_list::flush() {
 
 	vertex_layout layout;
 	layout.add_vertex_component(vertex_format_data::POSITION2, sizeof(line_vertex), offsetof(line_vertex, position));
+	layout.add_vertex_component(vertex_format_data::TEX_COORD2, sizeof(line_vertex), offsetof(line_vertex, texcoord));
 	layout.add_vertex_component(vertex_format_data::COLOR4F, sizeof(line_vertex), offsetof(line_vertex, color));
 
 	gr_render_primitives_2d_immediate(&line_mat,
@@ -66,6 +67,9 @@ void line_draw_list::add_vertex(int x, int y, int resize_mode, const color* colo
 	// m!m - This is silly but there is no better solution at the moment...
 	vtx.position.x += i2fl(offset_x) * w_scale;
 	vtx.position.y += i2fl(offset_y) * h_scale;
+
+	vtx.texcoord.x = 0.0f;
+	vtx.texcoord.y = 0.0f;
 
 	vtx.color.xyzw.x = color->red / 255.f;
 	vtx.color.xyzw.y = color->green / 255.f;

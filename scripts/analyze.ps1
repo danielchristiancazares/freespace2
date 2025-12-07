@@ -71,7 +71,70 @@ if (-not (Test-Path -LiteralPath $CdbPath)) {
 $DumpFull = (Resolve-Path -LiteralPath $Dump).Path
 $SymFull = (Resolve-Path -LiteralPath $SymbolPath).Path
 
-$escapedSym = $SymFull.Replace('"', '\"')
-$Commands = ".symfix; .sympath+ ""$escapedSym""; .reload; !analyze -v; .ecxr; kv; q"
+# Create a temporary debugger script file to avoid argument escaping issues
+$ScriptFile = [System.IO.Path]::GetTempFileName()
+try {
+    $ScriptContent = @"
+.symfix
+.sympath+ "$SymFull"
+.reload
+!analyze -v
+q
+"@
+    Set-Content -Path $ScriptFile -Value $ScriptContent -Encoding ASCII
 
-& $CdbPath -z $DumpFull -c $Commands
+    $rawOutput = & $CdbPath -z $DumpFull -cf $ScriptFile 2>&1 | Out-String
+
+    # Extract just the essential info
+    $lines = $rawOutput -split "`r?`n"
+
+    # Find failure bucket
+    $failureBucket = ""
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match 'Key\s*:\s*Failure\.Bucket') {
+            if ($i + 1 -lt $lines.Count -and $lines[$i + 1] -match 'Value:\s*(.+)') {
+                $failureBucket = $Matches[1].Trim()
+            }
+        }
+    }
+
+    # Extract stack trace (simplified - just function names)
+    $inStack = $false
+    $stack = @()
+    foreach ($line in $lines) {
+        if ($line -match '^STACK_TEXT:') {
+            $inStack = $true
+            continue
+        }
+        if ($inStack) {
+            # Stop at next section or empty line after stack
+            if ($line -match '^\w+:' -and $line -notmatch '^[0-9a-f]') {
+                break
+            }
+            # Parse stack frame - extract symbol (everything after last colon before the offset)
+            if ($line -match ':\s*([^:]+![^\+]+)') {
+                $symbol = $Matches[1].Trim()
+                # Skip noise
+                if ($symbol -match 'common_assert|_wassert|__scrt_|WinMainCRTStartup|BaseThreadInitThunk|RtlUserThreadStart') { continue }
+                if ($symbol -match 'scalar deleting destructor|std::unique_ptr|std::default_delete|invoke_main') { continue }
+                $stack += $symbol
+            }
+        }
+    }
+
+    # Output concise summary
+    Write-Host ""
+    Write-Host "Crash: $failureBucket" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Stack:" -ForegroundColor Yellow
+    foreach ($frame in $stack) {
+        # Strip common module prefix for readability
+        $short = $frame -replace '^fs2_open_[^!]+!', ''
+        Write-Host "  $short"
+    }
+}
+finally {
+    if (Test-Path $ScriptFile) {
+        Remove-Item $ScriptFile -ErrorAction SilentlyContinue
+    }
+}

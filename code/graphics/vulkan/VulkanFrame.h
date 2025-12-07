@@ -1,11 +1,18 @@
 #pragma once
 
 #include "VulkanRingBuffer.h"
+#include "graphics/grinternal.h"
 
 #include <vulkan/vulkan.hpp>
+#include <cstdint>
 
 namespace graphics {
 namespace vulkan {
+
+struct ModelUniformState {
+	gr_buffer_handle bufferHandle{};          // Engine-level buffer handle currently bound to descriptor
+	uint32_t dynamicOffset = UINT32_MAX;      // Dynamic offset for next draw; UINT32_MAX means "unset"
+};
 
 class VulkanFrame {
   public:
@@ -26,6 +33,7 @@ class VulkanFrame {
 	VulkanRingBuffer& uniformBuffer() { return m_uniformRing; }
 	VulkanRingBuffer& vertexBuffer() { return m_vertexRing; }
 	VulkanRingBuffer& stagingBuffer() { return m_stagingRing; }
+	vk::Fence inflightFence() const { return m_inflightFence.get(); }
 
 	vk::Semaphore imageAvailable() const { return m_imageAvailable.get(); }
 	vk::Semaphore renderFinished() const { return m_renderFinished.get(); }
@@ -35,11 +43,15 @@ class VulkanFrame {
 	uint64_t nextTimelineValue() const { return m_timelineValue + 1; }
 	void advanceTimeline() { ++m_timelineValue; }
 
+	vk::DescriptorSet modelDescriptorSet = nullptr;
+	ModelUniformState modelUniformState;
+
   private:
 	vk::Device m_device;
 
 	vk::UniqueCommandPool m_commandPool;
 	vk::CommandBuffer m_commandBuffer;
+	vk::UniqueFence m_inflightFence;
 
 	vk::UniqueSemaphore m_imageAvailable;
 	vk::UniqueSemaphore m_renderFinished;
