@@ -796,6 +796,7 @@ typedef struct screen {
 	std::function<void(gr_buffer_handle handle, size_t size, const void* data)> gf_update_buffer_data;
 	std::function<void(gr_buffer_handle handle, size_t offset, size_t size, const void* data)>
 		gf_update_buffer_data_offset;
+	std::function<void(gr_buffer_handle handle, size_t size)> gf_resize_buffer;
 	std::function<void*(gr_buffer_handle handle)> gf_map_buffer;
 	std::function<void(gr_buffer_handle handle, size_t offset, size_t size)> gf_flush_mapped_buffer;
 	std::function<void(void* data, size_t size)> gf_update_transform_buffer;
@@ -1139,6 +1140,10 @@ inline gr_buffer_handle gr_create_buffer(BufferType type, BufferUsageHint usage)
 #define gr_delete_buffer GR_CALL(gr_screen.gf_delete_buffer)
 #define gr_update_buffer_data GR_CALL(gr_screen.gf_update_buffer_data)
 #define gr_update_buffer_data_offset GR_CALL(gr_screen.gf_update_buffer_data_offset)
+inline void gr_resize_buffer(gr_buffer_handle handle, size_t size)
+{
+	gr_screen.gf_resize_buffer(handle, size);
+}
 inline void* gr_map_buffer(gr_buffer_handle handle)
 {
 	return gr_screen.gf_map_buffer(handle);

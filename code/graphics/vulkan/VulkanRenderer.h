@@ -9,6 +9,7 @@
 #include "VulkanFrame.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanShaderManager.h"
+#include "VulkanTextureManager.h"
 #include "FrameLifecycleTracker.h"
 
 #include "graphics/2d.h"
@@ -76,6 +77,10 @@ class VulkanRenderer {
 	// Helper methods for rendering
 	vk::Sampler getDummySampler() const { return m_dummySampler.get(); }
 	vk::ImageView getDummyImageView() const { return m_dummyImageView.get(); }
+	vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
+		VulkanFrame& frame,
+		vk::CommandBuffer cmd,
+		const VulkanTextureManager::SamplerKey& samplerKey);
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	VkFormat getSwapChainImageFormat() const { return static_cast<VkFormat>(m_swapChainImageFormat); }
 	VkFormat getDepthFormat() const { return static_cast<VkFormat>(m_depthFormat); }
@@ -97,13 +102,16 @@ class VulkanRenderer {
 	void deleteBuffer(gr_buffer_handle handle);
 	void updateBufferData(gr_buffer_handle handle, size_t size, const void* data);
 	void updateBufferDataOffset(gr_buffer_handle handle, size_t offset, size_t size, const void* data);
+	void resizeBuffer(gr_buffer_handle handle, size_t size);
 	void* mapBuffer(gr_buffer_handle handle);
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
+	int preloadTexture(int bitmapHandle, bool isAABitmap);
 
   private:
 	static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 	static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
 	static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
+	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
 
 	bool initDisplayDevice() const;
 	bool initializeInstance();
@@ -165,6 +173,7 @@ class VulkanRenderer {
 	std::unique_ptr<VulkanShaderManager> m_shaderManager;
 	std::unique_ptr<VulkanPipelineManager> m_pipelineManager;
 	std::unique_ptr<VulkanBufferManager> m_bufferManager;
+	std::unique_ptr<VulkanTextureManager> m_textureManager;
 
 	std::array<std::unique_ptr<VulkanFrame>, MAX_FRAMES_IN_FLIGHT> m_frames;
 	uint32_t m_currentFrame = 0;

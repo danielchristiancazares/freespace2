@@ -1,9 +1,13 @@
 #include "VulkanShaderManager.h"
 
+#include "globalincs/pstypes.h"
+#include "def_files/def_files.h"
+
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
+#include <cstring>
 
 namespace fs = std::filesystem;
 
@@ -54,6 +58,24 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
 
 vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path)
 {
+	// Try embedded file first (path stripped to filename)
+	const auto filename = fs::path(path).filename().string();
+	const auto embedded = defaults_get_all();
+	for (const auto& df : embedded) {
+		if (!stricmp(df.filename, filename.c_str())) {
+			// Ensure alignment by copying to a uint32_t vector if needed
+			std::vector<uint32_t> code((df.size + 3) / 4);
+			std::memcpy(code.data(), df.data, df.size);
+
+			vk::ShaderModuleCreateInfo moduleInfo;
+			moduleInfo.codeSize = df.size;
+			moduleInfo.pCode = code.data();
+
+			return m_device.createShaderModuleUnique(moduleInfo);
+		}
+	}
+
+	// Fallback to filesystem
 	std::ifstream file(path, std::ios::binary | std::ios::ate);
 	if (!file) {
 		throw std::runtime_error("Failed to open shader module " + path);

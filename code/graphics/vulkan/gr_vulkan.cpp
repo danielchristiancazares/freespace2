@@ -11,6 +11,7 @@
 #include "graphics/material.h"
 #include "graphics/matrix.h"
 #include "graphics/util/uniform_structs.h"
+#include "graphics/tmapper.h"
 #include "mod_table/mod_table.h"
 
 extern transform_stack gr_model_matrix_stack;
@@ -46,6 +47,14 @@ void gr_vulkan_delete_buffer(gr_buffer_handle handle)
 }
 
 int stub_preload(int /*bitmap_num*/, int /*is_aabitmap*/) { return 0; }
+int gr_vulkan_preload(int bitmap_num, int is_aabitmap)
+{
+	if (renderer_instance) {
+		return renderer_instance->preloadTexture(bitmap_num, is_aabitmap != 0);
+	}
+	return 0;
+}
+void stub_resize_buffer(gr_buffer_handle /*handle*/, size_t /*size*/) {}
 
 int stub_save_screen() { return 1; }
 
@@ -83,6 +92,13 @@ void gr_vulkan_update_buffer_data_offset(gr_buffer_handle handle,
 {
 	if (renderer_instance) {
 		renderer_instance->updateBufferDataOffset(handle, offset, size, data);
+	}
+}
+
+void gr_vulkan_resize_buffer(gr_buffer_handle handle, size_t size)
+{
+	if (renderer_instance) {
+		renderer_instance->resizeBuffer(handle, size);
 	}
 }
 
@@ -277,7 +293,8 @@ void gr_vulkan_render_primitives(material* material_info,
 		generic.clipEnabled = 0;
 	}
 
-	generic.baseMapIndex = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : 0;
+	int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
+	generic.baseMapIndex = (textureHandle >= 0) ? bm_get_array_index(textureHandle) : 0;
 	generic.alphaTexture = (material_info->get_texture_type() == material::TEX_TYPE_AABITMAP) ? 1 : 0;
 	generic.noTexturing = material_info->is_textured() ? 0 : 1;
 	generic.srgb = 1;
@@ -302,11 +319,22 @@ void gr_vulkan_render_primitives(material* material_info,
 	genericInfo.range = sizeof(generic);
 
 	vk::DescriptorImageInfo baseMapInfo{};
-	baseMapInfo.sampler = renderer_instance->getDummySampler();
-	baseMapInfo.imageView = renderer_instance->getDummyImageView();
-	baseMapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	auto samplerKey = VulkanTextureManager::SamplerKey{};
+	switch (material_info->get_texture_addressing()) {
+	case TMAP_ADDRESS_CLAMP:
+		samplerKey.address = vk::SamplerAddressMode::eClampToEdge;
+		break;
+	case TMAP_ADDRESS_MIRROR:
+		samplerKey.address = vk::SamplerAddressMode::eMirroredRepeat;
+		break;
+	case TMAP_ADDRESS_WRAP:
+	default:
+		samplerKey.address = vk::SamplerAddressMode::eRepeat;
+		break;
+	}
 
-	// TODO: Look up actual texture from material_info->get_texture_map(TM_BASE_TYPE)
+	baseMapInfo = renderer_instance->getTextureDescriptor(
+		textureHandle, *frame, cmd, samplerKey);
 
 	std::array<vk::WriteDescriptorSet, 3> writes{};
 	writes[0].dstBinding = 0;
@@ -572,6 +600,7 @@ void init_stub_pointers()
 	gr_screen.gf_update_transform_buffer = stub_update_transform_buffer;
 	gr_screen.gf_update_buffer_data = gr_vulkan_update_buffer_data;
 	gr_screen.gf_update_buffer_data_offset = gr_vulkan_update_buffer_data_offset;
+	gr_screen.gf_resize_buffer = gr_vulkan_resize_buffer;
 	gr_screen.gf_map_buffer = [](gr_buffer_handle handle) -> void* {
 		if (renderer_instance) {
 			return renderer_instance->mapBuffer(handle);
@@ -683,6 +712,13 @@ void init_function_pointers()
 		if (renderer_instance) {
 			renderer_instance->setClearColor(r, g, b);
 		}
+	};
+
+	gr_screen.gf_preload = [](int bitmap_num, int is_aabitmap) -> int {
+		if (renderer_instance) {
+			return renderer_instance->preloadTexture(bitmap_num, is_aabitmap != 0);
+		}
+		return 0;
 	};
 
 	gr_screen.gf_set_cull = [](int cull) -> int {

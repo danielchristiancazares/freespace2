@@ -30,6 +30,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `VulkanVertexTypes.h` for centralized vertex type definitions
 - Unit tests for Vulkan pipeline manager, frame lifecycle, and dynamic state
 - Architecture documentation (`ARCHITECTURE.md`, `AGENTS.md`, `CLAUDE.md`)
+- `VulkanTextureManager` for GPU texture lifecycle management
+  - On-demand texture uploads via per-frame staging ring buffers (12MB)
+  - Sampler caching with configurable filter and address modes
+  - Support for texture arrays, compressed formats (DXT1/3/5, BC7), and single-channel textures
+  - Frame-based upload scheduling to avoid pipeline stalls
+- `VulkanShaderReflection` for SPIR-V descriptor binding validation
+- `gr_resize_buffer` graphics API for resizing GPU buffers without full recreation
+  - Implemented for OpenGL, Vulkan, and stub backends
+- Embedded shader module loading from `def_files` in VulkanShaderManager
+- Extended dynamic state feature queries (`VK_EXT_extended_dynamic_state`, `VK_EXT_extended_dynamic_state2`, `VK_EXT_extended_dynamic_state3`)
+- Vulkan 1.2 features chain in device creation
 
 ### Changed
 - Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
@@ -48,12 +59,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `VulkanRenderer` now delegates to specialized manager classes for buffers, pipelines, shaders, and descriptors
   - Frame management consolidated into `VulkanFrame` class
   - Improved separation of concerns and testability
+- `VulkanFrame` now includes dedicated staging ring buffer (12MB) for texture uploads
+- `UniformBufferManager` initialization path split for persistent-mapped vs dynamic buffers
+  - Persistent: single allocation via `gr_update_buffer_data`
+  - Dynamic: resize + zero-initialize via new `gr_resize_buffer` API
+- `VulkanBufferManager::updateBufferData` now zero-initializes when data pointer is null
 
 ### Fixed
 - imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
 - Shader cmake dependency variable name (`_shader` not `shader`)
 - Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory
 - Clear flags now properly reset after being consumed in Vulkan renderer to prevent persistent clear state
+- Uninitialized memory in dynamic uniform buffers (shadow buffer now zero-initialized)
 
 ### Removed
 - `RenderFrame` class (replaced by `VulkanFrame`)

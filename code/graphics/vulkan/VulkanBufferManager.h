@@ -29,6 +29,7 @@ class VulkanBufferManager {
 	void deleteBuffer(gr_buffer_handle handle);
 	void updateBufferData(gr_buffer_handle handle, size_t size, const void* data);
 	void updateBufferDataOffset(gr_buffer_handle handle, size_t offset, size_t size, const void* data);
+	void resizeBuffer(gr_buffer_handle handle, size_t size);
 	void* mapBuffer(gr_buffer_handle handle);
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
 

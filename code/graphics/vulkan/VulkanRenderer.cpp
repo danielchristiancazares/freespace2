@@ -358,6 +358,11 @@ bool VulkanRenderer::initialize()
 		m_graphicsQueue,
 		deviceValues.graphicsQueueIndex.index);
 
+	m_textureManager = std::make_unique<VulkanTextureManager>(m_device.get(),
+		m_memoryProperties,
+		m_graphicsQueue,
+		deviceValues.graphicsQueueIndex.index);
+
 	m_graphicsQueueIndex = deviceValues.graphicsQueueIndex.index;
 	m_presentQueueIndex = deviceValues.presentQueueIndex.index;
 
@@ -574,12 +579,20 @@ bool VulkanRenderer::pickPhysicalDevice(PhysicalDeviceValues& deviceValues)
 		vals.properties = props.properties;
 
 		vk::PhysicalDeviceFeatures2 feats;
+		vals.features12 = vk::PhysicalDeviceVulkan12Features{};
 		vals.features13 = vk::PhysicalDeviceVulkan13Features{};
 		vals.features14 = vk::PhysicalDeviceVulkan14Features{};
+		vals.extDynamicState = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{};
+		vals.extDynamicState2 = vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT{};
+		vals.extDynamicState3 = vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{};
 		vals.pushDescriptorProps = vk::PhysicalDevicePushDescriptorPropertiesKHR{};
-		feats.pNext = &vals.features13;
+		feats.pNext = &vals.features12;
+		vals.features12.pNext = &vals.features13;
 		vals.features13.pNext = &vals.features14;
-		vals.features14.pNext = &vals.pushDescriptorProps;
+		vals.features14.pNext = &vals.extDynamicState;
+		vals.extDynamicState.pNext = &vals.extDynamicState2;
+		vals.extDynamicState2.pNext = &vals.extDynamicState3;
+		vals.extDynamicState3.pNext = &vals.pushDescriptorProps;
 		dev.getFeatures2(&feats);
 		vals.features = feats.features;
 
@@ -640,13 +653,24 @@ bool VulkanRenderer::createLogicalDevice(const PhysicalDeviceValues& deviceValue
 		}
 	}
 
-	// Chain features for 1.3/1.4 and enable only what we need (currently mirror supported bits)
+	// Chain features for 1.2/1.3/1.4 and extension features
+	// Create fresh structures to avoid copying stale pNext pointers from the query phase
 	vk::PhysicalDeviceFeatures2 enabledFeatures;
 	enabledFeatures.features = deviceValues.features;
+	vk::PhysicalDeviceVulkan12Features enabled12 = deviceValues.features12;
 	vk::PhysicalDeviceVulkan13Features enabled13 = deviceValues.features13;
 	vk::PhysicalDeviceVulkan14Features enabled14 = deviceValues.features14;
-	enabledFeatures.pNext = &enabled13;
+	vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT enabledExtDyn = deviceValues.extDynamicState;
+	vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT enabledExtDyn2 = deviceValues.extDynamicState2;
+	vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT enabledExtDyn3 = deviceValues.extDynamicState3;
+	// Explicitly reset pNext to ensure clean chain (copied structures may have stale pointers)
+	enabled12.pNext = &enabled13;
 	enabled13.pNext = &enabled14;
+	enabled14.pNext = &enabledExtDyn;
+	enabledExtDyn.pNext = &enabledExtDyn2;
+	enabledExtDyn2.pNext = &enabledExtDyn3;
+	enabledExtDyn3.pNext = nullptr;
+	enabledFeatures.pNext = &enabled12;
 
 	vk::DeviceCreateInfo deviceCreate;
 	deviceCreate.pQueueCreateInfos = queueInfos.data();
@@ -803,7 +827,9 @@ void VulkanRenderer::createFrames()
 			UNIFORM_RING_SIZE,
 			m_deviceProperties.limits.minUniformBufferOffsetAlignment,
 			VERTEX_RING_SIZE,
-			m_vertexBufferAlignment);
+			m_vertexBufferAlignment,
+			STAGING_RING_SIZE,
+			m_deviceProperties.limits.optimalBufferCopyOffsetAlignment);
 	}
 }
 
@@ -1219,6 +1245,44 @@ void VulkanRenderer::flushMappedBuffer(gr_buffer_handle handle, size_t offset, s
 	}
 }
 
+void VulkanRenderer::resizeBuffer(gr_buffer_handle handle, size_t size)
+{
+	if (m_bufferManager) {
+		m_bufferManager->resizeBuffer(handle, size);
+	}
+}
+
+vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
+	VulkanFrame& frame,
+	vk::CommandBuffer cmd,
+	const VulkanTextureManager::SamplerKey& samplerKey)
+{
+	if (m_textureManager) {
+		return m_textureManager->getDescriptor(
+			bitmapHandle,
+			frame,
+			cmd,
+			getCurrentFrameIndex(),
+			samplerKey,
+			m_dummyImageView.get(),
+			m_dummySampler.get());
+	}
+
+	vk::DescriptorImageInfo info{};
+	info.imageView = m_dummyImageView.get();
+	info.sampler = m_dummySampler.get();
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	return info;
+}
+
+int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap)
+{
+	if (m_textureManager && bitmapHandle >= 0) {
+		return m_textureManager->preloadTexture(bitmapHandle, isAABitmap) ? 1 : 0;
+	}
+	return 0;
+}
+
 uint32_t VulkanRenderer::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const
 {
 	for (uint32_t i = 0; i < m_memoryProperties.memoryTypeCount; ++i) {
@@ -1303,6 +1367,7 @@ void VulkanRenderer::shutdown()
 	}
 
 	// Cleanup managers
+	m_textureManager.reset();
 	m_bufferManager.reset();
 	m_pipelineManager.reset();
 	m_shaderManager.reset();

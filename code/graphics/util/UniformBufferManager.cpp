@@ -182,13 +182,18 @@ void UniformBufferManager::changeSegmentSize(size_t new_size)
 	}
 
 	_active_buffer_size = new_size * NUM_SEGMENTS;
-	_shadow_uniform_buffer.reset(new uint8_t[_active_buffer_size]);
+	_shadow_uniform_buffer.reset(new uint8_t[_active_buffer_size]());
 	_active_uniform_buffer = gr_create_buffer(
 	    BufferType::Uniform, _use_persistent_mapping ? BufferUsageHint::PersistentMapping : BufferUsageHint::Dynamic);
 
-	gr_update_buffer_data(_active_uniform_buffer, _active_buffer_size, nullptr);
 	if (_use_persistent_mapping) {
+		// Persistently mapped buffers cannot be resized after creation; allocate storage once.
+		gr_update_buffer_data(_active_uniform_buffer, _active_buffer_size, nullptr);
 		_buffer_ptr = gr_map_buffer(_active_uniform_buffer);
+	} else {
+		// Dynamic path can freely resize and upload an initial zeroed buffer.
+		gr_resize_buffer(_active_uniform_buffer, _active_buffer_size);
+		gr_update_buffer_data(_active_uniform_buffer, _active_buffer_size, _shadow_uniform_buffer.get());
 	}
 
 	_active_segment = 0;

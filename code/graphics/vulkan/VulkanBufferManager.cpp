@@ -97,6 +97,51 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 	buffer.size = 0;
 }
 
+void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
+{
+	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
+		return;
+	}
+
+	auto& buffer = m_buffers[handle.value()];
+
+	// Unmap old buffer if mapped
+	if (buffer.mapped) {
+		m_device.unmapMemory(buffer.memory.get());
+		buffer.mapped = nullptr;
+	}
+
+	// Destroy old buffer
+	buffer.buffer.reset();
+	buffer.memory.reset();
+	buffer.size = 0;
+
+	if (size == 0) {
+		return;
+	}
+
+	// Create new buffer with requested size
+	vk::BufferCreateInfo bufferInfo;
+	bufferInfo.size = size;
+	bufferInfo.usage = getVkUsageFlags(buffer.type);
+	bufferInfo.sharingMode = vk::SharingMode::eExclusive;
+
+	buffer.buffer = m_device.createBufferUnique(bufferInfo);
+
+	auto memRequirements = m_device.getBufferMemoryRequirements(buffer.buffer.get());
+	vk::MemoryAllocateInfo allocInfo;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, getMemoryProperties(buffer.usage));
+
+	buffer.memory = m_device.allocateMemoryUnique(allocInfo);
+	m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
+
+	// Remap if host-visible (all our usage hints use host-visible memory)
+	buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
+
+	buffer.size = size;
+}
+
 void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size, const void* data)
 {
 	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
@@ -143,16 +188,25 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 		buffer.size = size;
 	}
 
-	// Upload data
+	// Upload data (if provided)
 	if (buffer.mapped) {
-		// Host-visible: direct copy
-		memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
+		if (data != nullptr) {
+			// Host-visible: direct copy
+			memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
+		} else {
+			// Zero-initialize buffer when data is nullptr (safer than leaving uninitialized)
+			memset(buffer.mapped, 0, size);
+		}
 		// Host-coherent memory doesn't need explicit flush
-	} else {
+	} else if (data != nullptr) {
 		// Device-local: need staging buffer (TODO: implement staging buffer upload)
 		// For now, this is an error - device-local buffers need staging
 		// In practice, Static buffers should use staging, Dynamic/Streaming should be host-visible
 		UNREACHABLE("Cannot update device-local buffer without staging buffer!");
+	} else {
+		// data is nullptr and buffer is device-local - cannot zero-initialize without staging buffer
+		// This case should not occur in practice since all our usage hints use host-visible memory
+		UNREACHABLE("Cannot zero-initialize device-local buffer without staging buffer!");
 	}
 }
 
@@ -171,6 +225,11 @@ void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t
 
 	if (offset + size > buffer.size) {
 		UNREACHABLE("Buffer update offset out of bounds!");
+		return;
+	}
+
+	if (data == nullptr) {
+		// Null data pointer - skip copy (caller may initialize buffer separately)
 		return;
 	}
 

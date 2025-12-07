@@ -13,12 +13,17 @@ VulkanFrame::VulkanFrame(vk::Device device,
 	vk::DeviceSize uniformBufferSize,
 	vk::DeviceSize uniformAlignment,
 	vk::DeviceSize vertexBufferSize,
-	vk::DeviceSize vertexAlignment)
+	vk::DeviceSize vertexAlignment,
+	vk::DeviceSize stagingBufferSize,
+	vk::DeviceSize stagingAlignment)
 	: m_device(device),
 	  m_uniformRing(device, memoryProps, uniformBufferSize, uniformAlignment,
 	                vk::BufferUsageFlagBits::eUniformBuffer),
 	  m_vertexRing(device, memoryProps, vertexBufferSize, vertexAlignment,
-	               vk::BufferUsageFlagBits::eVertexBuffer)
+	               vk::BufferUsageFlagBits::eVertexBuffer),
+	  m_stagingRing(device, memoryProps, stagingBufferSize,
+	                stagingAlignment == 0 ? 1 : stagingAlignment,
+	                vk::BufferUsageFlagBits::eTransferSrc)
 {
 	vk::CommandPoolCreateInfo poolInfo;
 	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
@@ -67,6 +72,7 @@ void VulkanFrame::reset()
 	m_device.resetCommandPool(m_commandPool.get());
 	m_uniformRing.reset();
 	m_vertexRing.reset();
+	m_stagingRing.reset();
 }
 
 } // namespace vulkan

@@ -560,6 +560,7 @@ void gr_stub_init_function_pointers() {
 	gr_screen.gf_update_transform_buffer = gr_stub_update_transform_buffer;
 	gr_screen.gf_update_buffer_data = gr_stub_update_buffer_data;
 	gr_screen.gf_update_buffer_data_offset = gr_stub_update_buffer_data_offset;
+	gr_screen.gf_resize_buffer = [](gr_buffer_handle, size_t) {};
 	gr_screen.gf_map_buffer = [](gr_buffer_handle) -> void* { return nullptr; };
 	gr_screen.gf_flush_mapped_buffer = [](gr_buffer_handle, size_t, size_t) {};
 
