@@ -42,6 +42,7 @@ ctest --output-on-failure --test-dir build
   - `graphics/opengl/` - OpenGL renderer backend
   - `graphics/vulkan/` - Vulkan renderer backend (in development)
   - `graphics/shaders/` - GLSL shader sources; `compiled/` contains SPIR-V and generated headers
+  - `graphics/util/` - Shared graphics utilities (UniformBufferManager, etc.)
   - `ai/`, `ship/`, `weapon/` - Gameplay systems
   - `scripting/` - Lua scripting integration
 - `freespace2/` - Game executable entry point
@@ -56,7 +57,29 @@ Two renderer backends share common interfaces in `code/graphics/`:
 - **OpenGL** (`gropengl*`): Production renderer, uses legacy shader pipeline
 - **Vulkan** (`gr_vulkan*`, `VulkanRenderer`): In development, targets Vulkan 1.4
 
-Shader compilation flow (`code/shaders.cmake`):
+### Vulkan Manager Classes
+
+The Vulkan renderer uses a modular architecture with dedicated manager classes:
+- `VulkanRenderer` - Core renderer orchestration and frame management
+- `VulkanFrame` - Per-frame resources (command buffers, ring buffers, sync primitives)
+- `VulkanBufferManager` - GPU buffer lifecycle (create, update, resize, map)
+- `VulkanTextureManager` - Texture uploads via staging ring buffers, sampler caching
+- `VulkanShaderManager` - Shader module loading (filesystem and embedded)
+- `VulkanPipelineManager` - Pipeline creation and caching
+- `VulkanDescriptorLayouts` - Descriptor set layout management
+- `VulkanShaderReflection` - SPIR-V descriptor binding validation
+
+### Graphics API
+
+Common graphics operations are exposed through function pointers in `gr_screen` (see `2d.h`):
+- `gr_create_buffer`, `gr_delete_buffer` - Buffer lifecycle
+- `gr_update_buffer_data`, `gr_update_buffer_data_offset` - Buffer data upload
+- `gr_resize_buffer` - Resize buffer without full recreation
+- `gr_map_buffer`, `gr_flush_mapped_buffer` - Persistent mapping support
+
+### Shader Compilation Flow
+
+Shader compilation (`code/shaders.cmake`):
 1. `glslc` compiles GLSL to SPIR-V (target: vulkan1.4 for Vulkan-only, vulkan1.2 for cross-backend)
 2. `shadertool` post-processes SPIR-V to generate OpenGL GLSL and C++ uniform structs
 3. Vulkan-only shaders skip GLSL generation (structs only)
@@ -70,4 +93,4 @@ Shader compilation flow (`code/shaders.cmake`):
 
 ## Commit Style
 
-Short imperative subject (e.g., "Fix Vulkan surface creation"). For PRs, describe intent, testing performed (platform, backend), and link related issues.
+Conventional commits with scope (e.g., `feat(vulkan): add texture manager`). For PRs, describe intent, testing performed (platform, backend), and link related issues.
