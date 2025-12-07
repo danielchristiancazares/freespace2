@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Required Vulkan 1.4 device extensions: `VK_KHR_push_descriptor`, `VK_KHR_maintenance5`
 - Optional device extensions support: `VK_KHR_maintenance6`, `VK_EXT_extended_dynamic_state3`, `VK_EXT_dynamic_rendering_local_read`
 - Portability enumeration extension (`VK_KHR_portability_enumeration`) support for better cross-platform compatibility
+- Separate vertex staging ring buffer (1MB) for immediate-mode rendering
+- Error handling for timeline semaphore wait operations
 
 ### Changed
 - Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
@@ -28,10 +30,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Removed unused Vulkan GLSL prebuilts (`vulkan.*.spv.glsl`)
 - Modernized Vulkan debug infrastructure: replaced `VK_EXT_debug_report` with `VK_EXT_debug_utils` for better error reporting
 - Switched validation layer from `VK_LAYER_LUNARG_core_validation` to `VK_LAYER_KHRONOS_validation` (modern standard)
+- Refactored `VulkanUniformRingBuffer` to generic `VulkanRingBuffer` with configurable usage flags
+- `VulkanFrame` now maintains separate uniform (512KB) and vertex (1MB) ring buffers with independent budgets
+- `.clang-format` Standard updated from Cpp11 to Cpp17 to match codebase target
 
 ### Fixed
 - imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
 - Shader cmake dependency variable name (`_shader` not `shader`)
+- Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory
 
 ## [23.2.0] - 2023-06-16
 ### Changes
