@@ -27,6 +27,14 @@ add_file_folder("Graphics"
 	   graphics/test_font.cpp
 )
 
+if(FSO_BUILD_WITH_VULKAN)
+add_file_folder("Graphics"
+	   graphics/test_vulkan_dynstate.cpp
+	   graphics/test_vulkan_pipeline_manager.cpp
+	   graphics/test_vulkan_frame_lifecycle.cpp
+)
+endif()
+
 add_file_folder("Math"
     math/test_vecmat.cpp
 )

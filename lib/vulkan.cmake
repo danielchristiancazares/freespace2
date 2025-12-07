@@ -94,17 +94,5 @@ if (SHADERS_ENABLE_COMPILATION AND NOT SHADER_FORCE_PREBUILT)
 	set_target_properties(shadertool PROPERTIES IMPORTED_LOCATION "${SHADERTOOL_PATH}")
 	if (NOT SHADERTOOL_PATH)
 		message(FATAL_ERROR "shadertool not found after download/extract. Verify SHADERTOOL_PATH or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
-	else()
-		execute_process(
-			COMMAND "${SHADERTOOL_PATH}" --version
-			RESULT_VARIABLE _shadertool_res
-			OUTPUT_VARIABLE _shadertool_out
-			ERROR_VARIABLE _shadertool_err
-		)
-		if (NOT _shadertool_res EQUAL 0 AND _shadertool_out STREQUAL "" AND _shadertool_err STREQUAL "")
-			message(FATAL_ERROR "shadertool invocation failed (exit ${_shadertool_res}) with no output. Verify SHADERTOOL_PATH or set SHADER_FORCE_PREBUILT=ON to use prebuilts.")
-		elseif (NOT _shadertool_res EQUAL 0)
-			message(STATUS "shadertool reported a non-zero exit (${_shadertool_res}); continuing since it produced output. Output:\n${_shadertool_out}\n${_shadertool_err}")
-		endif()
 	endif()
 endif ()

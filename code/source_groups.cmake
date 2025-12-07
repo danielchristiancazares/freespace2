@@ -573,10 +573,20 @@ if (FSO_BUILD_WITH_VULKAN)
 	add_file_folder("Graphics\\\\Vulkan"
 		graphics/vulkan/gr_vulkan.cpp
 		graphics/vulkan/gr_vulkan.h
-		graphics/vulkan/RenderFrame.cpp
-		graphics/vulkan/RenderFrame.h
-		graphics/vulkan/vulkan_stubs.cpp
-		graphics/vulkan/vulkan_stubs.h
+		graphics/vulkan/VulkanFrame.cpp
+		graphics/vulkan/VulkanFrame.h
+		graphics/vulkan/FrameLifecycleTracker.cpp
+		graphics/vulkan/FrameLifecycleTracker.h
+		graphics/vulkan/VulkanDescriptorLayouts.cpp
+		graphics/vulkan/VulkanDescriptorLayouts.h
+		graphics/vulkan/VulkanRingBuffer.cpp
+		graphics/vulkan/VulkanRingBuffer.h
+		graphics/vulkan/VulkanPipelineManager.cpp
+		graphics/vulkan/VulkanPipelineManager.h
+		graphics/vulkan/VulkanShaderManager.cpp
+		graphics/vulkan/VulkanShaderManager.h
+		graphics/vulkan/VulkanBufferManager.cpp
+		graphics/vulkan/VulkanBufferManager.h
 		graphics/vulkan/VulkanRenderer.cpp
 		graphics/vulkan/VulkanRenderer.h
 	)

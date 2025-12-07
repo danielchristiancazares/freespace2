@@ -19,6 +19,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Portability enumeration extension (`VK_KHR_portability_enumeration`) support for better cross-platform compatibility
 - Separate vertex staging ring buffer (1MB) for immediate-mode rendering
 - Error handling for timeline semaphore wait operations
+- Vertex buffer alignment storage and getter method in VulkanRenderer for ring buffer allocations
+- Modular Vulkan renderer architecture with dedicated manager classes
+  - `VulkanBufferManager` for unified buffer lifecycle management
+  - `VulkanDescriptorLayouts` for descriptor set layout management
+  - `VulkanPipelineManager` for pipeline creation and caching
+  - `VulkanShaderManager` for shader module management
+- `FrameLifecycleTracker` for tracking command recording state across frames
+- `VulkanFrame` class replacing `RenderFrame` with improved frame resource management
+- `VulkanVertexTypes.h` for centralized vertex type definitions
+- Unit tests for Vulkan pipeline manager, frame lifecycle, and dynamic state
+- Architecture documentation (`ARCHITECTURE.md`, `AGENTS.md`, `CLAUDE.md`)
 
 ### Changed
 - Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
@@ -33,11 +44,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Refactored `VulkanUniformRingBuffer` to generic `VulkanRingBuffer` with configurable usage flags
 - `VulkanFrame` now maintains separate uniform (512KB) and vertex (1MB) ring buffers with independent budgets
 - `.clang-format` Standard updated from Cpp11 to Cpp17 to match codebase target
+- Refactored Vulkan renderer to use modular manager architecture
+  - `VulkanRenderer` now delegates to specialized manager classes for buffers, pipelines, shaders, and descriptors
+  - Frame management consolidated into `VulkanFrame` class
+  - Improved separation of concerns and testability
 
 ### Fixed
 - imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
 - Shader cmake dependency variable name (`_shader` not `shader`)
 - Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory
+- Clear flags now properly reset after being consumed in Vulkan renderer to prevent persistent clear state
+
+### Removed
+- `RenderFrame` class (replaced by `VulkanFrame`)
+- `vulkan_stubs.cpp` and `vulkan_stubs.h` (no longer needed)
 
 ## [23.2.0] - 2023-06-16
 ### Changes

@@ -7,6 +7,9 @@ target_compile_features(unittests PUBLIC cxx_std_17)
 
 target_link_libraries(unittests PRIVATE gtest)
 target_link_libraries(unittests PRIVATE code)
+if(FSO_BUILD_WITH_VULKAN)
+    target_link_libraries(unittests PRIVATE Vulkan::Vulkan)
+endif()
 
 target_include_directories(unittests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
