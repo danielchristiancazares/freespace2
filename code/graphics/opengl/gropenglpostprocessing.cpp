@@ -1062,8 +1062,9 @@ static GLuint load_smaa_texture(GLsizei width, GLsizei height, GLenum format, co
 	} else {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-		glTexImage2D(GL_TEXTURE_2D, 0, format, Post_texture_width, Post_texture_height, 0, GL_BGRA, GL_UNSIGNED_BYTE,
-		             nullptr);
+		// Fallback allocation when immutable storage isn't available
+		const GLenum base_format = (format == GL_RG8) ? GL_RG : GL_RED;
+		glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, base_format, GL_UNSIGNED_BYTE, nullptr);
 	}
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format == GL_RG8 ? GL_RG : GL_RED, GL_UNSIGNED_BYTE, pixels);
 
@@ -1073,6 +1074,12 @@ static GLuint load_smaa_texture(GLsizei width, GLsizei height, GLenum format, co
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
 	return tex;
+}
+
+// Test hook: exercise the same load path without needing the private static symbol
+GLuint opengl_test_load_smaa_texture(GLsizei width, GLsizei height, GLenum format, const uint8_t* pixels)
+{
+	return load_smaa_texture(width, height, format, pixels, "SMAA Unit Test Texture");
 }
 
 static void setup_smaa_resources()
