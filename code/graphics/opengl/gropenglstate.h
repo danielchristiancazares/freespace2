@@ -68,6 +68,8 @@ class opengl_texture_state
 		
 		inline GLenum GetTarget();
 		inline void SetShaderMode(GLboolean mode);
+		inline GLuint GetCurrentTextureID() const;
+		inline GLenum GetCurrentTextureTarget() const;
 };
 
 inline GLenum opengl_texture_state::GetTarget()
@@ -78,6 +80,16 @@ inline GLenum opengl_texture_state::GetTarget()
 inline void opengl_texture_state::SetShaderMode(GLboolean mode)
 {
 	shader_mode = mode;
+}
+
+inline GLuint opengl_texture_state::GetCurrentTextureID() const
+{
+	return units[active_texture_unit].texture_id;
+}
+
+inline GLenum opengl_texture_state::GetCurrentTextureTarget() const
+{
+	return units[active_texture_unit].texture_target;
 }
 
 struct opengl_client_texture_unit
