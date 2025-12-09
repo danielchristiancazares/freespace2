@@ -185,7 +185,10 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 		for (const auto* comp : components) {
 			if (comp->divisor != 0) {
 				binding.inputRate = vk::VertexInputRate::eInstance;
-				divisorsByBinding[binding.binding] = static_cast<uint32_t>(comp->divisor);
+				// Only divisors >1 need VK_EXT_vertex_attribute_divisor; divisor==1 is core.
+				if (comp->divisor > 1) {
+					divisorsByBinding[binding.binding] = static_cast<uint32_t>(comp->divisor);
+				}
 				break;
 			}
 		}
@@ -259,6 +262,8 @@ VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
 	}
 }
 
+// Targeting Vulkan 1.4: Extended Dynamic State 1 was promoted in 1.3, so the base dynamic states below are
+// guaranteed; Extended Dynamic State 2 is only partly core, so we only conditionally add EXT3 bits when supported.
 std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool supportsExtendedDynamicState3,
 	const ExtendedDynamicState3Caps& caps)
 {

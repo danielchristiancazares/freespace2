@@ -301,7 +301,8 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
 	offset = 0;
 	for (uint32_t layer = 0; layer < layers; ++layer) {
 		size_t layerSize = compressed ? calculateCompressedSize(width, height, format)
-		                              : static_cast<size_t>(width) * height * 4;
+		                              : singleChannel ? static_cast<size_t>(width) * height
+		                                              : static_cast<size_t>(width) * height * 4;
 		vk::BufferImageCopy region{};
 		region.bufferOffset = offset;
 		region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -315,6 +316,23 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
 	}
 	cmdBuf.copyBufferToImage(stagingBuf.get(), image.get(), vk::ImageLayout::eTransferDstOptimal,
 		static_cast<uint32_t>(copies.size()), copies.data());
+
+	// Transition to shader read so descriptor layout matches actual layout
+	vk::ImageMemoryBarrier2 toShader{};
+	toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	toShader.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	toShader.dstAccessMask = vk::AccessFlagBits2::eMemoryRead;
+	toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+	toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	toShader.image = image.get();
+	toShader.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	toShader.subresourceRange.levelCount = 1;
+	toShader.subresourceRange.layerCount = layers;
+	vk::DependencyInfo depToShader{};
+	depToShader.imageMemoryBarrierCount = 1;
+	depToShader.pImageMemoryBarriers = &toShader;
+	cmdBuf.pipelineBarrier2(depToShader);
 
 	cmdBuf.end();
 
@@ -345,8 +363,8 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
 	record.gpu.layers = layers;
 	record.gpu.mipLevels = 1;
 	record.gpu.format = format;
-	// Transfer queue left the image in TRANSFER_DST layout; transition to shader layout on graphics queue before use.
-	record.gpu.currentLayout = vk::ImageLayout::eTransferDstOptimal;
+	// Image already transitioned to shader read layout in the upload command buffer.
+	record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	record.state = TextureState::Resident;
 	record.lastUsedFrame = 0;
 	m_textures[baseFrame] = std::move(record);
@@ -479,51 +497,6 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 			continue; // defer to next frame
 		}
 
-		// Create image resources
-		vk::ImageCreateInfo imageInfo;
-		imageInfo.imageType = vk::ImageType::e2D;
-		imageInfo.format = format;
-		imageInfo.extent = vk::Extent3D(width, height, 1);
-		imageInfo.mipLevels = 1;
-		imageInfo.arrayLayers = layers;
-		imageInfo.samples = vk::SampleCountFlagBits::e1;
-		imageInfo.tiling = vk::ImageTiling::eOptimal;
-		imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
-		imageInfo.initialLayout = vk::ImageLayout::eUndefined;
-
-		record.gpu.image = m_device.createImageUnique(imageInfo);
-		auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
-		vk::MemoryAllocateInfo imgAlloc;
-		imgAlloc.allocationSize = imgReqs.size;
-		imgAlloc.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-		record.gpu.memory = m_device.allocateMemoryUnique(imgAlloc);
-		m_device.bindImageMemory(record.gpu.image.get(), record.gpu.memory.get(), 0);
-
-		record.gpu.width = width;
-		record.gpu.height = height;
-		record.gpu.layers = layers;
-		record.gpu.mipLevels = 1;
-		record.gpu.format = format;
-		if (!record.gpu.sampler) {
-			record.gpu.sampler = m_defaultSampler.get();
-		}
-
-		// Transition to transfer dst
-		vk::ImageMemoryBarrier2 toTransfer{};
-		toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-		toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-		toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-		toTransfer.oldLayout = vk::ImageLayout::eUndefined;
-		toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
-		toTransfer.image = record.gpu.image.get();
-		toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-		toTransfer.subresourceRange.levelCount = 1;
-		toTransfer.subresourceRange.layerCount = layers;
-		vk::DependencyInfo depToTransfer{};
-		depToTransfer.imageMemoryBarrierCount = 1;
-		depToTransfer.pImageMemoryBarriers = &toTransfer;
-		cmd.pipelineBarrier2(depToTransfer);
-
 		std::vector<vk::BufferImageCopy> regions;
 		regions.reserve(layers);
 
@@ -591,11 +564,53 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 		}
 
 		if (record.state == TextureState::Failed || record.state == TextureState::Missing) {
-			record.gpu.image.reset();
-			record.gpu.memory.reset();
-			record.gpu.imageView.reset();
 			continue;
 		}
+
+		// Create image resources now that staging succeeded
+		vk::ImageCreateInfo imageInfo;
+		imageInfo.imageType = vk::ImageType::e2D;
+		imageInfo.format = format;
+		imageInfo.extent = vk::Extent3D(width, height, 1);
+		imageInfo.mipLevels = 1;
+		imageInfo.arrayLayers = layers;
+		imageInfo.samples = vk::SampleCountFlagBits::e1;
+		imageInfo.tiling = vk::ImageTiling::eOptimal;
+		imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+		imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+		record.gpu.image = m_device.createImageUnique(imageInfo);
+		auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
+		vk::MemoryAllocateInfo imgAlloc;
+		imgAlloc.allocationSize = imgReqs.size;
+		imgAlloc.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+		record.gpu.memory = m_device.allocateMemoryUnique(imgAlloc);
+		m_device.bindImageMemory(record.gpu.image.get(), record.gpu.memory.get(), 0);
+
+		record.gpu.width = width;
+		record.gpu.height = height;
+		record.gpu.layers = layers;
+		record.gpu.mipLevels = 1;
+		record.gpu.format = format;
+		if (!record.gpu.sampler) {
+			record.gpu.sampler = m_defaultSampler.get();
+		}
+
+		// Transition to transfer dst
+		vk::ImageMemoryBarrier2 toTransfer{};
+		toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+		toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+		toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+		toTransfer.oldLayout = vk::ImageLayout::eUndefined;
+		toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
+		toTransfer.image = record.gpu.image.get();
+		toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		toTransfer.subresourceRange.levelCount = 1;
+		toTransfer.subresourceRange.layerCount = layers;
+		vk::DependencyInfo depToTransfer{};
+		depToTransfer.imageMemoryBarrierCount = 1;
+		depToTransfer.pImageMemoryBarriers = &toTransfer;
+		cmd.pipelineBarrier2(depToTransfer);
 
 		stagingUsed += static_cast<vk::DeviceSize>(totalUploadSize);
 		cmd.copyBufferToImage(frame.stagingBuffer().buffer(),
@@ -832,12 +847,13 @@ void VulkanTextureManager::processPendingDestructions(uint64_t currentFrame)
 vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textureHandle,
 	const SamplerKey& samplerKey)
 {
-	int baseFrame = bm_get_base_frame(textureHandle, nullptr);
-	auto it = m_textures.find(baseFrame);
-
 	vk::DescriptorImageInfo info{};
+
+	// textureHandle is already the base frame key from m_textures.
+	// Do not call bm_get_base_frame here - bmpman may have released this handle,
+	// but VulkanTextureManager owns the GPU texture independently.
+	auto it = m_textures.find(textureHandle);
 	if (it == m_textures.end() || it->second.state != TextureState::Resident) {
-		// Return empty info - caller should handle this case
 		return info;
 	}
 
