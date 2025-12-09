@@ -37,13 +37,14 @@ VulkanRingBuffer::Allocation VulkanRingBuffer::allocate(vk::DeviceSize requestSi
 	vk::DeviceSize alignmentOverride)
 {
 	const vk::DeviceSize align = alignmentOverride ? alignmentOverride : m_alignment;
-	vk::DeviceSize alignedOffset = (m_offset + align - 1) & ~(align - 1);
+	vk::DeviceSize alignedOffset = ((m_offset + align - 1) / align) * align;
 
 	if (alignedOffset + requestSize > m_size) {
-		// Ring buffer overflow; wrap to start.
+		// FIXME: Is this a bug?
+		// Potential issue: Do not wrap within a frame; wrapping could overwrite in-flight GPU reads.
 		alignedOffset = 0;
 		if (requestSize > m_size) {
-			throw std::runtime_error("Allocation size exceeds ring buffer capacity");
+			throw std::runtime_error("Allocation size exceeds remaining ring buffer capacity");
 		}
 	}
 
@@ -65,7 +66,7 @@ uint32_t VulkanRingBuffer::findMemoryType(uint32_t typeFilter,
 	const vk::PhysicalDeviceMemoryProperties& memoryProps)
 {
 	for (uint32_t i = 0; i < memoryProps.memoryTypeCount; ++i) {
-		if ((typeFilter & (1 << i)) && (memoryProps.memoryTypes[i].propertyFlags & properties) == properties) {
+		if ((typeFilter & (1u << i)) && (memoryProps.memoryTypes[i].propertyFlags & properties) == properties) {
 			return i;
 		}
 	}

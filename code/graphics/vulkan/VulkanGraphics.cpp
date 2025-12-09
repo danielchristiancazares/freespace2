@@ -1,5 +1,5 @@
 
-#include "gr_vulkan.h"
+#include "VulkanGraphics.h"
 
 #include "VulkanModelTypes.h"
 #include "VulkanRenderer.h"
@@ -336,13 +336,39 @@ void stub_scene_texture_end() {}
 
 void stub_copy_effect_texture() {}
 
-void stub_deferred_lighting_begin(bool /*clearNonColorBufs*/) {}
+void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
+{
+	if (!renderer_instance) {
+		return;
+	}
+	renderer_instance->beginDeferredLighting(clearNonColorBufs);
+}
 
-void stub_deferred_lighting_msaa() {}
+void gr_vulkan_deferred_lighting_msaa()
+{
+	// MSAA not implemented for deferred yet
+}
 
-void stub_deferred_lighting_end() {}
+void gr_vulkan_deferred_lighting_end()
+{
+	if (!renderer_instance) {
+		return;
+	}
+	VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
+	if (!frame) {
+		return;
+	}
+	renderer_instance->endDeferredGeometry(frame->commandBuffer());
+}
 
-void stub_deferred_lighting_finish() {}
+void gr_vulkan_deferred_lighting_finish()
+{
+	if (!renderer_instance) {
+		return;
+	}
+	renderer_instance->bindDeferredGlobalDescriptors();
+	renderer_instance->setPendingRenderTargetSwapchain();
+}
 
 void stub_set_line_width(float /*width*/) {}
 
@@ -412,6 +438,7 @@ static void issueModelDraw(const ModelDrawContext& ctx)
 {
 	ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
 
+	// Set model descriptor set + dynamic UBO offset
 	ctx.cmd.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		ctx.pipelineLayout,
@@ -421,6 +448,7 @@ static void issueModelDraw(const ModelDrawContext& ctx)
 		1,
 		&ctx.modelDynamicOffset);
 
+	// Push constants (vertex layout + texture indices)
 	ctx.cmd.pushConstants(
 		ctx.pipelineLayout,
 		vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
@@ -428,20 +456,31 @@ static void issueModelDraw(const ModelDrawContext& ctx)
 		sizeof(ModelPushConstants),
 		&ctx.pcs);
 
+	// Per-batch index data
+	const buffer_data& batch = ctx.vbuffer.tex_buf[ctx.texi];
+
 	vk::Buffer indexBuffer = renderer_instance->getBuffer(ctx.vertSource.Ibuffer_handle);
 	Assertion(indexBuffer, "Invalid index buffer handle %d", ctx.vertSource.Ibuffer_handle.value());
 
-	const vk::IndexType indexType = vk::IndexType::eUint16;
-	ctx.cmd.bindIndexBuffer(indexBuffer, ctx.vertSource.Index_offset, indexType);
+	// Select index type based on VB_FLAG_LARGE_INDEX
+	const bool use32BitIndices = (batch.flags & VB_FLAG_LARGE_INDEX) != 0;
+	const vk::IndexType indexType = use32BitIndices ? vk::IndexType::eUint32
+	                                                : vk::IndexType::eUint16;
 
-	const buffer_data* datap = &ctx.vbuffer.tex_buf[ctx.texi];
-	const uint32_t indexCount = static_cast<uint32_t>(datap->n_verts);
+	// Index data is laid out at:
+	//   vertSource.Index_offset (heap base) + batch.index_offset (per-batch byte offset)
+	const vk::DeviceSize indexOffsetBytes =
+		static_cast<vk::DeviceSize>(ctx.vertSource.Index_offset + batch.index_offset);
+
+	ctx.cmd.bindIndexBuffer(indexBuffer, indexOffsetBytes, indexType);
+
+	const uint32_t indexCount = static_cast<uint32_t>(batch.n_verts);
 
 	ctx.cmd.drawIndexed(
 		indexCount,
 		1,  // instanceCount
-		0,  // firstIndex
-		0,  // vertexOffset
+		0,  // firstIndex (we already baked the byte offset above)
+		0,  // vertexOffset (vertex pulling handles the base)
 		0   // firstInstance
 	);
 }
@@ -467,7 +506,6 @@ void gr_vulkan_render_model(model_material* material_info,
 	VulkanFrame& frame = *g_currentFrame;
 	vk::CommandBuffer cmd = frame.commandBuffer();
 	Assertion(cmd, "render_model called with null command buffer");
-	buffer_data* datap = &bufferp->tex_buf[texi];
 
 	// Get shader modules for model shader
 	ShaderModules modules = renderer_instance->getShaderModules(SDR_TYPE_MODEL);
@@ -476,13 +514,13 @@ void gr_vulkan_render_model(model_material* material_info,
 
 	// Build pipeline key
 	PipelineKey key{};
-	key.type = SDR_TYPE_MODEL;
-	key.variant_flags = material_info->get_shader_flags();
-	key.color_format = renderer_instance->getSwapChainImageFormat();
-	key.depth_format = renderer_instance->getDepthFormat();
-	key.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	key.color_attachment_count = renderer_instance->getColorAttachmentCount();
-	key.blend_mode = material_info->get_blend_mode();
+	key.type                   = SDR_TYPE_MODEL;
+	key.variant_flags          = material_info->get_shader_flags();
+	key.color_format           = renderer_instance->getCurrentColorFormat();
+	key.depth_format           = renderer_instance->getDepthFormat();
+	key.sample_count           = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+	key.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
+	key.blend_mode             = material_info->get_blend_mode();
 	// Model shaders ignore layout_hash (vertex pulling)
 
 	// Get or create pipeline (pass empty layout for vertex pulling)
@@ -498,12 +536,23 @@ void gr_vulkan_render_model(model_material* material_info,
 
 	// Build push constants - vertex layout offsets
 	ModelPushConstants pcs{};
-	pcs.vertexOffset = static_cast<uint32_t>(vert_source->Vertex_offset);
-	pcs.stride = static_cast<uint32_t>(bufferp->stride);
-	pcs.posOffset = MODEL_OFFSET_ABSENT;
-	pcs.normalOffset = MODEL_OFFSET_ABSENT;
-	pcs.texCoordOffset = MODEL_OFFSET_ABSENT;
-	pcs.tangentOffset = MODEL_OFFSET_ABSENT;
+
+	// Base byte offset in the vertex heap for THIS vertex_buffer
+	{
+		const vk::DeviceSize heapBase   = static_cast<vk::DeviceSize>(vert_source->Vertex_offset);
+		const vk::DeviceSize vbOffset   = static_cast<vk::DeviceSize>(bufferp->vertex_offset);
+		const vk::DeviceSize byteOffset = heapBase + vbOffset;
+
+		Assertion(byteOffset <= std::numeric_limits<uint32_t>::max(),
+		          "Model vertex heap offset exceeds uint32 range");
+		pcs.vertexOffset = static_cast<uint32_t>(byteOffset);
+	}
+
+	pcs.stride            = static_cast<uint32_t>(bufferp->stride);
+	pcs.posOffset         = MODEL_OFFSET_ABSENT;
+	pcs.normalOffset      = MODEL_OFFSET_ABSENT;
+	pcs.texCoordOffset    = MODEL_OFFSET_ABSENT;
+	pcs.tangentOffset     = MODEL_OFFSET_ABSENT;
 	pcs.boneIndicesOffset = MODEL_OFFSET_ABSENT;
 	pcs.boneWeightsOffset = MODEL_OFFSET_ABSENT;
 
@@ -511,20 +560,20 @@ void gr_vulkan_render_model(model_material* material_info,
 	for (size_t i = 0; i < bufferp->layout.get_num_vertex_components(); ++i) {
 		const auto* comp = bufferp->layout.get_vertex_component(i);
 		switch (comp->format_type) {
-			case vertex_format_data::POSITION3:
-				pcs.posOffset = static_cast<uint32_t>(comp->offset);
-				break;
-			case vertex_format_data::NORMAL:
-				pcs.normalOffset = static_cast<uint32_t>(comp->offset);
-				break;
-			case vertex_format_data::TEX_COORD2:
-				pcs.texCoordOffset = static_cast<uint32_t>(comp->offset);
-				break;
-			case vertex_format_data::TANGENT:
-				pcs.tangentOffset = static_cast<uint32_t>(comp->offset);
-				break;
-			default:
-				break;
+		case vertex_format_data::POSITION3:
+			pcs.posOffset = static_cast<uint32_t>(comp->offset);
+			break;
+		case vertex_format_data::NORMAL:
+			pcs.normalOffset = static_cast<uint32_t>(comp->offset);
+			break;
+		case vertex_format_data::TEX_COORD2:
+			pcs.texCoordOffset = static_cast<uint32_t>(comp->offset);
+			break;
+		case vertex_format_data::TANGENT:
+			pcs.tangentOffset = static_cast<uint32_t>(comp->offset);
+			break;
+		default:
+			break;
 		}
 	}
 
@@ -533,17 +582,17 @@ void gr_vulkan_render_model(model_material* material_info,
 		return (h >= 0) ? static_cast<uint32_t>(bm_get_array_index(h)) : MODEL_OFFSET_ABSENT;
 	};
 
-	int baseTex = material_info->get_texture_map(TM_BASE_TYPE);
-	int glowTex = material_info->get_texture_map(TM_GLOW_TYPE);
+	int baseTex   = material_info->get_texture_map(TM_BASE_TYPE);
+	int glowTex   = material_info->get_texture_map(TM_GLOW_TYPE);
 	int normalTex = material_info->get_texture_map(TM_NORMAL_TYPE);
-	int specTex = material_info->get_texture_map(TM_SPECULAR_TYPE);
+	int specTex   = material_info->get_texture_map(TM_SPECULAR_TYPE);
 
-	pcs.baseMapIndex = toIndex(baseTex);
-	pcs.glowMapIndex = toIndex(glowTex);
+	pcs.baseMapIndex   = toIndex(baseTex);
+	pcs.glowMapIndex   = toIndex(glowTex);
 	pcs.normalMapIndex = toIndex(normalTex);
-	pcs.specMapIndex = toIndex(specTex);
-	pcs.matrixIndex = 0;  // Unused
-	pcs.flags = material_info->get_shader_flags();
+	pcs.specMapIndex   = toIndex(specTex);
+	pcs.matrixIndex    = 0;  // Unused
+	pcs.flags          = material_info->get_shader_flags();
 
 	// Descriptor set
 	vk::DescriptorSet modelSet = frame.modelDescriptorSet;
@@ -551,19 +600,22 @@ void gr_vulkan_render_model(model_material* material_info,
 
 	std::vector<std::pair<uint32_t, int>> texturesToBind;
 	texturesToBind.reserve(4);
-	for (const auto& entry : {std::pair<uint32_t, int>{pcs.baseMapIndex, baseTex},
-							  std::pair<uint32_t, int>{pcs.glowMapIndex, glowTex},
-							  std::pair<uint32_t, int>{pcs.normalMapIndex, normalTex},
-							  std::pair<uint32_t, int>{pcs.specMapIndex, specTex}}) {
+	for (const auto& entry : {
+	         std::pair<uint32_t, int>{pcs.baseMapIndex,   baseTex},
+	         std::pair<uint32_t, int>{pcs.glowMapIndex,   glowTex},
+	         std::pair<uint32_t, int>{pcs.normalMapIndex, normalTex},
+	         std::pair<uint32_t, int>{pcs.specMapIndex,   specTex}}) {
 		if (entry.first != MODEL_OFFSET_ABSENT) {
 			texturesToBind.emplace_back(entry);
 		}
 	}
 
-	vk::DeviceSize vertexRange = static_cast<vk::DeviceSize>(bufferp->stride) * datap->n_verts;
 	renderer_instance->updateModelDescriptors(
-		modelSet, vertexBuffer, vert_source->Vertex_offset, vertexRange,
-		texturesToBind, frame, cmd);
+		modelSet,
+		vertexBuffer,
+		texturesToBind,
+		frame,
+		cmd);
 
 	// Ensure rendering has started
 	renderer_instance->ensureRenderingStarted(cmd);
@@ -630,10 +682,10 @@ void gr_vulkan_render_primitives(material* material_info,
 	PipelineKey pipelineKey{};
 	pipelineKey.type = shaderType;
 	pipelineKey.variant_flags = material_info->get_shader_flags();
-	pipelineKey.color_format = renderer_instance->getSwapChainImageFormat();
+	pipelineKey.color_format = renderer_instance->getCurrentColorFormat();
 	pipelineKey.depth_format = renderer_instance->getDepthFormat();
 	pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	pipelineKey.color_attachment_count = renderer_instance->getColorAttachmentCount();
+	pipelineKey.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
 	pipelineKey.blend_mode = material_info->get_blend_mode();
 	pipelineKey.layout_hash = layout->hash();
 
@@ -761,7 +813,7 @@ void gr_vulkan_render_primitives(material* material_info,
 
 	// Cull mode
 	cmd.setCullMode(material_info->get_cull_mode() ? vk::CullModeFlagBits::eBack : vk::CullModeFlagBits::eNone);
-	cmd.setFrontFace(vk::FrontFace::eCounterClockwise);
+	cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
 
 	// Depth state
 	gr_zbuffer_type zbufferMode = material_info->get_depth_mode();
@@ -1004,6 +1056,12 @@ void init_function_pointers()
 	// Rendering
 	gr_screen.gf_render_model = gr_vulkan_render_model;
 	gr_screen.gf_render_primitives = gr_vulkan_render_primitives;
+
+	// Deferred lighting
+	gr_screen.gf_deferred_lighting_begin = gr_vulkan_deferred_lighting_begin;
+	gr_screen.gf_deferred_lighting_msaa = gr_vulkan_deferred_lighting_msaa;
+	gr_screen.gf_deferred_lighting_end = gr_vulkan_deferred_lighting_end;
+	gr_screen.gf_deferred_lighting_finish = gr_vulkan_deferred_lighting_finish;
 
 	// Capabilities
 	gr_screen.gf_is_capable = gr_vulkan_is_capable;
