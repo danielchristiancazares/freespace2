@@ -34,6 +34,21 @@ struct QueueIndex {
 	uint32_t index = 0;
 };
 
+// G-buffer configuration for deferred rendering
+static constexpr uint32_t kGBufferAttachmentCount = 3;
+
+struct DeferredTargets {
+	std::array<vk::UniqueImage, kGBufferAttachmentCount> images;
+	std::array<vk::UniqueDeviceMemory, kGBufferAttachmentCount> memories;
+	std::array<vk::UniqueImageView, kGBufferAttachmentCount> views;
+	vk::Format format = vk::Format::eR16G16B16A16Sfloat;
+};
+
+enum class RenderTargetMode {
+	Swapchain,        // Forward rendering to swapchain
+	DeferredGBuffer   // Deferred geometry pass to G-buffer
+};
+
 struct PhysicalDeviceValues {
 	vk::PhysicalDevice device;
 	vk::PhysicalDeviceProperties properties;
@@ -86,8 +101,6 @@ class VulkanRenderer {
 		size_t size);
 	void updateModelDescriptors(vk::DescriptorSet set,
 		vk::Buffer vertexBuffer,
-		vk::DeviceSize vertexOffset,
-		vk::DeviceSize vertexRange,
 		const std::vector<std::pair<uint32_t, int>>& textures,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd);
@@ -112,6 +125,16 @@ class VulkanRenderer {
 	VkFormat getDepthFormat() const { return static_cast<VkFormat>(m_depthFormat); }
 	vk::SampleCountFlagBits getSampleCount() const { return m_sampleCount; }
 	uint32_t getColorAttachmentCount() const { return 1; }
+
+	// Deferred rendering - current render target queries
+	VkFormat getCurrentColorFormat() const;
+	uint32_t getCurrentColorAttachmentCount() const;
+
+	// Deferred rendering hooks
+	void beginDeferredLighting(bool clearNonColorBufs);
+	void endDeferredGeometry(vk::CommandBuffer cmd);
+	void bindDeferredGlobalDescriptors();
+	void setPendingRenderTargetSwapchain() { m_pendingRenderTargetMode = RenderTargetMode::Swapchain; }
 	uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_deviceProperties.limits.minUniformBufferOffsetAlignment); }
 	uint32_t getVertexBufferAlignment() const { return m_vertexBufferAlignment; }
 	ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
@@ -157,7 +180,13 @@ class VulkanRenderer {
 	void createFrames();
 	void createVertexBuffer();
 	void createDepthResources();
+	void createDeferredTargets();
 	vk::Format findDepthFormat() const;
+
+	// Rendering mode helpers
+	void beginSwapchainRendering(vk::CommandBuffer cmd);
+	void beginDeferredGeometryRendering(vk::CommandBuffer cmd);
+	void setDefaultDynamicState(vk::CommandBuffer cmd);
 
 	uint32_t acquireImage(VulkanFrame& frame);
 	void beginFrame(VulkanFrame& frame, uint32_t imageIndex);
@@ -202,7 +231,17 @@ class VulkanRenderer {
 	vk::UniqueImage m_depthImage;
 	vk::UniqueDeviceMemory m_depthImageMemory;
 	vk::UniqueImageView m_depthImageView;
+	vk::UniqueImageView m_depthSampleView;  // Sampled depth view for deferred lighting
 	bool m_depthImageInitialized = false;
+
+	// Deferred rendering resources
+	DeferredTargets m_gbuffer;
+	vk::UniqueSampler m_gbufferSampler;
+	RenderTargetMode m_renderTargetMode = RenderTargetMode::Swapchain;
+	RenderTargetMode m_pendingRenderTargetMode = RenderTargetMode::Swapchain;
+	bool m_deferredActive = false;
+	bool m_deferredGeometryDone = false;
+	bool m_deferredClearNonColorBufs = false;
 
 	std::unique_ptr<VulkanDescriptorLayouts> m_descriptorLayouts;
 	vk::DescriptorSet m_globalDescriptorSet{};
