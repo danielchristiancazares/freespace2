@@ -571,8 +571,8 @@ add_file_folder("Graphics\\\\Util"
 
 if (FSO_BUILD_WITH_VULKAN)
 	add_file_folder("Graphics\\\\Vulkan"
-		graphics/vulkan/gr_vulkan.cpp
-		graphics/vulkan/gr_vulkan.h
+		graphics/vulkan/VulkanGraphics.cpp
+		graphics/vulkan/VulkanGraphics.h
 		graphics/vulkan/VulkanFrame.cpp
 		graphics/vulkan/VulkanFrame.h
 		graphics/vulkan/FrameLifecycleTracker.cpp

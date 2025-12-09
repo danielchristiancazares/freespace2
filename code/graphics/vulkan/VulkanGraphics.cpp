@@ -1,5 +1,5 @@
 
-#include "gr_vulkan.h"
+#include "VulkanGraphics.h"
 
 #include "VulkanModelTypes.h"
 #include "VulkanRenderer.h"
@@ -336,13 +336,39 @@ void stub_scene_texture_end() {}
 
 void stub_copy_effect_texture() {}
 
-void stub_deferred_lighting_begin(bool /*clearNonColorBufs*/) {}
+void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
+{
+	if (!renderer_instance) {
+		return;
+	}
+	renderer_instance->beginDeferredLighting(clearNonColorBufs);
+}
 
-void stub_deferred_lighting_msaa() {}
+void gr_vulkan_deferred_lighting_msaa()
+{
+	// MSAA not implemented for deferred yet
+}
 
-void stub_deferred_lighting_end() {}
+void gr_vulkan_deferred_lighting_end()
+{
+	if (!renderer_instance) {
+		return;
+	}
+	VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
+	if (!frame) {
+		return;
+	}
+	renderer_instance->endDeferredGeometry(frame->commandBuffer());
+}
 
-void stub_deferred_lighting_finish() {}
+void gr_vulkan_deferred_lighting_finish()
+{
+	if (!renderer_instance) {
+		return;
+	}
+	renderer_instance->bindDeferredGlobalDescriptors();
+	renderer_instance->setPendingRenderTargetSwapchain();
+}
 
 void stub_set_line_width(float /*width*/) {}
 
@@ -478,10 +504,10 @@ void gr_vulkan_render_model(model_material* material_info,
 	PipelineKey key{};
 	key.type = SDR_TYPE_MODEL;
 	key.variant_flags = material_info->get_shader_flags();
-	key.color_format = renderer_instance->getSwapChainImageFormat();
+	key.color_format = renderer_instance->getCurrentColorFormat();
 	key.depth_format = renderer_instance->getDepthFormat();
 	key.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	key.color_attachment_count = renderer_instance->getColorAttachmentCount();
+	key.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
 	key.blend_mode = material_info->get_blend_mode();
 	// Model shaders ignore layout_hash (vertex pulling)
 
@@ -560,9 +586,8 @@ void gr_vulkan_render_model(model_material* material_info,
 		}
 	}
 
-	vk::DeviceSize vertexRange = static_cast<vk::DeviceSize>(bufferp->stride) * datap->n_verts;
 	renderer_instance->updateModelDescriptors(
-		modelSet, vertexBuffer, vert_source->Vertex_offset, vertexRange,
+		modelSet, vertexBuffer,
 		texturesToBind, frame, cmd);
 
 	// Ensure rendering has started
@@ -630,10 +655,10 @@ void gr_vulkan_render_primitives(material* material_info,
 	PipelineKey pipelineKey{};
 	pipelineKey.type = shaderType;
 	pipelineKey.variant_flags = material_info->get_shader_flags();
-	pipelineKey.color_format = renderer_instance->getSwapChainImageFormat();
+	pipelineKey.color_format = renderer_instance->getCurrentColorFormat();
 	pipelineKey.depth_format = renderer_instance->getDepthFormat();
 	pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	pipelineKey.color_attachment_count = renderer_instance->getColorAttachmentCount();
+	pipelineKey.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
 	pipelineKey.blend_mode = material_info->get_blend_mode();
 	pipelineKey.layout_hash = layout->hash();
 
@@ -761,7 +786,7 @@ void gr_vulkan_render_primitives(material* material_info,
 
 	// Cull mode
 	cmd.setCullMode(material_info->get_cull_mode() ? vk::CullModeFlagBits::eBack : vk::CullModeFlagBits::eNone);
-	cmd.setFrontFace(vk::FrontFace::eCounterClockwise);
+	cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
 
 	// Depth state
 	gr_zbuffer_type zbufferMode = material_info->get_depth_mode();
@@ -1004,6 +1029,12 @@ void init_function_pointers()
 	// Rendering
 	gr_screen.gf_render_model = gr_vulkan_render_model;
 	gr_screen.gf_render_primitives = gr_vulkan_render_primitives;
+
+	// Deferred lighting
+	gr_screen.gf_deferred_lighting_begin = gr_vulkan_deferred_lighting_begin;
+	gr_screen.gf_deferred_lighting_msaa = gr_vulkan_deferred_lighting_msaa;
+	gr_screen.gf_deferred_lighting_end = gr_vulkan_deferred_lighting_end;
+	gr_screen.gf_deferred_lighting_finish = gr_vulkan_deferred_lighting_finish;
 
 	// Capabilities
 	gr_screen.gf_is_capable = gr_vulkan_is_capable;
