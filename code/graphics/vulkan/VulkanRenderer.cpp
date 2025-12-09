@@ -1,6 +1,6 @@
 
 #include "VulkanRenderer.h"
-#include "gr_vulkan.h"
+#include "VulkanGraphics.h"
 #include "VulkanConstants.h"
 #include "graphics/util/uniform_structs.h"
 
@@ -372,6 +372,7 @@ bool VulkanRenderer::initialize()
 	createPipelineCache();
 	createDescriptorResources();
 	createDepthResources();
+	createDeferredTargets();
 	createUploadCommandPool();
 	createFrames();
 
@@ -901,7 +902,7 @@ void VulkanRenderer::createDepthResources()
 	imageInfo.arrayLayers = 1;
 	imageInfo.samples = vk::SampleCountFlagBits::e1;
 	imageInfo.tiling = vk::ImageTiling::eOptimal;
-	imageInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+	imageInfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
 	imageInfo.initialLayout = vk::ImageLayout::eUndefined;
 
 	m_depthImage = m_device->createImageUnique(imageInfo);
@@ -923,6 +924,16 @@ void VulkanRenderer::createDepthResources()
 	viewInfo.subresourceRange.layerCount = 1;
 
 	m_depthImageView = m_device->createImageViewUnique(viewInfo);
+
+	// Create sampled depth view for deferred lighting
+	vk::ImageViewCreateInfo sampleViewInfo{};
+	sampleViewInfo.image = m_depthImage.get();
+	sampleViewInfo.viewType = vk::ImageViewType::e2D;
+	sampleViewInfo.format = m_depthFormat;
+	sampleViewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+	sampleViewInfo.subresourceRange.levelCount = 1;
+	sampleViewInfo.subresourceRange.layerCount = 1;
+	m_depthSampleView = m_device->createImageViewUnique(sampleViewInfo);
 }
 
 vk::Format VulkanRenderer::findDepthFormat() const
@@ -941,6 +952,57 @@ vk::Format VulkanRenderer::findDepthFormat() const
 	}
 
 	return vk::Format::eD32Sfloat; // Fallback
+}
+
+void VulkanRenderer::createDeferredTargets()
+{
+	for (uint32_t i = 0; i < kGBufferAttachmentCount; ++i) {
+		vk::ImageCreateInfo imageInfo{};
+		imageInfo.imageType = vk::ImageType::e2D;
+		imageInfo.format = m_gbuffer.format;
+		imageInfo.extent = vk::Extent3D(m_swapChainExtent.width, m_swapChainExtent.height, 1);
+		imageInfo.mipLevels = 1;
+		imageInfo.arrayLayers = 1;
+		imageInfo.samples = m_sampleCount;
+		imageInfo.tiling = vk::ImageTiling::eOptimal;
+		imageInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
+		imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+		m_gbuffer.images[i] = m_device->createImageUnique(imageInfo);
+
+		vk::MemoryRequirements memReqs = m_device->getImageMemoryRequirements(m_gbuffer.images[i].get());
+		vk::MemoryAllocateInfo allocInfo{};
+		allocInfo.allocationSize = memReqs.size;
+		allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+		m_gbuffer.memories[i] = m_device->allocateMemoryUnique(allocInfo);
+		m_device->bindImageMemory(m_gbuffer.images[i].get(), m_gbuffer.memories[i].get(), 0);
+
+		vk::ImageViewCreateInfo viewInfo{};
+		viewInfo.image = m_gbuffer.images[i].get();
+		viewInfo.viewType = vk::ImageViewType::e2D;
+		viewInfo.format = m_gbuffer.format;
+		viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		viewInfo.subresourceRange.levelCount = 1;
+		viewInfo.subresourceRange.layerCount = 1;
+
+		m_gbuffer.views[i] = m_device->createImageViewUnique(viewInfo);
+	}
+
+	// Sampler for G-buffer textures in lighting pass
+	vk::SamplerCreateInfo samplerInfo{};
+	samplerInfo.magFilter = vk::Filter::eLinear;
+	samplerInfo.minFilter = vk::Filter::eLinear;
+	samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+	samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+	samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+	m_gbufferSampler = m_device->createSamplerUnique(samplerInfo);
+
+	vkprintf("Created G-buffer: %u attachments, format %d, %ux%u\n",
+		kGBufferAttachmentCount,
+		static_cast<int>(m_gbuffer.format),
+		m_swapChainExtent.width,
+		m_swapChainExtent.height);
 }
 
 void VulkanRenderer::createUploadCommandPool()
@@ -973,6 +1035,12 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex)
 {
 	m_frameLifecycle.begin(m_currentFrame);
 	m_isRecording = true;
+
+	// Reset deferred rendering state for this frame
+	m_deferredActive = false;
+	m_deferredGeometryDone = false;
+	m_renderTargetMode = RenderTargetMode::Swapchain;
+	m_pendingRenderTargetMode = RenderTargetMode::Swapchain;
 
 	// Sync model descriptors BEFORE command buffer recording
 	// This is the ONLY place descriptors are updated for this frame
@@ -1167,21 +1235,60 @@ VulkanFrame* VulkanRenderer::getCurrentRecordingFrame()
 	return m_frames[m_recordingFrame].get();
 }
 
-void VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd)
+void VulkanRenderer::setDefaultDynamicState(vk::CommandBuffer cmd)
 {
-	if (m_renderPassActive) {
-		return;
+	// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
+	vk::Viewport viewport;
+	viewport.x = 0.f;
+	viewport.y = static_cast<float>(m_swapChainExtent.height);
+	viewport.width = static_cast<float>(m_swapChainExtent.width);
+	viewport.height = -static_cast<float>(m_swapChainExtent.height);
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+	cmd.setViewport(0, viewport);
+
+	vk::Rect2D scissor({0, 0}, m_swapChainExtent);
+	cmd.setScissor(0, scissor);
+
+	cmd.setCullMode(m_cullMode);
+	cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
+	cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+	cmd.setDepthTestEnable(m_depthTestEnable ? VK_TRUE : VK_FALSE);
+	cmd.setDepthWriteEnable(m_depthWriteEnable ? VK_TRUE : VK_FALSE);
+	cmd.setDepthCompareOp(m_depthTestEnable ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
+	cmd.setStencilTestEnable(VK_FALSE);
+	if (m_supportsExtendedDynamicState3) {
+		if (m_extDyn3Caps.colorBlendEnable) {
+			vk::Bool32 blendEnable = VK_FALSE;
+			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+		}
+		if (m_extDyn3Caps.colorWriteMask) {
+			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+				vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+		}
+		if (m_extDyn3Caps.polygonMode) {
+			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
+		}
+		if (m_extDyn3Caps.rasterizationSamples) {
+			cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+		}
 	}
 
+	// Bind global descriptor set
+	cmd.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics, m_descriptorLayouts->pipelineLayout(), 1, 1, &m_globalDescriptorSet, 0, nullptr);
+}
+
+void VulkanRenderer::beginSwapchainRendering(vk::CommandBuffer cmd)
+{
 	const uint32_t imageIndex = m_recordingImage;
 
-	// Begin dynamic rendering
 	vk::RenderingAttachmentInfo colorAttachment{};
 	colorAttachment.imageView = m_swapChainImageViews[imageIndex].get();
 	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
 	colorAttachment.loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
 	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-	
 	colorAttachment.clearValue = vk::ClearColorValue(m_clearColor);
 
 	vk::RenderingAttachmentInfo depthAttachment{};
@@ -1198,65 +1305,209 @@ void VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd)
 	renderingInfo.colorAttachmentCount = 1;
 	renderingInfo.pColorAttachments = &colorAttachment;
 	renderingInfo.pDepthAttachment = &depthAttachment;
-	
+
 	cmd.beginRendering(renderingInfo);
-	m_renderPassActive = true;
 
 	// Clear flags are one-shot; reset after we consume them
 	m_shouldClearColor = false;
 	m_shouldClearDepth = false;
+}
 
-	// Set dynamic state defaults
-	// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
-	vk::Viewport viewport;
-	viewport.x = 0.f;
-	viewport.y = static_cast<float>(m_swapChainExtent.height);
-	viewport.width = static_cast<float>(m_swapChainExtent.width);
-	viewport.height = -static_cast<float>(m_swapChainExtent.height);
-	viewport.minDepth = 0.f;
-	viewport.maxDepth = 1.f;
-	cmd.setViewport(0, viewport);
-
-	vk::Rect2D scissor({0, 0}, m_swapChainExtent);
-	cmd.setScissor(0, scissor);
-
-	cmd.setCullMode(m_cullMode);
-	cmd.setFrontFace(vk::FrontFace::eCounterClockwise);
-	cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
-	cmd.setDepthTestEnable(m_depthTestEnable ? VK_TRUE : VK_FALSE);
-	cmd.setDepthWriteEnable(m_depthWriteEnable ? VK_TRUE : VK_FALSE);
-	cmd.setDepthCompareOp(m_depthTestEnable ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
-	cmd.setStencilTestEnable(VK_FALSE);
-	if (m_supportsExtendedDynamicState3) {
-		if (m_extDyn3Caps.colorBlendEnable) {
-			vk::Bool32 blendEnable = VK_FALSE;
-			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
-		}
-		if (m_extDyn3Caps.colorWriteMask) {
-			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-				vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
-			vkprintf("Set color write mask dynamically: RGBA\n");
-		} else {
-			// If EDS3 colorWriteMask not available, rely on pipeline state
-			// Pipeline should have color write mask set in buildBlendAttachment()
-			static bool warnedOnce = false;
-			if (!warnedOnce) {
-				vkprintf("EDS3 colorWriteMask not available, using pipeline state\n");
-				warnedOnce = true;
-			}
-		}
-		if (m_extDyn3Caps.polygonMode) {
-			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
-		}
-		if (m_extDyn3Caps.rasterizationSamples) {
-			cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
-		}
+void VulkanRenderer::beginDeferredGeometryRendering(vk::CommandBuffer cmd)
+{
+	// Transition G-buffer images to color attachment optimal
+	std::array<vk::ImageMemoryBarrier2, kGBufferAttachmentCount> barriers{};
+	for (uint32_t i = 0; i < kGBufferAttachmentCount; ++i) {
+		barriers[i].srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+		barriers[i].dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+		barriers[i].dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+		barriers[i].oldLayout = vk::ImageLayout::eUndefined;
+		barriers[i].newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		barriers[i].image = m_gbuffer.images[i].get();
+		barriers[i].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		barriers[i].subresourceRange.levelCount = 1;
+		barriers[i].subresourceRange.layerCount = 1;
 	}
 
-	// Bind global descriptor set (no draw here; actual draws occur between flips)
-	cmd.bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics, m_descriptorLayouts->pipelineLayout(), 1, 1, &m_globalDescriptorSet, 0, nullptr);
+	vk::DependencyInfo dep{};
+	dep.imageMemoryBarrierCount = kGBufferAttachmentCount;
+	dep.pImageMemoryBarriers = barriers.data();
+	cmd.pipelineBarrier2(dep);
+
+	// Setup color attachments for G-buffer
+	std::array<vk::RenderingAttachmentInfo, kGBufferAttachmentCount> colorAttachments{};
+	for (uint32_t i = 0; i < kGBufferAttachmentCount; ++i) {
+		colorAttachments[i].imageView = m_gbuffer.views[i].get();
+		colorAttachments[i].imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		colorAttachments[i].loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+		colorAttachments[i].storeOp = vk::AttachmentStoreOp::eStore;
+		colorAttachments[i].clearValue = vk::ClearColorValue(std::array<float, 4>{0.f, 0.f, 0.f, 0.f});
+	}
+
+	vk::RenderingAttachmentInfo depthAttachment{};
+	depthAttachment.imageView = m_depthImageView.get();
+	depthAttachment.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	depthAttachment.loadOp = m_shouldClearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+	depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	depthAttachment.clearValue.depthStencil.depth = m_clearDepth;
+	depthAttachment.clearValue.depthStencil.stencil = 0;
+
+	vk::RenderingInfo renderingInfo{};
+	renderingInfo.renderArea = vk::Rect2D({0, 0}, m_swapChainExtent);
+	renderingInfo.layerCount = 1;
+	renderingInfo.colorAttachmentCount = kGBufferAttachmentCount;
+	renderingInfo.pColorAttachments = colorAttachments.data();
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	cmd.beginRendering(renderingInfo);
+
+	// Clear flags are one-shot; reset after we consume them
+	m_shouldClearColor = false;
+	m_shouldClearDepth = false;
+}
+
+void VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd)
+{
+	// Check if we need to switch render target modes
+	if (m_renderPassActive && m_renderTargetMode == m_pendingRenderTargetMode) {
+		return;
+	}
+
+	// End current rendering if switching modes
+	if (m_renderPassActive) {
+		cmd.endRendering();
+		m_renderPassActive = false;
+	}
+
+	// Begin rendering to the appropriate target
+	switch (m_pendingRenderTargetMode) {
+	case RenderTargetMode::Swapchain:
+		beginSwapchainRendering(cmd);
+		break;
+	case RenderTargetMode::DeferredGBuffer:
+		beginDeferredGeometryRendering(cmd);
+		break;
+	}
+
+	m_renderTargetMode = m_pendingRenderTargetMode;
+	m_renderPassActive = true;
+
+	// Set dynamic state defaults
+	setDefaultDynamicState(cmd);
+}
+
+VkFormat VulkanRenderer::getCurrentColorFormat() const
+{
+	return (m_renderTargetMode == RenderTargetMode::DeferredGBuffer)
+		? static_cast<VkFormat>(m_gbuffer.format)
+		: static_cast<VkFormat>(m_swapChainImageFormat);
+}
+
+uint32_t VulkanRenderer::getCurrentColorAttachmentCount() const
+{
+	return (m_renderTargetMode == RenderTargetMode::DeferredGBuffer)
+		? kGBufferAttachmentCount
+		: 1;
+}
+
+void VulkanRenderer::beginDeferredLighting(bool clearNonColorBufs)
+{
+	m_deferredActive = true;
+	m_deferredGeometryDone = false;
+	m_deferredClearNonColorBufs = clearNonColorBufs;
+	m_pendingRenderTargetMode = RenderTargetMode::DeferredGBuffer;
+	m_shouldClearColor = true;
+	m_shouldClearDepth = true;
+}
+
+void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
+{
+	if (!m_deferredActive || m_deferredGeometryDone) {
+		return;
+	}
+
+	// End G-buffer rendering
+	if (m_renderPassActive) {
+		cmd.endRendering();
+		m_renderPassActive = false;
+	}
+
+	// Transition G-buffer + depth to shader-read layout
+	std::array<vk::ImageMemoryBarrier2, kGBufferAttachmentCount + 1> barriers{};
+
+	for (uint32_t i = 0; i < kGBufferAttachmentCount; ++i) {
+		barriers[i].srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+		barriers[i].srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+		barriers[i].dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+		barriers[i].dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+		barriers[i].oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		barriers[i].newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		barriers[i].image = m_gbuffer.images[i].get();
+		barriers[i].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		barriers[i].subresourceRange.levelCount = 1;
+		barriers[i].subresourceRange.layerCount = 1;
+	}
+
+	// Depth transition
+	auto& bd = barriers[kGBufferAttachmentCount];
+	bd.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests;
+	bd.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+	bd.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+	bd.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+	bd.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	bd.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	bd.image = m_depthImage.get();
+	bd.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+	bd.subresourceRange.levelCount = 1;
+	bd.subresourceRange.layerCount = 1;
+
+	vk::DependencyInfo dep{};
+	dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+	dep.pImageMemoryBarriers = barriers.data();
+	cmd.pipelineBarrier2(dep);
+
+	m_deferredGeometryDone = true;
+}
+
+void VulkanRenderer::bindDeferredGlobalDescriptors()
+{
+	std::vector<vk::WriteDescriptorSet> writes;
+	std::vector<vk::DescriptorImageInfo> infos;
+	writes.reserve(kGBufferAttachmentCount + 1);
+	infos.reserve(kGBufferAttachmentCount + 1);
+
+	for (uint32_t i = 0; i < kGBufferAttachmentCount; ++i) {
+		vk::DescriptorImageInfo info{};
+		info.sampler = m_gbufferSampler.get();
+		info.imageView = m_gbuffer.views[i].get();
+		info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		infos.push_back(info);
+
+		vk::WriteDescriptorSet write{};
+		write.dstSet = m_globalDescriptorSet;
+		write.dstBinding = i;
+		write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		write.descriptorCount = 1;
+		write.pImageInfo = &infos.back();
+		writes.push_back(write);
+	}
+
+	// Depth as extra binding
+	vk::DescriptorImageInfo depthInfo{};
+	depthInfo.sampler = m_gbufferSampler.get();
+	depthInfo.imageView = m_depthSampleView.get();
+	depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	infos.push_back(depthInfo);
+
+	vk::WriteDescriptorSet depthWrite{};
+	depthWrite.dstSet = m_globalDescriptorSet;
+	depthWrite.dstBinding = kGBufferAttachmentCount;
+	depthWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	depthWrite.descriptorCount = 1;
+	depthWrite.pImageInfo = &infos.back();
+	writes.push_back(depthWrite);
+
+	m_device->updateDescriptorSets(writes, {});
 }
 
 vk::Buffer VulkanRenderer::getBuffer(gr_buffer_handle handle) const
@@ -1422,8 +1673,6 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
 
 void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
 	vk::Buffer vertexBuffer,
-	vk::DeviceSize vertexOffset,
-	vk::DeviceSize vertexRange,
 	const std::vector<std::pair<uint32_t, int>>& textures,
 	VulkanFrame& frame,
 	vk::CommandBuffer cmd)
@@ -1431,8 +1680,8 @@ void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
 	std::vector<vk::WriteDescriptorSet> writes;
 	writes.reserve(textures.size() + 1);
 
-	// Vertex buffer (binding 0)
-	vk::DescriptorBufferInfo bufferInfo{vertexBuffer, vertexOffset, vertexRange};
+	// Vertex buffer (binding 0) - offset 0, whole buffer; shader uses pcs.vertexOffset for addressing
+	vk::DescriptorBufferInfo bufferInfo{vertexBuffer, 0, VK_WHOLE_SIZE};
 	writes.push_back({set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &bufferInfo, nullptr});
 
 	// Textures (binding 1)

@@ -3,6 +3,7 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 namespace graphics {
 namespace vulkan {
@@ -65,12 +66,28 @@ void VulkanFrame::wait_for_gpu()
 		throw std::runtime_error("Fence wait failed for Vulkan frame");
 	}
 	auto resetResult = m_device.resetFences(1, &fence);
-	Assertion(resetResult == vk::Result::eSuccess, "Failed to reset fence for Vulkan frame");
+	if (resetResult != vk::Result::eSuccess) {
+		throw std::runtime_error("Failed to reset fence for Vulkan frame");
+	}
 }
 
 void VulkanFrame::reset()
 {
-	m_device.resetCommandPool(m_commandPool.get());
+	using ResetReturn = decltype(m_device.resetCommandPool(m_commandPool.get()));
+	constexpr bool returnsVoid = std::is_same_v<ResetReturn, void>;
+
+	auto reset_pool = [](auto& dev, VkCommandPool pool, std::true_type) {
+		dev.resetCommandPool(pool);          // returns void
+		return vk::Result::eSuccess;
+	};
+	auto reset_pool_result = [](auto& dev, VkCommandPool pool, std::false_type) {
+		return dev.resetCommandPool(pool);   // returns vk::Result
+	};
+
+	vk::Result poolResult = reset_pool(m_device, m_commandPool.get(), std::integral_constant<bool, returnsVoid>{});
+	if (poolResult != vk::Result::eSuccess) {
+		throw std::runtime_error("Failed to reset command pool for Vulkan frame");
+	}
 	m_uniformRing.reset();
 	m_vertexRing.reset();
 	m_stagingRing.reset();
