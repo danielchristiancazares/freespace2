@@ -26,21 +26,18 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 
 VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(device)
 {
-	std::array<vk::DescriptorSetLayoutBinding, 3> globalBindings{};
-	globalBindings[0].binding = 0;
-	globalBindings[0].descriptorCount = 1;
-	globalBindings[0].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-	globalBindings[0].stageFlags = vk::ShaderStageFlagBits::eFragment;
-
-	globalBindings[1].binding = 1;
-	globalBindings[1].descriptorCount = 1;
-	globalBindings[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-	globalBindings[1].stageFlags = vk::ShaderStageFlagBits::eFragment;
-
-	globalBindings[2].binding = 2;
-	globalBindings[2].descriptorCount = 1;
-	globalBindings[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-	globalBindings[2].stageFlags = vk::ShaderStageFlagBits::eFragment;
+	// Global layout bindings for deferred lighting:
+	// Binding 0: G-buffer 0 (albedo+spec)
+	// Binding 1: G-buffer 1 (normal)
+	// Binding 2: G-buffer 2 (material params)
+	// Binding 3: Depth (sampled)
+	std::array<vk::DescriptorSetLayoutBinding, 4> globalBindings{};
+	for (uint32_t i = 0; i < globalBindings.size(); ++i) {
+		globalBindings[i].binding = i;
+		globalBindings[i].descriptorCount = 1;
+		globalBindings[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		globalBindings[i].stageFlags = vk::ShaderStageFlagBits::eFragment;
+	}
 
 	vk::DescriptorSetLayoutCreateInfo globalLayoutInfo;
 	globalLayoutInfo.bindingCount = static_cast<uint32_t>(globalBindings.size());
@@ -82,7 +79,7 @@ VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(d
 
 	std::array<vk::DescriptorPoolSize, 1> poolSizes{};
 	poolSizes[0].type = vk::DescriptorType::eCombinedImageSampler;
-	poolSizes[0].descriptorCount = 3;
+	poolSizes[0].descriptorCount = 4; // G-buffer (3) + depth (1)
 
 	vk::DescriptorPoolCreateInfo poolInfo;
 	poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
@@ -160,11 +157,11 @@ void VulkanDescriptorLayouts::createModelLayouts()
 	// Descriptor pool - sizes derived from kFramesInFlight, not magic numbers
 	std::array<vk::DescriptorPoolSize, 3> poolSizes{};
 	poolSizes[0].type = vk::DescriptorType::eStorageBuffer;
-	poolSizes[0].descriptorCount = kModelSetsPerPool * 1; // 1 SSBO per set
+	poolSizes[0].descriptorCount = kModelSetsPerPool; // 1 SSBO per set (vertex heap)
 	poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
 	poolSizes[1].descriptorCount = kModelSetsPerPool * kMaxBindlessTextures;
 	poolSizes[2].type = vk::DescriptorType::eUniformBufferDynamic;
-	poolSizes[2].descriptorCount = kModelSetsPerPool * 1; // 1 dynamic UBO per set
+	poolSizes[2].descriptorCount = kModelSetsPerPool; // 1 dynamic UBO per set
 
 	vk::DescriptorPoolCreateInfo poolInfo;
 	// eFreeDescriptorSet not strictly needed for fixed ring, but harmless
