@@ -23,6 +23,7 @@ class tcache_slot_opengl : public gr_bitmap_info {
  public:
 	GLuint texture_id;
 	GLenum texture_target;
+	GLenum wrap_mode;
 	float u_scale, v_scale;
 	int	bitmap_handle;
 	int	size;
@@ -43,6 +44,7 @@ class tcache_slot_opengl : public gr_bitmap_info {
 	{
 		texture_id = 0;
 		texture_target = GL_TEXTURE_2D;
+		wrap_mode = GL_REPEAT;
 		u_scale = 1.0f;
 		v_scale = 1.0f;
 		bitmap_handle = -1;
@@ -68,38 +70,6 @@ extern GLenum GL_texture_face;
 extern GLfloat GL_anisotropy;
 extern bool GL_rendering_to_texture;
 extern GLint GL_max_renderbuffer_size;
-
-// Sampler object cache for wrap/filter combinations
-// Decouples texture parameters from sampler state for bindless texture compatibility
-class opengl_sampler_cache {
-public:
-	// Sampler indices: wrap_mode * 2 + has_mipmaps
-	enum class SamplerIndex : int {
-		ClampNoMip = 0,
-		ClampMip = 1,
-		RepeatNoMip = 2,
-		RepeatMip = 3,
-		MirrorNoMip = 4,
-		MirrorMip = 5,
-		Count = 6
-	};
-
-	void init();
-	void shutdown();
-	void bind(GLuint tex_unit, GLenum wrap_mode, bool has_mipmaps);
-	void unbind(GLuint tex_unit);  // Bind sampler 0 for embedded texture state
-
-private:
-	static constexpr int MAX_TRACKED_UNITS = 32;  // Matches typical GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS
-
-	GLuint samplers_[static_cast<int>(SamplerIndex::Count)] = {};
-	GLuint bound_sampler_[MAX_TRACKED_UNITS] = {};  // Track bound sampler per unit to avoid redundant calls
-
-	void configure_sampler(GLuint sampler, GLenum wrap_mode, bool has_mipmaps);
-	GLuint get_sampler(GLenum wrap_mode, bool has_mipmaps) const;
-};
-
-extern opengl_sampler_cache GL_sampler_cache;
 
 void opengl_switch_arb(int unit, int state);
 void opengl_tcache_init();
@@ -128,8 +98,5 @@ void gr_opengl_bm_generate_mip_maps(int slot);
 void gr_opengl_get_texture_scale(int bitmap_handle, float *u_scale, float *v_scale);
 
 void gr_opengl_update_texture(int bitmap_handle, int bpp, const ubyte* data, int width, int height);
-
-// Test hook / future runtime anisotropy refresh
-void opengl_apply_anisotropy_to_current_texture();
 
 #endif	//_GROPENGLTEXTURE_H

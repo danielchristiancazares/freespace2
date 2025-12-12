@@ -1313,6 +1313,15 @@ bool gr_opengl_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 	}
 #endif
 
+	// Diagnostic: Print GLAD version flags
+	mprintf(("GLAD Diagnostics:\n"));
+	mprintf(("  GLAD_GL_VERSION_3_0 = %d\n", GLAD_GL_VERSION_3_0));
+	mprintf(("  GLAD_GL_VERSION_3_1 = %d\n", GLAD_GL_VERSION_3_1));
+	mprintf(("  GLAD_GL_VERSION_3_2 = %d\n", GLAD_GL_VERSION_3_2));
+	mprintf(("  GLAD_GL_ARB_timer_query = %d\n", GLAD_GL_ARB_timer_query));
+	mprintf(("  glQueryCounter pointer = %p\n", (void*)glQueryCounter));
+	mprintf(("  glGetQueryObjectui64v pointer = %p\n", (void*)glGetQueryObjectui64v));
+
 	// version check
 	GL_version = (GLVersion.major * 10) + GLVersion.minor;
 
