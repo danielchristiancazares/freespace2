@@ -11,8 +11,6 @@
 #include <windows.h>
 #endif
 
-#include <algorithm>
-
 #define BMPMAN_INTERNAL
 #include "gropenglstate.h"
 #include "gropengltexture.h"
@@ -45,8 +43,6 @@ GLenum GL_texture_face = GL_TEXTURE_2D;
 GLenum GL_texture_addressing = GL_REPEAT;
 bool GL_rendering_to_texture = false;
 GLint GL_max_renderbuffer_size = 0;
-
-opengl_sampler_cache GL_sampler_cache;
 
 extern int GLOWMAP;
 extern int SPECMAP;
@@ -146,30 +142,6 @@ int opengl_create_texture (int bitmap_handle, int bitmap_type, tcache_slot_openg
 
 extern int get_num_mipmap_levels(int w, int h);
 
-void opengl_apply_anisotropy_to_current_texture()
-{
-	if (!GLAD_GL_EXT_texture_filter_anisotropic) {
-		return;
-	}
-
-	const auto tex_id = GL_state.Texture.GetCurrentTextureID();
-	if (tex_id == 0) {
-		return;
-	}
-
-	// Clamp to device max (if known) and skip redundant 1.0f (off)
-	float max_supported = GL_state.Constants.GetMaxAnisotropy();
-	if (max_supported <= 0.0f) {
-		max_supported = GL_anisotropy; // fallback when constants not initialized (unit tests, headless)
-	}
-	const float desired = std::max(1.0f, std::min(GL_anisotropy, max_supported));
-	if (desired <= 1.0f) {
-		return;
-	}
-
-	glTexParameterf(GL_state.Texture.GetCurrentTextureTarget(), GL_TEXTURE_MAX_ANISOTROPY_EXT, desired);
-}
-
 void opengl_set_additive_tex_env()
 {
 	GL_CHECK_FOR_ERRORS("start of set_additive_tex_env()");
@@ -189,103 +161,6 @@ void opengl_set_modulate_tex_env()
 void opengl_set_texture_target( GLenum target )
 {
     GL_texture_target = target;
-}
-
-void opengl_sampler_cache::init()
-{
-	glGenSamplers(static_cast<int>(SamplerIndex::Count), samplers_);
-
-	// Validate sampler generation succeeded
-	for (int i = 0; i < static_cast<int>(SamplerIndex::Count); ++i) {
-		if (samplers_[i] == 0) {
-			Error(LOCATION, "Failed to generate OpenGL sampler objects");
-			return;
-		}
-	}
-
-	static const GLenum wrap_modes[] = {GL_CLAMP_TO_EDGE, GL_REPEAT, GL_MIRRORED_REPEAT};
-
-	for (int w = 0; w < 3; ++w) {
-		for (int m = 0; m < 2; ++m) {
-			configure_sampler(samplers_[w * 2 + m], wrap_modes[w], m == 1);
-		}
-	}
-
-	// Initialize bound sampler tracking (0 = no sampler bound)
-	std::fill(std::begin(bound_sampler_), std::end(bound_sampler_), 0);
-
-	GL_CHECK_FOR_ERRORS("opengl_sampler_cache::init()");
-}
-
-void opengl_sampler_cache::shutdown()
-{
-	// Unbind all samplers before deletion
-	for (int i = 0; i < MAX_TRACKED_UNITS; ++i) {
-		if (bound_sampler_[i] != 0) {
-			glBindSampler(i, 0);
-			bound_sampler_[i] = 0;
-		}
-	}
-
-	glDeleteSamplers(static_cast<int>(SamplerIndex::Count), samplers_);
-	std::fill(std::begin(samplers_), std::end(samplers_), 0);
-}
-
-void opengl_sampler_cache::configure_sampler(GLuint sampler, GLenum wrap_mode, bool has_mipmaps)
-{
-	glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, wrap_mode);
-	glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, wrap_mode);
-	glSamplerParameteri(sampler, GL_TEXTURE_WRAP_R, wrap_mode);
-	glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	// Respect GL_mipmap_filter: 0=bilinear (MIPMAP_NEAREST), 1=trilinear (MIPMAP_LINEAR)
-	GLenum min_filter;
-	if (has_mipmaps) {
-		min_filter = GL_mipmap_filter ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR_MIPMAP_NEAREST;
-	} else {
-		min_filter = GL_LINEAR;
-	}
-	glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, min_filter);
-
-	// Apply anisotropic filtering to mipmapped samplers
-	if (GLAD_GL_EXT_texture_filter_anisotropic && has_mipmaps) {
-		glSamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY_EXT, GL_anisotropy);
-	}
-}
-
-GLuint opengl_sampler_cache::get_sampler(GLenum wrap_mode, bool has_mipmaps) const
-{
-	int w_idx;
-	switch (wrap_mode) {
-		case GL_REPEAT:          w_idx = 1; break;
-		case GL_MIRRORED_REPEAT: w_idx = 2; break;
-		default:                 w_idx = 0; break;  // CLAMP_TO_EDGE and fallback
-	}
-	return samplers_[w_idx * 2 + (has_mipmaps ? 1 : 0)];
-}
-
-void opengl_sampler_cache::bind(GLuint tex_unit, GLenum wrap_mode, bool has_mipmaps)
-{
-	Assertion(tex_unit < MAX_TRACKED_UNITS, "Texture unit %u exceeds sampler cache tracking limit", tex_unit);
-
-	GLuint sampler = get_sampler(wrap_mode, has_mipmaps);
-
-	// Only issue GL call if sampler actually changes (performance optimization)
-	if (bound_sampler_[tex_unit] != sampler) {
-		glBindSampler(tex_unit, sampler);
-		bound_sampler_[tex_unit] = sampler;
-	}
-}
-
-void opengl_sampler_cache::unbind(GLuint tex_unit)
-{
-	Assertion(tex_unit < MAX_TRACKED_UNITS, "Texture unit %u exceeds sampler cache tracking limit", tex_unit);
-
-	// Only issue GL call if a sampler was previously bound
-	if (bound_sampler_[tex_unit] != 0) {
-		glBindSampler(tex_unit, 0);
-		bound_sampler_[tex_unit] = 0;
-	}
 }
 
 void opengl_tcache_init()
@@ -346,8 +221,6 @@ void opengl_tcache_init()
 	GL_textures_in_frame = 0;
 
 	vm_matrix4_set_identity(&GL_texture_matrix);
-
-	GL_sampler_cache.init();
 }
 
 void opengl_tcache_flush()
@@ -363,8 +236,6 @@ extern void opengl_kill_all_render_targets();
 
 void opengl_tcache_shutdown()
 {
-	GL_sampler_cache.shutdown();
-
 	opengl_kill_all_render_targets();
 
 	opengl_tcache_flush();
@@ -1164,6 +1035,8 @@ int opengl_create_texture(int bitmap_handle, int bitmap_type, tcache_slot_opengl
 	glTexParameteri(tslot->texture_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(tslot->texture_target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
+	tslot->wrap_mode = GL_CLAMP_TO_EDGE;
+
 	ushort bitmap_flags;
 	int bits_per_pixel;
 	opengl_determine_bpp_and_flags(animation_begin, bitmap_type, bitmap_flags, bits_per_pixel);
@@ -1264,20 +1137,16 @@ int gr_opengl_tcache_set_internal(int bitmap_handle, int bitmap_type, float *u_s
 
 		GL_state.Texture.Enable(tex_unit, t->texture_target, t->texture_id);
 
-		// Ensure current texture observes updated anisotropy setting
-		opengl_apply_anisotropy_to_current_texture();
+		if ( (t->wrap_mode != GL_texture_addressing) && (bitmap_type != TCACHE_TYPE_AABITMAP)
+			&& (bitmap_type != TCACHE_TYPE_INTERFACE) && (bitmap_type != TCACHE_TYPE_CUBEMAP))
+		{
+			// In this case we need to make sure that the texture unit is actually active
+			GL_state.Texture.SetActiveUnit(tex_unit);
+			glTexParameteri(t->texture_target, GL_TEXTURE_WRAP_S, GL_texture_addressing);
+			glTexParameteri(t->texture_target, GL_TEXTURE_WRAP_T, GL_texture_addressing);
+			glTexParameteri(t->texture_target, GL_TEXTURE_WRAP_R, GL_texture_addressing);
 
-		// Bind sampler object for wrap/filter state
-		// Special types (AABITMAP, INTERFACE, CUBEMAP) use texture's embedded state (sampler 0)
-		if (bitmap_type != TCACHE_TYPE_AABITMAP &&
-			bitmap_type != TCACHE_TYPE_INTERFACE &&
-			bitmap_type != TCACHE_TYPE_CUBEMAP)
-		{
-			GL_sampler_cache.bind(tex_unit, GL_texture_addressing, t->mipmap_levels > 1);
-		}
-		else
-		{
-			GL_sampler_cache.unbind(tex_unit);
+			t->wrap_mode = GL_texture_addressing;
 		}
 	}
 	// gah

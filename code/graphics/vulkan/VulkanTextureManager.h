@@ -22,6 +22,59 @@ inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
 	return blocksWide * blocksHigh * blockSize;
 }
 
+inline bool isBlockCompressedFormat(vk::Format format)
+{
+	switch (format) {
+	case vk::Format::eBc1RgbaUnormBlock:
+	case vk::Format::eBc2UnormBlock:
+	case vk::Format::eBc3UnormBlock:
+	case vk::Format::eBc7UnormBlock:
+		return true;
+	default:
+		return false;
+	}
+}
+
+inline size_t calculateLayerSize(uint32_t w, uint32_t h, vk::Format format)
+{
+	if (isBlockCompressedFormat(format)) {
+		return calculateCompressedSize(w, h, format);
+	}
+	if (format == vk::Format::eR8Unorm) {
+		return static_cast<size_t>(w) * h;
+	}
+	// Non-compressed uploads are expanded to 4 bytes/pixel in the upload path.
+	return static_cast<size_t>(w) * h * 4;
+}
+
+inline size_t alignUp(size_t value, size_t alignment)
+{
+	return (value + (alignment - 1)) & ~(alignment - 1);
+}
+
+struct ImmediateUploadLayout {
+	size_t layerSize = 0;
+	size_t totalSize = 0;
+	std::vector<size_t> layerOffsets;
+};
+
+inline ImmediateUploadLayout buildImmediateUploadLayout(uint32_t w, uint32_t h, vk::Format format, uint32_t layers)
+{
+	ImmediateUploadLayout layout;
+	layout.layerSize = calculateLayerSize(w, h, format);
+	layout.layerOffsets.reserve(layers);
+
+	constexpr size_t kCopyOffsetAlignment = 4;
+	size_t offset = 0;
+	for (uint32_t layer = 0; layer < layers; ++layer) {
+		offset = alignUp(offset, kCopyOffsetAlignment);
+		layout.layerOffsets.push_back(offset);
+		offset += layout.layerSize;
+	}
+	layout.totalSize = alignUp(offset, kCopyOffsetAlignment);
+	return layout;
+}
+
 struct VulkanTexture {
 	vk::UniqueImage image;
 	vk::UniqueDeviceMemory memory;
@@ -53,7 +106,6 @@ class VulkanTextureManager {
 
 	struct TextureBindingState {
 		uint32_t arrayIndex = 0;
-		std::array<bool, kFramesInFlight> descriptorWritten = {false, false, false};
 	};
 
 	struct TextureRecord {
@@ -74,13 +126,17 @@ class VulkanTextureManager {
 		}
 	};
 
-	// Get descriptor for a bitmap; schedules upload if needed. Refuses to return dummy fallbacks.
-	vk::DescriptorImageInfo getDescriptor(int bitmapHandle,
-		VulkanFrame& frame,
-		vk::CommandBuffer cmd,
-		uint32_t currentFrameIndex,
-		bool renderPassActive,
-		const SamplerKey& samplerKey);
+	struct TextureDescriptorQuery {
+		vk::DescriptorImageInfo info;
+		bool isFallback = false;
+		bool queuedUpload = false;
+	};
+
+	// Query descriptor for a bitmap; queues upload if needed but never throws.
+	// Returns fallback descriptor if texture is not resident.
+	TextureDescriptorQuery queryDescriptor(int bitmapHandle, const SamplerKey& samplerKey);
+
+	// Flush pending uploads (only callable when no rendering is active).
 	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 	void markUploadsCompleted(uint32_t completedFrameIndex);
 
@@ -95,19 +151,21 @@ class VulkanTextureManager {
 
 	// Descriptor binding management
 	void onTextureResident(int textureHandle, uint32_t arrayIndex);
-	void retireTexture(int textureHandle);
+	void retireTexture(int textureHandle, uint64_t retireSerial);
 
 	const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
 	void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
 	int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
-	void processPendingDestructions(uint64_t currentFrame);
-	void setCurrentFrame(uint64_t frame) { m_currentFrame = frame; }
+	void processPendingDestructions(uint64_t completedSerial);
 
 	// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
 	std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
 
 	// Get texture descriptor info without frame/cmd (for already-resident textures)
 	vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey& samplerKey);
+
+	// Synthetic handle for fallback texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kFallbackTextureHandle = -1000;
 
   private:
 	vk::Device m_device;
@@ -126,6 +184,7 @@ class VulkanTextureManager {
 
 	vk::Sampler getOrCreateSampler(const SamplerKey& key);
 	bool uploadImmediate(int baseFrame, bool isAABitmap);
+	void createFallbackTexture();
 	TextureRecord* ensureTextureResident(int bitmapHandle,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd,
@@ -144,16 +203,12 @@ class VulkanTextureManager {
 	// Fallback "black" texture for retired slots (initialized at startup)
 	int m_fallbackTextureHandle = -1;
 
-	// Pending destructions: {textureHandle, safeFrame}
+	// Pending destructions: {textureHandle, retireSerial}
 	std::vector<std::pair<int, uint64_t>> m_pendingDestructions;
-
-	// Current frame counter for deferred destruction tracking
-	uint64_t m_currentFrame = 0;
 };
 
 } // namespace vulkan
 } // namespace graphics
-
 
 
 

@@ -155,6 +155,8 @@ void opengl_shader_set_passthrough(bool textured, bool hdr);
 
 void opengl_shader_set_default_material(bool textured, bool alpha, vec4* clr, float color_scale, uint32_t array_index, const material::clip_plane& clip_plane);
 
+void opengl_shader_set_interface(bool textured, bool alpha, vec4* clr, float color_scale, uint32_t array_index);
+
 template <typename T, typename DataCallback>
 void opengl_set_generic_uniform_data(DataCallback cb)
 {

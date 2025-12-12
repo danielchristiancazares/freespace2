@@ -50,7 +50,7 @@
 #include "graphics/opengl/gropengl.h"
 #endif
 #ifdef WITH_VULKAN
-#include "graphics/vulkan/gr_vulkan.h"
+#include "graphics/vulkan/VulkanGraphics.h"
 #endif
 
 #include <SDL_surface.h>
@@ -1549,6 +1549,10 @@ static void gr_init_function_pointers(int mode) {
 static bool gr_init_sub(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, int mode, int width, int height,
 						int depth, float center_aspect_ratio)
 {
+	if (std::getenv("FS2_VULKAN_IT")) {
+		printf("[gr_init_sub] enter mode=%d\n", mode);
+		fflush(stdout);
+	}
 	int res = GR_1024;
 	bool rc = false;
 
@@ -1647,6 +1651,10 @@ static bool gr_init_sub(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, i
 
 	init_colors();
 
+	if (std::getenv("FS2_VULKAN_IT")) {
+		printf("[gr_init_sub] before backend init mode=%d\n", mode);
+		fflush(stdout);
+	}
 	switch (mode) {
 	case GR_OPENGL:
 #ifdef WITH_OPENGL
@@ -1670,6 +1678,11 @@ static bool gr_init_sub(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, i
 		break;
 	default:
 		Int3(); // Invalid graphics mode
+	}
+
+	if (std::getenv("FS2_VULKAN_IT")) {
+		printf("[gr_init_sub] backend init rc=%d\n", rc ? 1 : 0);
+		fflush(stdout);
 	}
 
 	return rc != 0;
@@ -3127,7 +3140,6 @@ static void gpu_heap_init() {
 
 	for (size_t i = 0; i < static_cast<size_t>(GpuHeap::NUM_VALUES); ++i) {
 		auto enumVal = static_cast<GpuHeap>(i);
-
 		gpu_heaps[i].reset(new graphics::util::GPUMemoryHeap(enumVal));
 	}
 }
