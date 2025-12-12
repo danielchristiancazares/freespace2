@@ -836,6 +836,12 @@ void opengl_tnl_set_material(material* material_info, bool set_base_map, bool se
 										   material_info->get_color_scale(),
 										   array_index,
 										   material_info->get_clip_plane());
+	} else if ( Current_shader->shader == SDR_TYPE_INTERFACE ) {
+		opengl_shader_set_interface(base_map >= 0,
+									material_info->get_texture_type() == TCACHE_TYPE_AABITMAP,
+									&clr,
+									material_info->get_color_scale(),
+									array_index);
 	}
 }
 

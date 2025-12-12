@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.hpp>
+#include <optional>
 
 namespace graphics {
 namespace vulkan {
@@ -29,10 +30,12 @@ class VulkanRingBuffer {
 	VulkanRingBuffer& operator=(const VulkanRingBuffer&) = delete;
 
 	Allocation allocate(vk::DeviceSize size, vk::DeviceSize alignmentOverride = 0);
+	std::optional<Allocation> try_allocate(vk::DeviceSize size, vk::DeviceSize alignmentOverride = 0);
 	void reset();
 
 	vk::Buffer buffer() const { return m_buffer.get(); }
 	vk::DeviceSize size() const { return m_size; }
+	vk::DeviceSize remaining() const;
 
   private:
 	vk::Device m_device;

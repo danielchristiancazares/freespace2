@@ -47,6 +47,14 @@ void gr_opengl_query_value(int obj, QueryType type) {
 	switch(type) {
 		case QueryType::Timestamp:
 			Assertion(GLAD_GL_ARB_timer_query, "Timestamp queries are not available! Availability must be checked before calling this function!");
+
+			// Additional safety check for null function pointer
+			if (glQueryCounter == nullptr) {
+				mprintf(("ERROR: glQueryCounter function pointer is NULL (GLAD_GL_ARB_timer_query=%d)\n",
+					GLAD_GL_ARB_timer_query));
+				return;
+			}
+
 			glQueryCounter(slot.name, GL_TIMESTAMP);
 			break;
 		default:
@@ -66,6 +74,12 @@ bool gr_opengl_query_value_available(int obj) {
 
 std::uint64_t gr_opengl_get_query_value(int obj) {
 	auto& slot = get_query_slot(obj);
+
+	// Safety check for null function pointer
+	if (glGetQueryObjectui64v == nullptr) {
+		mprintf(("ERROR: glGetQueryObjectui64v function pointer is NULL\n"));
+		return 0;
+	}
 
 	GLuint64 available;
 	glGetQueryObjectui64v(slot.name, GL_QUERY_RESULT, &available);
