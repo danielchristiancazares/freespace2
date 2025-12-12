@@ -13,6 +13,10 @@ set(VULKAN_SHADERS
 set(SHADERS
 	${SHADER_DIR}/default-material.frag
 	${SHADER_DIR}/default-material.vert
+	${SHADER_DIR}/batched-bitmap.frag
+	${SHADER_DIR}/batched-bitmap.vert
+	${SHADER_DIR}/interface.frag
+	${SHADER_DIR}/interface.vert
 )
 
 if (FSO_BUILD_WITH_VULKAN)

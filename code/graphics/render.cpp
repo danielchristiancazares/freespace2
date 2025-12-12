@@ -1474,6 +1474,7 @@ void gr_aabitmap_list(bitmap_rect_list* list, int n_bm, int resize_mode, float a
 	}
 
 	material render_mat;
+	render_mat.set_shader_type(SDR_TYPE_INTERFACE);
 	render_mat.set_blend_mode(ALPHA_BLEND_ALPHA_BLEND_ALPHA);
 	render_mat.set_depth_mode(ZBUFFER_TYPE_NONE);
 	render_mat.set_texture_map(TM_BASE_TYPE, gr_screen.current_bitmap);

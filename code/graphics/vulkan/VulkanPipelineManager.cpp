@@ -13,6 +13,8 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <chrono>
+#include <fstream>
 
 namespace graphics {
 namespace vulkan {
@@ -444,6 +446,33 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 	vk::Format colorFormat = static_cast<vk::Format>(key.color_format);
 	vk::Format depthFormat = static_cast<vk::Format>(key.depth_format);
 	std::vector<vk::Format> colorFormats(key.color_attachment_count, colorFormat);
+
+	// Fail-fast: pipeline color attachment count/formats must match the creation request
+	Assertion(!colorFormats.empty(), "colorFormats must not be empty");
+	if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
+		// When using vertex attributes, require Location 0; log if Location 1 is missing.
+		const VertexInputState& vertexInputState = getVertexInputState(layout);
+		bool hasLoc0 = false;
+		bool hasLoc1 = false;
+		for (const auto& a : vertexInputState.attributes) {
+			if (a.location == 0) hasLoc0 = true;
+			if (a.location == 1) hasLoc1 = true;
+		}
+		Assertion(hasLoc0, "Vertex input pipeline created without Location 0 attribute");
+		if (!hasLoc1) {
+			std::ofstream logFile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
+			const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::system_clock::now().time_since_epoch()).count();
+			logFile << "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A_LOC1\","
+			        << "\"location\":\"VulkanPipelineManager.cpp:createPipeline\","
+			        << "\"message\":\"missing Location 1 attribute for vertex-input pipeline\","
+			        << "\"data\":{\"shaderType\":" << static_cast<int>(key.type)
+			        << ",\"variantFlags\":" << key.variant_flags
+			        << ",\"layoutHash\":" << key.layout_hash
+			        << ",\"colorAttachments\":" << key.color_attachment_count
+			        << "},\"timestamp\":" << now << "}\n";
+		}
+	}
 
 	vk::PipelineDepthStencilStateCreateInfo depthStencil{};
 	if (depthFormat != vk::Format::eUndefined) {
