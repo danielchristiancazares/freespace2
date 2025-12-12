@@ -126,18 +126,15 @@ void gr_vulkan_setup_frame()
 	vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
 	Assertion(cmd, "Frame has no valid command buffer");
 
-	// Ensure dynamic rendering has begun so subsequent state and draws are valid
-	renderer_instance->ensureRenderingStarted(cmd);
+	// DO NOT start the render pass here - allow gr_clear to set clear flags first.
+	// The render pass will start lazily when the first draw or clear occurs.
 
 	// Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
-	// Note: ensureRenderingStarted() already sets viewport, but we override to ensure
-	// it matches gr_screen dimensions (which should match swapchain extent)
 	vk::Viewport viewport = createFullScreenViewport();
 	cmd.setViewport(0, 1, &viewport);
 
-	// Scissor: respect current clip region from gr_screen
-	// This ensures that any clip set before setup_frame is applied
-	vk::Rect2D scissor = createClipScissor();
+	// Scissor: full-screen to ensure clears cover the entire framebuffer
+	vk::Rect2D scissor = createFullScreenScissor();
 	cmd.setScissor(0, 1, &scissor);
 }
 
@@ -155,18 +152,24 @@ static void gr_vulkan_bind_uniform_buffer(uniform_block_type type,
 	Assertion(renderer_instance != nullptr, "bind_uniform_buffer called without renderer");
 	Assertion(g_currentFrame != nullptr, "bind_uniform_buffer called before setup_frame");
 
-	if (type != uniform_block_type::ModelData) {
+	if (type == uniform_block_type::ModelData) {
+		renderer_instance->setModelUniformBinding(*g_currentFrame, handle, offset, size);
+	} else if (type == uniform_block_type::NanoVGData) {
+		// Explicitly ignore NanoVG data for now as it's handled via a different path or not yet implemented
+		// in the Vulkan backend's descriptor set management.
+		// This prevents "unsupported block type 2" error logs.
+	} else if (type == uniform_block_type::Matrices) {
+		renderer_instance->setSceneUniformBinding(*g_currentFrame, handle, offset, size);
+	} else {
 		// Keep running but make it noisy so the offending path gets fixed.
 		vkprintf("VULKAN ERROR: gr_bind_uniform_buffer called with unsupported block type %d (offset=%zu, size=%zu, handle=%d). "
-		         "Only ModelData is implemented in the Vulkan backend; this call must be fixed.\n",
+		         "Only ModelData(1), NanoVGData(2), and Matrices(6) are handled; this call must be fixed.\n",
 		         static_cast<int>(type),
 		         offset,
 		         size,
 		         handle.value());
 		return;
 	}
-
-	renderer_instance->setModelUniformBinding(*g_currentFrame, handle, offset, size);
 }
 
 int stub_preload(int /*bitmap_num*/, int /*is_aabitmap*/) { return 0; }
@@ -476,6 +479,8 @@ static void issueModelDraw(const ModelDrawContext& ctx)
 
 	const uint32_t indexCount = static_cast<uint32_t>(batch.n_verts);
 
+
+
 	ctx.cmd.drawIndexed(
 		indexCount,
 		1,  // instanceCount
@@ -522,6 +527,8 @@ void gr_vulkan_render_model(model_material* material_info,
 	key.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
 	key.blend_mode             = material_info->get_blend_mode();
 	// Model shaders ignore layout_hash (vertex pulling)
+
+
 
 	// Get or create pipeline (pass empty layout for vertex pulling)
 	vertex_layout emptyLayout;
@@ -594,9 +601,9 @@ void gr_vulkan_render_model(model_material* material_info,
 	pcs.matrixIndex    = 0;  // Unused
 	pcs.flags          = material_info->get_shader_flags();
 
-	// Descriptor set
-	vk::DescriptorSet modelSet = frame.modelDescriptorSet;
-	Assertion(modelSet, "Model descriptor set not initialized for frame");
+	// Allocate fresh descriptor set for this draw to avoid race conditions
+	vk::DescriptorSet modelSet = renderer_instance->allocateModelDescriptorSet();
+	Assertion(modelSet, "Failed to allocate model descriptor set");
 
 	std::vector<std::pair<uint32_t, int>> texturesToBind;
 	texturesToBind.reserve(4);
@@ -619,6 +626,32 @@ void gr_vulkan_render_model(model_material* material_info,
 
 	// Ensure rendering has started
 	renderer_instance->ensureRenderingStarted(cmd);
+
+	// Validate pipeline/render-target compatibility before binding
+	{
+		const uint32_t expectedAttachments = renderer_instance->getCurrentColorAttachmentCount();
+		const auto expectedFormat = renderer_instance->getCurrentColorFormat();
+		Assertion(key.color_attachment_count == expectedAttachments,
+			"Pipeline color attachment count mismatch (key=%u, active=%u)",
+			key.color_attachment_count, expectedAttachments);
+		Assertion(static_cast<VkFormat>(key.color_format) == expectedFormat,
+			"Pipeline color format mismatch (key=%d, active=%d)",
+			key.color_format, static_cast<int>(expectedFormat));
+	}
+
+	// Dynamic state: compensate for viewport Y-flip (CCW becomes CW)
+	cmd.setFrontFace(vk::FrontFace::eClockwise);
+
+	// Cull mode from material
+	cmd.setCullMode(material_info->get_cull_mode() ? vk::CullModeFlagBits::eBack : vk::CullModeFlagBits::eNone);
+
+	// Depth state from material
+	gr_zbuffer_type zMode = material_info->get_depth_mode();
+	bool depthWrite = (zMode == ZBUFFER_TYPE_WRITE || zMode == ZBUFFER_TYPE_FULL);
+	bool depthTest = (zMode == ZBUFFER_TYPE_READ || zMode == ZBUFFER_TYPE_FULL);
+	cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
+	cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
+	cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
 
 	// Enforce contract: ModelData must be bound via gr_bind_uniform_buffer
 	uint32_t dynOffset = frame.modelUniformState.dynamicOffset;
@@ -673,6 +706,38 @@ void gr_vulkan_render_primitives(material* material_info,
 	// Use the shader type requested by the material
 	shader_type shaderType = material_info->get_shader_type();
 
+	// Instrumentation: detect shader/layout mismatches that will cause validation warnings
+	// DEFAULT_MATERIAL shader expects vertex color at location 1
+	if (shaderType == SDR_TYPE_DEFAULT_MATERIAL) {
+		bool hasColor = false;
+		for (size_t i = 0; i < layout->get_num_vertex_components(); ++i) {
+			auto fmt = layout->get_vertex_component(i)->format_type;
+			if (fmt == vertex_format_data::COLOR3 ||
+			    fmt == vertex_format_data::COLOR4 ||
+			    fmt == vertex_format_data::COLOR4F) {
+				hasColor = true;
+				break;
+			}
+		}
+		if (!hasColor) {
+			// Log everything BEFORE warning dialog (Warning is modal)
+			mprintf(("SDR_TYPE_DEFAULT_MATERIAL used without vertex color!\n"));
+			mprintf(("  n_verts=%d, prim_type=%d, buffer_handle=%d\n",
+			        n_verts, static_cast<int>(prim_type), buffer_handle.value()));
+			mprintf(("  layout components (%zu):\n", layout->get_num_vertex_components()));
+			for (size_t i = 0; i < layout->get_num_vertex_components(); ++i) {
+				auto* comp = layout->get_vertex_component(i);
+				mprintf(("    [%zu] format=%d stride=%d offset=%d\n",
+				        i, static_cast<int>(comp->format_type), comp->stride, comp->offset));
+			}
+			// Dump stack to find caller
+			mprintf(("Stack trace:\n"));
+			dump_stacktrace();
+			// Now show warning dialog
+			Warning(LOCATION, "SDR_TYPE_DEFAULT_MATERIAL used without vertex color! Check log for details.");
+		}
+	}
+
 	// Get shader modules
 	ShaderModules shaderModules = renderer_instance->getShaderModules(shaderType);
 	Assertion(shaderModules.vert != nullptr, "render_primitives missing vertex shader for shaderType=%d", static_cast<int>(shaderType));
@@ -709,43 +774,84 @@ void gr_vulkan_render_primitives(material* material_info,
 	matrix4 projMatrix = gr_projection_matrix;
 	matrix4 modelMatrix = gr_model_matrix_stack.get_transform();
 
-	// Fill uniform structs
+	// 1. Prepare Matrix Data (Common to all types at Binding 0)
 	matrixData_default_material_vert matrices{};
 	matrices.modelViewMatrix = modelViewMatrix;
 	matrices.projMatrix = projMatrix;
 
-	genericData_default_material_vert generic{};
-	generic.modelMatrix = modelMatrix;
-	vec4 clr = material_info->get_color();
-	generic.color = {clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w};
+	// 2. Prepare Generic Data (Handle Layout Mismatch at Binding 1)
+	const void* genericDataPtr = nullptr;
+	size_t genericDataSize = 0;
 
-	if (material_info->is_clipped()) {
-		const auto& clip = material_info->get_clip_plane();
-		generic.clipEquation = {clip.normal.xyz.x, clip.normal.xyz.y, clip.normal.xyz.z,
-		                        -vm_vec_dot(&clip.normal, &clip.position)};
-		generic.clipEnabled = 1;
+	// Declare instances for both potential layouts
+	genericData_interface_frag interfaceData{};
+	genericData_default_material_vert defaultData{};
+
+	// Extract common material properties
+	vec4 clr = material_info->get_color();
+	int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
+
+	int baseMapIndex = (textureHandle >= 0) ? bm_get_array_index(textureHandle) : 0;
+	int alphaTexture = (material_info->get_texture_type() == material::TEX_TYPE_AABITMAP) ? 1 : 0;
+	int noTexturing = material_info->is_textured() ? 0 : 1;
+	float intensity = material_info->get_color_scale();
+
+	if (shaderType == SDR_TYPE_INTERFACE) {
+		// Interface shader: 40-byte layout with color at offset 0
+		interfaceData.color = {clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w};
+		interfaceData.baseMapIndex = baseMapIndex;
+		interfaceData.alphaTexture = alphaTexture;
+		interfaceData.noTexturing = noTexturing;
+		interfaceData.srgb = 1;
+		interfaceData.intensity = intensity;
+		interfaceData.alphaThreshold = 0.f;
+
+		// DEBUG: Log first few interface draws
+		static int iface_debug_count = 0;
+		if (iface_debug_count < 5) {
+			mprintf(("Interface #%d: color=(%.2f,%.2f,%.2f,%.2f) intensity=%.2f tex=%d noTex=%d\n",
+			         iface_debug_count, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w,
+			         intensity, textureHandle, noTexturing));
+			++iface_debug_count;
+		}
+
+		genericDataPtr = &interfaceData;
+		genericDataSize = sizeof(genericData_interface_frag);
 	} else {
-		generic.clipEquation = {0.f, 0.f, 0.f, 0.f};
-		generic.clipEnabled = 0;
+		// Default material shader: 124-byte layout with modelMatrix at offset 0
+		defaultData.modelMatrix = modelMatrix;
+		defaultData.color = {clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w};
+
+		if (material_info->is_clipped()) {
+			const auto& clip = material_info->get_clip_plane();
+			defaultData.clipEquation = {clip.normal.xyz.x, clip.normal.xyz.y, clip.normal.xyz.z,
+			                            -vm_vec_dot(&clip.normal, &clip.position)};
+			defaultData.clipEnabled = 1;
+		} else {
+			defaultData.clipEquation = {0.f, 0.f, 0.f, 0.f};
+			defaultData.clipEnabled = 0;
+		}
+
+		defaultData.baseMapIndex = baseMapIndex;
+		defaultData.alphaTexture = alphaTexture;
+		defaultData.noTexturing = noTexturing;
+		defaultData.srgb = 1;
+		defaultData.intensity = intensity;
+		defaultData.alphaThreshold = 0.f;
+
+		genericDataPtr = &defaultData;
+		genericDataSize = sizeof(genericData_default_material_vert);
 	}
 
-	int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
-	generic.baseMapIndex = (textureHandle >= 0) ? bm_get_array_index(textureHandle) : 0;
-	generic.alphaTexture = (material_info->get_texture_type() == material::TEX_TYPE_AABITMAP) ? 1 : 0;
-	generic.noTexturing = material_info->is_textured() ? 0 : 1;
-	generic.srgb = 1;
-	generic.intensity = material_info->get_color_scale();
-	generic.alphaThreshold = 0.f;
-
-	// Allocate from uniform ring buffer (single allocation to avoid extra padding)
+	// 3. Allocate from uniform ring buffer using dynamic size
 	const size_t matrixSize = sizeof(matrices);
 	const size_t genericOffset = (matrixSize + 255u) & ~static_cast<size_t>(255);
-	const size_t totalUniformSize = genericOffset + sizeof(generic);
+	const size_t totalUniformSize = genericOffset + genericDataSize;
 
 	auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, 256);
 	auto* uniformBase = static_cast<char*>(uniformAlloc.mapped);
 	std::memcpy(uniformBase, &matrices, sizeof(matrices));
-	std::memcpy(uniformBase + genericOffset, &generic, sizeof(generic));
+	std::memcpy(uniformBase + genericOffset, genericDataPtr, genericDataSize);
 
 	// Build push descriptor writes
 	vk::DescriptorBufferInfo matrixInfo{};
@@ -756,7 +862,7 @@ void gr_vulkan_render_primitives(material* material_info,
 	vk::DescriptorBufferInfo genericInfo{};
 	genericInfo.buffer = frame.uniformBuffer().buffer();
 	genericInfo.offset = uniformAlloc.offset + genericOffset;
-	genericInfo.range = sizeof(generic);
+	genericInfo.range = genericDataSize;
 
 	vk::DescriptorImageInfo baseMapInfo{};
 	const bool isTextured = textureHandle >= 0;
@@ -791,6 +897,18 @@ void gr_vulkan_render_primitives(material* material_info,
 
 	// Ensure rendering has started before binding pipeline/descriptors
 	renderer_instance->ensureRenderingStarted(cmd);
+
+	// Validate pipeline/render-target compatibility before binding
+	{
+		const uint32_t expectedAttachments = renderer_instance->getCurrentColorAttachmentCount();
+		const auto expectedFormat = renderer_instance->getCurrentColorFormat();
+		Assertion(pipelineKey.color_attachment_count == expectedAttachments,
+			"Pipeline color attachment count mismatch (key=%u, active=%u)",
+			pipelineKey.color_attachment_count, expectedAttachments);
+		Assertion(static_cast<VkFormat>(pipelineKey.color_format) == expectedFormat,
+			"Pipeline color format mismatch (key=%d, active=%d)",
+			pipelineKey.color_format, static_cast<int>(expectedFormat));
+	}
 
 	// Bind pipeline
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
@@ -900,13 +1018,204 @@ void stub_render_nanovg(nanovg_material* /*material_info*/,
 {
 }
 
-void stub_render_primitives_batched(batched_bitmap_material* /*material_info*/,
-	primitive_type /*prim_type*/,
-	vertex_layout* /*layout*/,
-	int /*offset*/,
-	int /*n_verts*/,
-	gr_buffer_handle /*buffer_handle*/)
+void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
+	primitive_type prim_type,
+	vertex_layout* layout,
+	int offset,
+	int n_verts,
+	gr_buffer_handle buffer_handle)
 {
+	if (renderer_instance) {
+		renderer_instance->incrementPrimDraw();
+	}
+
+	// Preconditions
+	Assertion(g_currentFrame != nullptr, "render_primitives_batched called before setup_frame");
+	Assertion(renderer_instance != nullptr, "render_primitives_batched called without renderer");
+	Assertion(material_info != nullptr, "render_primitives_batched called with null material_info");
+	Assertion(layout != nullptr, "render_primitives_batched called with null vertex layout");
+	Assertion(n_verts > 0, "render_primitives_batched called with zero vertices");
+
+	VulkanFrame& frame = *g_currentFrame;
+	vk::CommandBuffer cmd = frame.commandBuffer();
+	Assertion(cmd, "render_primitives_batched called with null command buffer");
+
+	// Force batched bitmap shader
+	shader_type shaderType = SDR_TYPE_BATCHED_BITMAP;
+
+	// Get shader modules
+	ShaderModules shaderModules = renderer_instance->getShaderModules(shaderType);
+	Assertion(shaderModules.vert != nullptr, "Batched bitmap vertex shader not loaded");
+	Assertion(shaderModules.frag != nullptr, "Batched bitmap fragment shader not loaded");
+
+	// Build pipeline key
+	PipelineKey pipelineKey{};
+	pipelineKey.type = shaderType;
+	pipelineKey.variant_flags = material_info->get_shader_flags();
+	pipelineKey.color_format = renderer_instance->getCurrentColorFormat();
+	pipelineKey.depth_format = renderer_instance->getDepthFormat();
+	pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+	pipelineKey.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
+	pipelineKey.blend_mode = material_info->get_blend_mode();
+	pipelineKey.layout_hash = layout->hash();
+
+	// Get or create pipeline
+	vk::Pipeline pipeline = renderer_instance->getPipeline(pipelineKey, shaderModules, *layout);
+	Assertion(pipeline, "Pipeline creation failed for batched bitmap shader");
+
+	// Get vertex buffer
+	Assertion(buffer_handle.isValid(), "render_primitives_batched called with invalid buffer handle");
+	vk::Buffer vertexBuffer = renderer_instance->getBuffer(buffer_handle);
+	Assertion(vertexBuffer, "Failed to get buffer for handle %d", buffer_handle.value());
+
+	// Get matrices from global state (uses simpler struct than default-material)
+	matrixData_batched_bitmap_vert matrices{};
+	matrices.modelViewMatrix = gr_model_view_matrix;
+	matrices.projMatrix = gr_projection_matrix;
+
+	// Fill generic data from material
+	genericData_batched_bitmap_vert generic{};
+	vec4 clr = material_info->get_color();
+	generic.color = {clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w};
+	generic.intensity = material_info->get_color_scale();
+
+	// DEBUG: Log first few batched bitmap draws to check values
+	static int debug_count = 0;
+	if (debug_count < 5) {
+		mprintf(("Batched bitmap #%d: color=(%.2f,%.2f,%.2f,%.2f) intensity=%.2f\n",
+		         debug_count, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w,
+		         generic.intensity));
+		++debug_count;
+	}
+
+	// Allocate from uniform ring buffer (256-byte alignment required)
+	const size_t matrixSize = sizeof(matrices);  // 128 bytes
+	const size_t genericOffset = (matrixSize + 255u) & ~static_cast<size_t>(255);  // Align to 256
+	const size_t totalUniformSize = genericOffset + sizeof(generic);
+
+	auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, 256);
+	auto* uniformBase = static_cast<char*>(uniformAlloc.mapped);
+	std::memcpy(uniformBase, &matrices, sizeof(matrices));
+	std::memcpy(uniformBase + genericOffset, &generic, sizeof(generic));
+
+	// Build descriptor buffer infos
+	vk::DescriptorBufferInfo matrixInfo{};
+	matrixInfo.buffer = frame.uniformBuffer().buffer();
+	matrixInfo.offset = uniformAlloc.offset;
+	matrixInfo.range = sizeof(matrices);
+
+	vk::DescriptorBufferInfo genericInfo{};
+	genericInfo.buffer = frame.uniformBuffer().buffer();
+	genericInfo.offset = uniformAlloc.offset + genericOffset;
+	genericInfo.range = sizeof(generic);
+
+	// Get texture descriptor (batched rendering requires texture)
+	int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
+	if (textureHandle < 0) {
+		Warning(LOCATION, "Batched bitmap rendering called without texture");
+		return;  // Early exit - batched rendering requires texture array
+	}
+
+	auto samplerKey = VulkanTextureManager::SamplerKey{};
+	samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
+
+	vk::DescriptorImageInfo baseMapInfo = renderer_instance->getTextureDescriptor(
+		textureHandle, frame, cmd, samplerKey);
+
+	// Build push descriptor writes (3 bindings: 0=matrix, 1=generic, 2=texture)
+	std::array<vk::WriteDescriptorSet, 3> writes{};
+
+	writes[0].dstBinding = 0;
+	writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+	writes[0].descriptorCount = 1;
+	writes[0].pBufferInfo = &matrixInfo;
+
+	writes[1].dstBinding = 1;
+	writes[1].descriptorType = vk::DescriptorType::eUniformBuffer;
+	writes[1].descriptorCount = 1;
+	writes[1].pBufferInfo = &genericInfo;
+
+	writes[2].dstBinding = 2;
+	writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	writes[2].descriptorCount = 1;
+	writes[2].pImageInfo = &baseMapInfo;
+
+	// Ensure rendering has started
+	renderer_instance->ensureRenderingStarted(cmd);
+
+	// Validate pipeline/render-target compatibility
+	{
+		const uint32_t expectedAttachments = renderer_instance->getCurrentColorAttachmentCount();
+		const auto expectedFormat = renderer_instance->getCurrentColorFormat();
+		Assertion(pipelineKey.color_attachment_count == expectedAttachments,
+			"Pipeline color attachment count mismatch (key=%u, active=%u)",
+			pipelineKey.color_attachment_count, expectedAttachments);
+		Assertion(static_cast<VkFormat>(pipelineKey.color_format) == expectedFormat,
+			"Pipeline color format mismatch (key=%d, active=%d)",
+			pipelineKey.color_format, static_cast<int>(expectedFormat));
+	}
+
+	// Bind pipeline
+	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+
+	// Push descriptors (no descriptor set allocation needed)
+	cmd.pushDescriptorSetKHR(
+		vk::PipelineBindPoint::eGraphics,
+		renderer_instance->getPipelineLayout(),
+		0,  // set 0 (per-draw push descriptors)
+		3,  // all three bindings
+		writes.data());
+
+	// Bind vertex buffer
+	vk::DeviceSize vbOffset = 0;
+	cmd.bindVertexBuffers(0, 1, &vertexBuffer, &vbOffset);
+
+	// Set dynamic state: primitive topology
+	cmd.setPrimitiveTopology(convertPrimitiveType(prim_type));
+
+	// Set dynamic state: cull mode
+	cmd.setCullMode(material_info->get_cull_mode() ?
+		vk::CullModeFlagBits::eBack : vk::CullModeFlagBits::eNone);
+	cmd.setFrontFace(vk::FrontFace::eClockwise);
+
+	// Set dynamic state: depth test and write
+	gr_zbuffer_type zbufferMode = material_info->get_depth_mode();
+	bool depthTest = (zbufferMode == ZBUFFER_TYPE_READ || zbufferMode == ZBUFFER_TYPE_FULL);
+	bool depthWrite = (zbufferMode == ZBUFFER_TYPE_WRITE || zbufferMode == ZBUFFER_TYPE_FULL);
+	cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
+	cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
+	cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
+	cmd.setStencilTestEnable(VK_FALSE);
+
+	// Set extended dynamic state 3 (if supported)
+	if (renderer_instance->supportsExtendedDynamicState3()) {
+		const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+		if (caps.colorBlendEnable) {
+			vk::Bool32 blendEnable = VK_FALSE;
+			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+		}
+		if (caps.colorWriteMask) {
+			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR |
+				vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+				vk::ColorComponentFlagBits::eA;
+			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+		}
+		if (caps.polygonMode) {
+			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
+		}
+		if (caps.rasterizationSamples) {
+			cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+		}
+	}
+
+	// Set viewport and scissor
+	vk::Viewport viewport = createFullScreenViewport();
+	cmd.setViewport(0, 1, &viewport);
+	vk::Rect2D scissor = createFullScreenScissor();
+	cmd.setScissor(0, 1, &scissor);
+
+	// Draw call
+	cmd.draw(static_cast<uint32_t>(n_verts), 1, static_cast<uint32_t>(offset), 0);
 }
 
 void stub_render_rocket_primitives(interface_material* /*material_info*/,
@@ -1056,6 +1365,7 @@ void init_function_pointers()
 	// Rendering
 	gr_screen.gf_render_model = gr_vulkan_render_model;
 	gr_screen.gf_render_primitives = gr_vulkan_render_primitives;
+	gr_screen.gf_render_primitives_batched = gr_vulkan_render_primitives_batched;
 
 	// Deferred lighting
 	gr_screen.gf_deferred_lighting_begin = gr_vulkan_deferred_lighting_begin;

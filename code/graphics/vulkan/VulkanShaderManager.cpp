@@ -52,18 +52,26 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
 		const auto vertPath = fs::path(m_shaderRoot) / "default-material.vert.spv";
 		const auto fragPath = fs::path(m_shaderRoot) / "default-material.frag.spv";
 		return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
-		}
+	}
+	case shader_type::SDR_TYPE_BATCHED_BITMAP: {
+		const auto vertPath = fs::path(m_shaderRoot) / "batched-bitmap.vert.spv";
+		const auto fragPath = fs::path(m_shaderRoot) / "batched-bitmap.frag.spv";
+		return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+	}
+	case shader_type::SDR_TYPE_INTERFACE: {
+		const auto vertPath = fs::path(m_shaderRoot) / "interface.vert.spv";
+		const auto fragPath = fs::path(m_shaderRoot) / "interface.frag.spv";
+		return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+	}
 	case shader_type::SDR_TYPE_PASSTHROUGH_RENDER: {
 		const auto vertPath = fs::path(m_shaderRoot) / "vulkan.vert.spv";
 		const auto fragPath = fs::path(m_shaderRoot) / "vulkan.frag.spv";
 		return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
 	}
 	default:
-		{
-			const auto vertPath = fs::path(m_shaderRoot) / "vulkan.vert.spv";
-			const auto fragPath = fs::path(m_shaderRoot) / "vulkan.frag.spv";
-			return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
-		}
+		// Any shader type not explicitly mapped is unsupported on Vulkan; fail fast
+		throw std::runtime_error("Unsupported shader_type for Vulkan: type=" + std::to_string(static_cast<int>(type)) +
+		                         " flags=0x" + std::to_string(variantFlags));
 	}
 }
 

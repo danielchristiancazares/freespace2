@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Interface and batched-bitmap shader variants for OpenGL/Vulkan plus shader build entries.
+- `VulkanDevice`, `VulkanRenderTargets`, and `VulkanRenderingSession` components owning swapchain, render-target lifetimes, and dynamic rendering flow.
+- Manual Vulkan visibility integration test (`test/src/graphics/it_vulkan_model_present.cpp`) gated by `FS2_VULKAN_IT`, and OpenGL SMAA fallback unit test without ARB_texture_storage.
 - `SDR_TYPE_MODEL` shader path in `VulkanShaderManager` that loads unified `model.vert.spv`/`model.frag.spv` and ignores variant flags
 - `VulkanModelValidation` stub helpers for descriptor-indexing feature validation and push-constant budget checks (not yet implemented)
 - Unit tests for model shader path: unified modules, variant-flag independence, layout-hash ignore, plus failing tests for descriptor-indexing and push-constant validation
@@ -45,6 +48,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Vulkan 1.2 features chain in device creation
 
 ### Changed
+- VulkanRenderer now allocates per-draw model descriptor sets, validates pipeline/attachment compatibility, and defers GPU buffer retirement to avoid in-flight reuse.
+- Rendering startup is now lazy with explicit clear control; depth/G-buffer transitions consolidated under the rendering session.
+- OpenGL texture path removes the sampler-object cache, refreshes per-texture wrap state, and logs GLAD capability probes for diagnostics.
+- README refreshed and `.gitignore` ignores agent metadata files.
 - `PipelineKey` equality and hash now ignore `layout_hash` when `type == SDR_TYPE_MODEL` (vertex-pulling path uses zero vertex inputs)
 - Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
 - Early Vulkan SDK detection in CMake before library targets are configured
@@ -77,6 +84,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `vulkan_stubs.cpp` and `vulkan_stubs.h` (no longer needed)
 
 ### Fixed
+- Guard null GL timer-query function pointers and SMAA texture allocation when ARB_texture_storage is unavailable.
+- Prevent stale model descriptor reuse across frames and assert default-material vertex colors when required.
+- Validate Vulkan pipeline vertex attributes and attachment formats before binding to avoid mismatched layouts.
 - imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
 - Shader cmake dependency variable name (`_shader` not `shader`)
 - Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory

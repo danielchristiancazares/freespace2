@@ -26,7 +26,6 @@ add_file_folder("Globalincs"
 add_file_folder("Graphics"
 	   graphics/test_font.cpp
 	   graphics/test_post_processing_null_safety.cpp
-	   graphics/test_opengl_anisotropy_runtime.cpp
 	   graphics/test_opengl_postprocessing_smaa_fallback.cpp
 )
 
@@ -41,6 +40,7 @@ add_file_folder("Graphics"
 	   graphics/test_model_shader_spirv.cpp
 	   graphics/test_vulkan_descriptor_layouts.cpp
 	   graphics/test_vulkan_shader_layout_contracts.cpp
+	   graphics/it_vulkan_model_present.cpp
 )
 endif()
 

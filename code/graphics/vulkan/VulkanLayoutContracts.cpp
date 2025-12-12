@@ -44,6 +44,7 @@ constexpr std::array<ShaderLayoutSpec, NUM_SHADER_TYPES> buildSpecs()
 		makeSpec(SDR_TYPE_SHIELD_DECAL, "SDR_TYPE_SHIELD_DECAL", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_BATCHED_BITMAP, "SDR_TYPE_BATCHED_BITMAP", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_DEFAULT_MATERIAL, "SDR_TYPE_DEFAULT_MATERIAL", PL::Standard, VI::VertexAttributes),
+		makeSpec(SDR_TYPE_INTERFACE, "SDR_TYPE_INTERFACE", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_NANOVG, "SDR_TYPE_NANOVG", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_DECAL, "SDR_TYPE_DECAL", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_SCENE_FOG, "SDR_TYPE_SCENE_FOG", PL::Standard, VI::VertexAttributes),
@@ -88,6 +89,11 @@ PipelineLayoutKind pipelineLayoutForShader(shader_type type)
 
 } // namespace vulkan
 } // namespace graphics
+
+
+
+
+
 
 
 

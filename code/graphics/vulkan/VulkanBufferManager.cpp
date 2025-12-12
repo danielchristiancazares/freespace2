@@ -112,9 +112,14 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 			buffer.mapped = nullptr;
 		}
 
-		// Destroy old buffer
-		buffer.buffer.reset();
-		buffer.memory.reset();
+		// Retire old buffer for deferred deletion (GPU may still be using it)
+		if (buffer.buffer) {
+			RetiredBuffer retired;
+			retired.buffer = std::move(buffer.buffer);
+			retired.memory = std::move(buffer.memory);
+			retired.retiredAtFrame = m_currentFrame;
+			m_retiredBuffers.push_back(std::move(retired));
+		}
 
 		// Create new buffer with correct size
 		vk::BufferCreateInfo bufferInfo;
