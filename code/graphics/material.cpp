@@ -36,6 +36,7 @@ gr_zbuffer_type material_determine_depth_mode(bool depth_testing, bool blending)
 
 void material_set_unlit(material* mat_info, int texture, float alpha, bool blending, bool depth_testing)
 {
+	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 
 	gr_alpha_blend blend_mode = material_determine_blend_mode(texture, blending);
@@ -58,6 +59,7 @@ void material_set_unlit(material* mat_info, int texture, float alpha, bool blend
 
 void material_set_unlit_opaque(material* mat_info, int texture, bool depth_testing)
 {
+	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 
 	gr_alpha_blend blend_mode = ALPHA_BLEND_NONE;
@@ -67,9 +69,7 @@ void material_set_unlit_opaque(material* mat_info, int texture, bool depth_testi
 	mat_info->set_depth_mode(depth_mode);
 	mat_info->set_cull_mode(false);
 
-	
 	mat_info->set_color(1.0f, 1.0f, 1.0f, 1.0f);
-	
 
 	if ( texture >= 0 && bm_has_alpha_channel(texture) ) {
 		mat_info->set_texture_type(material::TEX_TYPE_XPARENT);
@@ -85,6 +85,7 @@ void material_set_unlit_emissive(material* mat_info, int texture, float alpha, f
 
 void material_set_unlit_color(material* mat_info, int texture, color *clr, bool blending, bool depth_testing)
 {
+	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 
 	gr_alpha_blend blend_mode = material_determine_blend_mode(texture, blending);
@@ -106,6 +107,7 @@ void material_set_unlit_color(material* mat_info, int texture, color *clr, float
 
 void material_set_interface(material* mat_info, int texture, bool blended, float alpha)
 {
+	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 	mat_info->set_texture_type(material::TEX_TYPE_INTERFACE);
 

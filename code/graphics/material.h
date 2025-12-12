@@ -86,9 +86,9 @@ public:
 	StencilOp Front_stencil_op;
 	StencilOp Back_stencil_op;
 
-protected:
-	void set_shader_type(shader_type init_sdr_type = SDR_TYPE_NONE);
 public:
+	void set_shader_type(shader_type init_sdr_type = SDR_TYPE_NONE);
+
 	material();
 
 	int get_shader_handle() const;

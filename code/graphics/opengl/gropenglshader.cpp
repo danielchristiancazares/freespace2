@@ -137,6 +137,9 @@ static opengl_shader_type_t GL_shader_types[] = {
 	{ SDR_TYPE_DEFAULT_MATERIAL, "default-material.vert.spv.glsl", "default-material.frag.spv.glsl", nullptr,
 		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::TEXCOORD, opengl_vert_attrib::COLOR }, "Default material", true },
 
+	{ SDR_TYPE_INTERFACE, "interface.vert.spv.glsl", "interface.frag.spv.glsl", nullptr,
+		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::TEXCOORD }, "Interface rendering", true },
+
 	{ SDR_TYPE_NANOVG, "nanovg-v.sdr", "nanovg-f.sdr", nullptr,
 		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::TEXCOORD }, "NanoVG shader", false },
 
@@ -1145,6 +1148,49 @@ void opengl_shader_set_default_material(bool textured, bool alpha, vec4* clr, fl
 				data->modelMatrix  = gr_model_matrix_stack.get_transform();
 			} else {
 				data->clipEnabled = 0;
+			}
+		});
+
+	gr_matrix_set_uniforms();
+}
+
+void opengl_shader_set_interface(bool textured, bool alpha, vec4* clr, float color_scale, uint32_t array_index)
+{
+	Current_shader->program->Uniforms.setTextureUniform("baseMap", 0);
+
+	opengl_set_generic_uniform_data<genericData_interface_frag>(
+		[=](genericData_interface_frag* data) {
+			if (textured) {
+				data->noTexturing  = 0;
+				data->baseMapIndex = array_index;
+			} else {
+				data->noTexturing = 1;
+				data->baseMapIndex = 0;
+			}
+
+			if (alpha) {
+				data->alphaTexture = 1;
+			} else {
+				data->alphaTexture = 0;
+			}
+
+			if (High_dynamic_range) {
+				data->srgb      = 1;
+				data->intensity = color_scale;
+			} else {
+				data->srgb      = 0;
+				data->intensity = 1.0f;
+			}
+
+			data->alphaThreshold = GL_alpha_threshold;
+
+			if (clr != nullptr) {
+				data->color = *clr;
+			} else {
+				data->color.xyzw.x = 1.0f;
+				data->color.xyzw.y = 1.0f;
+				data->color.xyzw.z = 1.0f;
+				data->color.xyzw.w = 1.0f;
 			}
 		});
 
