@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Vulkan `gr_set_line_width` implementation with device limit clamping and granularity snapping
+- `vk::DynamicState::eLineWidth` in Vulkan pipeline dynamic state list
+- Interface and batched-bitmap shader variants for OpenGL/Vulkan plus shader build entries.
+- `VulkanDevice`, `VulkanRenderTargets`, and `VulkanRenderingSession` components owning swapchain, render-target lifetimes, and dynamic rendering flow.
+- Manual Vulkan visibility integration test (`test/src/graphics/it_vulkan_model_present.cpp`) gated by `FS2_VULKAN_IT`, and OpenGL SMAA fallback unit test without ARB_texture_storage.
 - `SDR_TYPE_MODEL` shader path in `VulkanShaderManager` that loads unified `model.vert.spv`/`model.frag.spv` and ignores variant flags
 - `VulkanModelValidation` stub helpers for descriptor-indexing feature validation and push-constant budget checks (not yet implemented)
 - Unit tests for model shader path: unified modules, variant-flag independence, layout-hash ignore, plus failing tests for descriptor-indexing and push-constant validation
@@ -43,8 +48,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Embedded shader module loading from `def_files` in VulkanShaderManager
 - Extended dynamic state feature queries (`VK_EXT_extended_dynamic_state`, `VK_EXT_extended_dynamic_state2`, `VK_EXT_extended_dynamic_state3`)
 - Vulkan 1.2 features chain in device creation
+- `VulkanRingBuffer::remaining()` introspection method for available space queries
 
 ### Changed
+- `VulkanBufferManager` now provides `ensureBuffer()` method for transparent buffer resizing
+  - Automatically grows buffers when needed without duplicating resize logic
+  - Simplifies `updateBufferData()` and `updateBufferDataOffset()` implementations
+- Restructured `VulkanRenderingSession` command recording and frame lifecycle for clarity
+- Vulkan render pass lifetime is now scope-owned via `VulkanRenderingSession::RenderScope` (`ActivePass` RAII), removing runtime active-pass tracking
+- Model uniform binding now structurally required via `setModelUniformBinding()`
+  - Fallback auto-populated UBO removed; missing binding prevents draw (matches texture semantics)
+- Renamed `ModelUniformState` to `DynamicUniformBinding` for semantic clarity
+- Removed verbose debug logging from Vulkan device selection path
+- G-buffer dynamic state now sets blend enable and color write mask for all color attachments
+- Eliminate exception-based coordination in Vulkan renderer
+  - `VulkanRingBuffer::try_allocate()` returns optional instead of throwing; intra-frame wrapping removed
+  - `VulkanTextureManager::queryDescriptor()` replaces `getDescriptor()`; always returns valid descriptor (possibly fallback)
+  - Texture upload failures (oversized, staging exhausted) mark texture as Failed instead of throwing/looping
+  - Remove "end pass and retry" exception handling from `getTextureDescriptor()`
+- VulkanRenderer uses per-frame model descriptor sets instead of per-draw allocation
+  - Explicit upload flush point in `beginFrame()` before rendering starts
+  - Serial-based texture retirement aligns with GPU completion tracking
+- VulkanDescriptorLayouts shrinks model pool from 4096×frames to frames-in-flight sets
+  - Storage buffer limit validation checks >= 1 per set, not >= pool size
+- Descriptor write state ownership moved from TextureManager to renderer layer
+- VulkanRenderer validates pipeline/attachment compatibility and defers GPU buffer retirement
+- Rendering startup is now lazy with explicit clear control; depth/G-buffer transitions consolidated under the rendering session.
+- OpenGL texture path removes the sampler-object cache, refreshes per-texture wrap state, and logs GLAD capability probes for diagnostics.
+- README refreshed and `.gitignore` ignores agent metadata files.
 - `PipelineKey` equality and hash now ignore `layout_hash` when `type == SDR_TYPE_MODEL` (vertex-pulling path uses zero vertex inputs)
 - Vulkan renderer requires Vulkan 1.4 capable devices (was 1.1)
 - Early Vulkan SDK detection in CMake before library targets are configured
@@ -75,13 +106,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Removed
 - `RenderFrame` class (replaced by `VulkanFrame`)
 - `vulkan_stubs.cpp` and `vulkan_stubs.h` (no longer needed)
+- `VulkanTextureManager::setCurrentFrame()` and `m_currentFrame` (renderer owns frame tracking)
+- `TextureBindingState::descriptorWritten` array (renderer layer owns descriptor write state)
+- `kModelSetsPerPool` constant (model pool now sized to frames-in-flight)
 
 ### Fixed
+- `gr_aabitmap_list` now sets `SDR_TYPE_INTERFACE` shader type (was defaulting to `SDR_TYPE_DEFAULT_MATERIAL` which requires vertex color)
+- Guard null GL timer-query function pointers and SMAA texture allocation when ARB_texture_storage is unavailable.
+- Prevent stale model descriptor reuse across frames and assert default-material vertex colors when required.
+- Validate Vulkan pipeline vertex attributes and attachment formats before binding to avoid mismatched layouts.
 - imgui Vulkan compile definitions scope (INTERFACE to PUBLIC)
 - Shader cmake dependency variable name (`_shader` not `shader`)
 - Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory
 - Clear flags now properly reset after being consumed in Vulkan renderer to prevent persistent clear state
 - Uninitialized memory in dynamic uniform buffers (shadow buffer now zero-initialized)
+- Vulkan buffer deletion use-after-free: `deleteBuffer()` now uses deferred deletion via `m_retiredBuffers` instead of immediate destruction
+- Vulkan shader alignment crash on ARM: filesystem shader loading now uses `std::vector<uint32_t>` to guarantee 4-byte alignment required by Vulkan spec
+- Vulkan fallback texture crash: `VulkanTextureManager` now creates 1x1 black fallback texture during initialization
+- Vulkan frame count constant mismatch: consolidated `MAX_FRAMES_IN_FLIGHT` and `kFramesInFlight` to single `kFramesInFlight = 2` constant
+- Vulkan scissor ignoring clip region: draw paths now apply `gr_screen` clip state instead of forcing full-screen scissor
 
 ## [23.2.0] - 2023-06-16
 ### Changes

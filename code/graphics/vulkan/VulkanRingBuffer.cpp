@@ -1,6 +1,7 @@
 #include "VulkanRingBuffer.h"
 
 #include <stdexcept>
+#include <optional>
 
 namespace graphics {
 namespace vulkan {
@@ -36,16 +37,22 @@ VulkanRingBuffer::VulkanRingBuffer(vk::Device device,
 VulkanRingBuffer::Allocation VulkanRingBuffer::allocate(vk::DeviceSize requestSize,
 	vk::DeviceSize alignmentOverride)
 {
+	auto result = try_allocate(requestSize, alignmentOverride);
+	if (!result) {
+		throw std::runtime_error("Allocation size exceeds remaining ring buffer capacity");
+	}
+	return *result;
+}
+
+std::optional<VulkanRingBuffer::Allocation> VulkanRingBuffer::try_allocate(vk::DeviceSize requestSize,
+	vk::DeviceSize alignmentOverride)
+{
 	const vk::DeviceSize align = alignmentOverride ? alignmentOverride : m_alignment;
 	vk::DeviceSize alignedOffset = ((m_offset + align - 1) / align) * align;
 
+	// Do not wrap within a frame - this would overwrite in-flight GPU reads
 	if (alignedOffset + requestSize > m_size) {
-		// FIXME: Is this a bug?
-		// Potential issue: Do not wrap within a frame; wrapping could overwrite in-flight GPU reads.
-		alignedOffset = 0;
-		if (requestSize > m_size) {
-			throw std::runtime_error("Allocation size exceeds remaining ring buffer capacity");
-		}
+		return std::nullopt;
 	}
 
 	Allocation result;
@@ -54,6 +61,15 @@ VulkanRingBuffer::Allocation VulkanRingBuffer::allocate(vk::DeviceSize requestSi
 
 	m_offset = alignedOffset + requestSize;
 	return result;
+}
+
+vk::DeviceSize VulkanRingBuffer::remaining() const
+{
+	const vk::DeviceSize alignedOffset = ((m_offset + m_alignment - 1) / m_alignment) * m_alignment;
+	if (alignedOffset >= m_size) {
+		return 0;
+	}
+	return m_size - alignedOffset;
 }
 
 void VulkanRingBuffer::reset()

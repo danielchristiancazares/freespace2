@@ -2,6 +2,7 @@
 
 #include "VulkanShaderManager.h"
 #include "VulkanLayoutContracts.h"
+#include "VulkanDebug.h"
 
 #include "graphics/2d.h"
 
@@ -58,14 +59,6 @@ struct VertexInputState {
 	std::vector<vk::VertexInputBindingDescription> bindings;
 	std::vector<vk::VertexInputAttributeDescription> attributes;
 	std::vector<vk::VertexInputBindingDivisorDescription> divisors;
-};
-
-// Capabilities we care about from VK_EXT_extended_dynamic_state3
-struct ExtendedDynamicState3Caps {
-	bool colorBlendEnable = false;
-	bool colorWriteMask = false;
-	bool polygonMode = false;
-	bool rasterizationSamples = false;
 };
 
 VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout);

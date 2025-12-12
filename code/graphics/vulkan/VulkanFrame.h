@@ -45,6 +45,14 @@ class VulkanFrame {
 
 	vk::DescriptorSet modelDescriptorSet = nullptr;
 	ModelUniformState modelUniformState;
+	ModelUniformState sceneUniformState;
+
+	void record_submit_info(uint32_t frameIndex, uint32_t imageIndex, uint64_t timelineValue, uint64_t submitSerial);
+	uint64_t lastSubmitSerial() const { return m_lastSubmitSerial; }
+	uint32_t lastSubmitFrameIndex() const { return m_lastSubmitFrameIndex; }
+	uint32_t lastSubmitImageIndex() const { return m_lastSubmitImageIndex; }
+	uint64_t lastSubmitTimeline() const { return m_lastSubmitTimeline; }
+	bool hasSubmitInfo() const { return m_hasSubmitInfo; }
 
   private:
 	vk::Device m_device;
@@ -61,6 +69,12 @@ class VulkanFrame {
 	VulkanRingBuffer m_uniformRing;
 	VulkanRingBuffer m_vertexRing;
 	VulkanRingBuffer m_stagingRing;
+
+	uint64_t m_lastSubmitTimeline = 0;
+	uint32_t m_lastSubmitImageIndex = UINT32_MAX;
+	uint32_t m_lastSubmitFrameIndex = UINT32_MAX;
+	uint64_t m_lastSubmitSerial = 0;
+	bool m_hasSubmitInfo = false;
 };
 
 } // namespace vulkan
