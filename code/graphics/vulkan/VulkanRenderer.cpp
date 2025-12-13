@@ -79,7 +79,7 @@ void VulkanRenderer::createDescriptorResources() {
 
 void VulkanRenderer::createFrames() {
 	const auto& props = m_vulkanDevice->properties();
-	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+	for (size_t i = 0; i < kFramesInFlight; ++i) {
 		m_frames[i] = std::make_unique<VulkanFrame>(
 			m_vulkanDevice->device(),
 			m_vulkanDevice->graphicsQueueIndex(),
@@ -276,7 +276,7 @@ void VulkanRenderer::flip() {
 
 	// Advance frame index and prepare next frame
 	uint32_t prevFrame = m_currentFrame;
-	m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+	m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
 	auto& frame = *m_frames[m_currentFrame];
 	// #region agent log
 	agent_log("H5", "VulkanRenderer.cpp:flip", "before wait_for_gpu",

@@ -92,6 +92,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Ring buffer overflow protection: allocations larger than buffer capacity now throw exception instead of corrupting memory
 - Clear flags now properly reset after being consumed in Vulkan renderer to prevent persistent clear state
 - Uninitialized memory in dynamic uniform buffers (shadow buffer now zero-initialized)
+- Vulkan buffer deletion use-after-free: `deleteBuffer()` now uses deferred deletion via `m_retiredBuffers` instead of immediate destruction
+- Vulkan shader alignment crash on ARM: filesystem shader loading now uses `std::vector<uint32_t>` to guarantee 4-byte alignment required by Vulkan spec
+- Vulkan fallback texture crash: `VulkanTextureManager` now creates 1x1 black fallback texture during initialization
+- Vulkan frame count constant mismatch: consolidated `MAX_FRAMES_IN_FLIGHT` and `kFramesInFlight` to single `kFramesInFlight = 2` constant
+- Vulkan scissor ignoring clip region: draw paths now apply `gr_screen` clip state instead of forcing full-screen scissor
 
 ## [23.2.0] - 2023-06-16
 ### Changes

@@ -223,25 +223,22 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 	m_shouldClearDepth = false;
 }
 
-void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet) {
-	const auto extent = m_device.swapchainExtent();
-	// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
-	vk::Viewport viewport;
-	viewport.x = 0.f;
-	viewport.y = static_cast<float>(extent.height);
-	viewport.width = static_cast<float>(extent.width);
-	viewport.height = -static_cast<float>(extent.height);
-	viewport.minDepth = 0.f;
-	viewport.maxDepth = 1.f;
-	cmd.setViewport(0, viewport);
+	void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet) {
+		const auto extent = m_device.swapchainExtent();
+		// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
+		vk::Viewport viewport;
+		viewport.x = 0.f;
+		viewport.y = static_cast<float>(extent.height);
+		viewport.width = static_cast<float>(extent.width);
+		viewport.height = -static_cast<float>(extent.height);
+		viewport.minDepth = 0.f;
+		viewport.maxDepth = 1.f;
+		cmd.setViewport(0, viewport);
 
-	vk::Rect2D scissor({0, 0}, extent);
-	cmd.setScissor(0, scissor);
-
-	cmd.setCullMode(m_cullMode);
-	cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
-	cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
-	cmd.setDepthTestEnable(m_depthTest ? VK_TRUE : VK_FALSE);
+		cmd.setCullMode(m_cullMode);
+		cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
+		cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+		cmd.setDepthTestEnable(m_depthTest ? VK_TRUE : VK_FALSE);
 	cmd.setDepthWriteEnable(m_depthWrite ? VK_TRUE : VK_FALSE);
 	cmd.setDepthCompareOp(m_depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
 	cmd.setStencilTestEnable(VK_FALSE);

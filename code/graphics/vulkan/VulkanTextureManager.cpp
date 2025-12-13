@@ -69,6 +69,7 @@ VulkanTextureManager::VulkanTextureManager(vk::Device device,
 	, m_transferQueueIndex(transferQueueIndex)
 {
 	createDefaultSampler();
+	createFallbackTexture();
 }
 
 uint32_t VulkanTextureManager::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const
@@ -102,6 +103,154 @@ void VulkanTextureManager::createDefaultSampler()
 	samplerInfo.maxLod = 0.0f;
 
 	m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
+}
+
+void VulkanTextureManager::createFallbackTexture()
+{
+	// Create a 1x1 black texture for use when retired textures are sampled.
+	// This prevents accessing destroyed VkImage/VkImageView resources.
+	constexpr uint32_t width = 1;
+	constexpr uint32_t height = 1;
+	constexpr vk::Format format = vk::Format::eR8G8B8A8Unorm;
+	const uint8_t black[4] = {0, 0, 0, 255}; // RGBA black
+
+	// Create staging buffer
+	vk::BufferCreateInfo bufInfo;
+	bufInfo.size = sizeof(black);
+	bufInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+	bufInfo.sharingMode = vk::SharingMode::eExclusive;
+	auto stagingBuf = m_device.createBufferUnique(bufInfo);
+
+	auto reqs = m_device.getBufferMemoryRequirements(stagingBuf.get());
+	vk::MemoryAllocateInfo allocInfo;
+	allocInfo.allocationSize = reqs.size;
+	allocInfo.memoryTypeIndex = findMemoryType(reqs.memoryTypeBits,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+	auto stagingMem = m_device.allocateMemoryUnique(allocInfo);
+	m_device.bindBufferMemory(stagingBuf.get(), stagingMem.get(), 0);
+
+	// Copy pixel data to staging
+	void* mapped = m_device.mapMemory(stagingMem.get(), 0, sizeof(black));
+	std::memcpy(mapped, black, sizeof(black));
+	m_device.unmapMemory(stagingMem.get());
+
+	// Create image
+	vk::ImageCreateInfo imageInfo;
+	imageInfo.imageType = vk::ImageType::e2D;
+	imageInfo.format = format;
+	imageInfo.extent = vk::Extent3D(width, height, 1);
+	imageInfo.mipLevels = 1;
+	imageInfo.arrayLayers = 1;
+	imageInfo.samples = vk::SampleCountFlagBits::e1;
+	imageInfo.tiling = vk::ImageTiling::eOptimal;
+	imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+	imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+	auto image = m_device.createImageUnique(imageInfo);
+	auto imgReqs = m_device.getImageMemoryRequirements(image.get());
+	vk::MemoryAllocateInfo imgAllocInfo;
+	imgAllocInfo.allocationSize = imgReqs.size;
+	imgAllocInfo.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+	auto imageMem = m_device.allocateMemoryUnique(imgAllocInfo);
+	m_device.bindImageMemory(image.get(), imageMem.get(), 0);
+
+	// Command pool + buffer for upload
+	vk::CommandPoolCreateInfo poolInfo;
+	poolInfo.queueFamilyIndex = m_transferQueueIndex;
+	poolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+	auto uploadPool = m_device.createCommandPoolUnique(poolInfo);
+
+	vk::CommandBufferAllocateInfo cmdAlloc;
+	cmdAlloc.commandPool = uploadPool.get();
+	cmdAlloc.level = vk::CommandBufferLevel::ePrimary;
+	cmdAlloc.commandBufferCount = 1;
+	auto cmdBuf = m_device.allocateCommandBuffers(cmdAlloc).front();
+
+	vk::CommandBufferBeginInfo beginInfo;
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	cmdBuf.begin(beginInfo);
+
+	// Transition to transfer dst
+	vk::ImageMemoryBarrier2 toTransfer{};
+	toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+	toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	toTransfer.oldLayout = vk::ImageLayout::eUndefined;
+	toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
+	toTransfer.image = image.get();
+	toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	toTransfer.subresourceRange.levelCount = 1;
+	toTransfer.subresourceRange.layerCount = 1;
+
+	vk::DependencyInfo depToTransfer{};
+	depToTransfer.imageMemoryBarrierCount = 1;
+	depToTransfer.pImageMemoryBarriers = &toTransfer;
+	cmdBuf.pipelineBarrier2(depToTransfer);
+
+	// Copy buffer to image
+	vk::BufferImageCopy region{};
+	region.bufferOffset = 0;
+	region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+	region.imageSubresource.mipLevel = 0;
+	region.imageSubresource.baseArrayLayer = 0;
+	region.imageSubresource.layerCount = 1;
+	region.imageExtent = vk::Extent3D(width, height, 1);
+	cmdBuf.copyBufferToImage(stagingBuf.get(), image.get(), vk::ImageLayout::eTransferDstOptimal, 1, &region);
+
+	// Transition to shader read
+	vk::ImageMemoryBarrier2 toShader{};
+	toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+	toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+	toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+	toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	toShader.image = image.get();
+	toShader.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	toShader.subresourceRange.levelCount = 1;
+	toShader.subresourceRange.layerCount = 1;
+
+	vk::DependencyInfo depToShader{};
+	depToShader.imageMemoryBarrierCount = 1;
+	depToShader.pImageMemoryBarriers = &toShader;
+	cmdBuf.pipelineBarrier2(depToShader);
+
+	cmdBuf.end();
+
+	// Submit and wait
+	vk::SubmitInfo submitInfo;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &cmdBuf;
+	m_transferQueue.submit(submitInfo, nullptr);
+	m_transferQueue.waitIdle();
+
+	// Create view
+	vk::ImageViewCreateInfo viewInfo;
+	viewInfo.image = image.get();
+	viewInfo.viewType = vk::ImageViewType::e2DArray;
+	viewInfo.format = format;
+	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.layerCount = 1;
+	auto view = m_device.createImageViewUnique(viewInfo);
+
+	// Store in texture map with synthetic handle
+	TextureRecord record{};
+	record.gpu.image = std::move(image);
+	record.gpu.memory = std::move(imageMem);
+	record.gpu.imageView = std::move(view);
+	record.gpu.sampler = m_defaultSampler.get();
+	record.gpu.width = width;
+	record.gpu.height = height;
+	record.gpu.layers = 1;
+	record.gpu.mipLevels = 1;
+	record.gpu.format = format;
+	record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	record.state = TextureState::Resident;
+	m_textures[kFallbackTextureHandle] = std::move(record);
+
+	// Set the handle so getFallbackTextureHandle() returns valid value
+	m_fallbackTextureHandle = kFallbackTextureHandle;
 }
 
 vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key)
@@ -491,6 +640,11 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 			                              : singleChannel ? static_cast<size_t>(width) * height
 			                                              : static_cast<size_t>(width) * height * 4;
 		}
+
+		// Catch textures that can never fit in the staging buffer - these would loop forever
+		Assertion(totalUploadSize <= stagingBudget,
+			"Texture %d (%zu bytes, %ux%ux%u) exceeds staging budget (%zu bytes)",
+			baseFrame, totalUploadSize, width, height, layers, static_cast<size_t>(stagingBudget));
 
 		if (stagingUsed + totalUploadSize > stagingBudget) {
 			remaining.push_back(baseFrame);

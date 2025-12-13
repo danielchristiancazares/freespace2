@@ -5,6 +5,7 @@
 #include "graphics/grinternal.h"
 
 #include "VulkanBufferManager.h"
+#include "VulkanConstants.h"
 #include "VulkanDescriptorLayouts.h"
 #include "VulkanDevice.h"
 #include "VulkanFrame.h"
@@ -136,7 +137,6 @@ class VulkanRenderer {
 	const VulkanDevice* vulkanDevice() const { return m_vulkanDevice.get(); }
 
   private:
-	static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 	static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
 	static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
 	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
@@ -178,7 +178,7 @@ class VulkanRenderer {
 	std::unique_ptr<VulkanBufferManager> m_bufferManager;
 	std::unique_ptr<VulkanTextureManager> m_textureManager;
 
-	std::array<std::unique_ptr<VulkanFrame>, MAX_FRAMES_IN_FLIGHT> m_frames;
+	std::array<std::unique_ptr<VulkanFrame>, kFramesInFlight> m_frames;
 	uint32_t m_currentFrame = 0;
 	uint32_t m_recordingFrame = 0;
 	uint32_t m_recordingImage = 0;

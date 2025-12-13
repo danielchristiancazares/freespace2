@@ -53,7 +53,7 @@ class VulkanTextureManager {
 
 	struct TextureBindingState {
 		uint32_t arrayIndex = 0;
-		std::array<bool, kFramesInFlight> descriptorWritten = {false, false, false};
+		std::array<bool, kFramesInFlight> descriptorWritten{};
 	};
 
 	struct TextureRecord {
@@ -109,6 +109,9 @@ class VulkanTextureManager {
 	// Get texture descriptor info without frame/cmd (for already-resident textures)
 	vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey& samplerKey);
 
+	// Synthetic handle for fallback texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kFallbackTextureHandle = -1000;
+
   private:
 	vk::Device m_device;
 	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
@@ -126,6 +129,7 @@ class VulkanTextureManager {
 
 	vk::Sampler getOrCreateSampler(const SamplerKey& key);
 	bool uploadImmediate(int baseFrame, bool isAABitmap);
+	void createFallbackTexture();
 	TextureRecord* ensureTextureResident(int bitmapHandle,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd,

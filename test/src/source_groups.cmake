@@ -35,11 +35,16 @@ add_file_folder("Graphics"
 	   graphics/test_vulkan_pipeline_manager.cpp
 	   graphics/test_vulkan_frame_lifecycle.cpp
 	   graphics/test_vulkan_shader_manager_model.cpp
+	   graphics/test_vulkan_shader_alignment.cpp
 	   graphics/test_vulkan_texture_contract.cpp
+	   graphics/test_vulkan_texture_helpers.cpp
+	   graphics/test_vulkan_fallback_texture.cpp
+	   graphics/test_vulkan_buffer_manager_retirement.cpp
 	   graphics/test_vulkan_renderer_shutdown.cpp
 	   graphics/test_model_shader_spirv.cpp
 	   graphics/test_vulkan_descriptor_layouts.cpp
 	   graphics/test_vulkan_shader_layout_contracts.cpp
+	   graphics/test_vulkan_clip_scissor.cpp
 	   graphics/it_vulkan_model_present.cpp
 )
 endif()

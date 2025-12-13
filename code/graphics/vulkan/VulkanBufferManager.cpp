@@ -82,17 +82,23 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 	          "Invalid buffer handle %d in deleteBuffer", handle.value());
 
 	auto& buffer = m_buffers[handle.value()];
-	
+
 	// Unmap if mapped
 	if (buffer.mapped) {
 		m_device.unmapMemory(buffer.memory.get());
 		buffer.mapped = nullptr;
 	}
 
-	// Buffers are automatically destroyed via UniqueBuffer/UniqueDeviceMemory
-	// Mark as invalid by clearing
-	buffer.buffer.reset();
-	buffer.memory.reset();
+	// Retire buffer for deferred deletion (GPU may still be using it)
+	if (buffer.buffer) {
+		RetiredBuffer retired;
+		retired.buffer = std::move(buffer.buffer);
+		retired.memory = std::move(buffer.memory);
+		retired.retiredAtFrame = m_currentFrame;
+		m_retiredBuffers.push_back(std::move(retired));
+	}
+
+	// Mark slot as invalid
 	buffer.size = 0;
 }
 
