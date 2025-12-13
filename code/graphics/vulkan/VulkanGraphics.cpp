@@ -554,28 +554,9 @@ void gr_vulkan_render_model(model_material* material_info,
 	pcs.matrixIndex    = 0;  // Unused
 	pcs.flags          = material_info->get_shader_flags();
 
-	// Allocate fresh descriptor set for this draw to avoid race conditions
-	vk::DescriptorSet modelSet = renderer_instance->allocateModelDescriptorSet();
-	Assertion(modelSet, "Failed to allocate model descriptor set");
-
-	std::vector<std::pair<uint32_t, int>> texturesToBind;
-	texturesToBind.reserve(4);
-	for (const auto& entry : {
-	         std::pair<uint32_t, int>{pcs.baseMapIndex,   baseTex},
-	         std::pair<uint32_t, int>{pcs.glowMapIndex,   glowTex},
-	         std::pair<uint32_t, int>{pcs.normalMapIndex, normalTex},
-	         std::pair<uint32_t, int>{pcs.specMapIndex,   specTex}}) {
-		if (entry.first != MODEL_OFFSET_ABSENT) {
-			texturesToBind.emplace_back(entry);
-		}
-	}
-
-	renderer_instance->updateModelDescriptors(
-		modelSet,
-		vertexBuffer,
-		texturesToBind,
-		frame,
-		cmd);
+	// Use the per-frame model descriptor set (allocated and synced at frame start)
+	Assertion(frame.modelDescriptorSet, "Model descriptor set must be allocated at frame start");
+	vk::DescriptorSet modelSet = frame.modelDescriptorSet;
 
 	// Ensure rendering has started
 	renderer_instance->ensureRenderingStarted(cmd);
@@ -897,7 +878,8 @@ void gr_vulkan_render_primitives(material* material_info,
 	if (renderer_instance->supportsExtendedDynamicState3()) {
 		const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
 		if (caps.colorBlendEnable) {
-			vk::Bool32 blendEnable = VK_FALSE;
+			// H7 fix: respect material blend mode instead of unconditionally disabling
+			vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
 			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
 		}
 		if (caps.colorWriteMask) {
@@ -1144,7 +1126,8 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	if (renderer_instance->supportsExtendedDynamicState3()) {
 		const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
 		if (caps.colorBlendEnable) {
-			vk::Bool32 blendEnable = VK_FALSE;
+			// H7 fix: respect material blend mode instead of unconditionally disabling
+			vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
 			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
 		}
 		if (caps.colorWriteMask) {

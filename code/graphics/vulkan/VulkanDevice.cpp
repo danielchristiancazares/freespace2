@@ -171,13 +171,16 @@ bool isDeviceUnsuitable(PhysicalDeviceValues& values, const vk::UniqueSurfaceKHR
 	return false;
 }
 
+} // namespace (anonymous) - device scoring functions below are exposed for testing
+
 uint32_t deviceTypeScore(vk::PhysicalDeviceType type) {
 	switch (type) {
-	case vk::PhysicalDeviceType::eIntegratedGpu:
-		return 1;
 	case vk::PhysicalDeviceType::eDiscreteGpu:
+		return 3;
+	case vk::PhysicalDeviceType::eIntegratedGpu:
 		return 2;
 	case vk::PhysicalDeviceType::eVirtualGpu:
+		return 1;
 	case vk::PhysicalDeviceType::eCpu:
 	case vk::PhysicalDeviceType::eOther:
 	default:
@@ -188,11 +191,19 @@ uint32_t deviceTypeScore(vk::PhysicalDeviceType type) {
 uint32_t scoreDevice(const PhysicalDeviceValues& device) {
 	uint32_t score = 0;
 
-	score += deviceTypeScore(device.properties.deviceType) * 1000;
-	score += device.properties.apiVersion * 100;
+	// Device type is the dominant factor (discrete > integrated > virtual > other)
+	score += deviceTypeScore(device.properties.deviceType) * 1000000;
+
+	// Vulkan version as tiebreaker between same-type devices
+	// Use major.minor only; patch version is irrelevant for capability
+	uint32_t major = VK_VERSION_MAJOR(device.properties.apiVersion);
+	uint32_t minor = VK_VERSION_MINOR(device.properties.apiVersion);
+	score += major * 100 + minor;
 
 	return score;
 }
+
+namespace {
 
 bool compareDevices(const PhysicalDeviceValues& left, const PhysicalDeviceValues& right) {
 	return scoreDevice(left) < scoreDevice(right);

@@ -43,6 +43,10 @@ struct PhysicalDeviceValues {
 	QueueIndex presentQueueIndex;
 };
 
+// Device scoring for GPU selection (exposed for testing)
+uint32_t deviceTypeScore(vk::PhysicalDeviceType type);
+uint32_t scoreDevice(const PhysicalDeviceValues& device);
+
 class VulkanDevice {
   public:
 	explicit VulkanDevice(std::unique_ptr<os::GraphicsOperations> graphicsOps);

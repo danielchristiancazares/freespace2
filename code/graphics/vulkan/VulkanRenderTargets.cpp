@@ -1,6 +1,8 @@
 #include "VulkanRenderTargets.h"
 #include "VulkanDebug.h"
 
+#include <stdexcept>
+
 namespace graphics {
 namespace vulkan {
 
@@ -67,20 +69,30 @@ void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
 
 vk::Format VulkanRenderTargets::findDepthFormat() const
 {
+	// Candidate depth formats in preference order (stencil variants first for
+	// future stencil buffer support, pure depth last for maximum compatibility)
 	const std::vector<vk::Format> candidates = {
 		vk::Format::eD32SfloatS8Uint,
 		vk::Format::eD24UnormS8Uint,
 		vk::Format::eD32Sfloat,
 	};
 
+	// Required features: depth buffer is used both as attachment and sampled
+	// for deferred lighting (see createDepthResources usage flags and m_depthSampleView)
+	constexpr auto requiredFeatures = vk::FormatFeatureFlagBits::eDepthStencilAttachment |
+	                                  vk::FormatFeatureFlagBits::eSampledImage;
+
 	for (auto format : candidates) {
 		vk::FormatProperties props = m_device.physicalDevice().getFormatProperties(format);
-		if (props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
+		if ((props.optimalTilingFeatures & requiredFeatures) == requiredFeatures) {
 			return format;
 		}
 	}
 
-	return vk::Format::eD32Sfloat; // Fallback
+	// No suitable format found - this is a fundamental capability failure.
+	// Do NOT silently return a fallback format that may not actually work;
+	// that would cause undefined behavior during deferred lighting.
+	throw std::runtime_error("No suitable depth format found with both attachment and sampling support");
 }
 
 void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {

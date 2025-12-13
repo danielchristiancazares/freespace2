@@ -46,9 +46,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Embedded shader module loading from `def_files` in VulkanShaderManager
 - Extended dynamic state feature queries (`VK_EXT_extended_dynamic_state`, `VK_EXT_extended_dynamic_state2`, `VK_EXT_extended_dynamic_state3`)
 - Vulkan 1.2 features chain in device creation
+- `VulkanRingBuffer::remaining()` introspection method for available space queries
 
 ### Changed
-- VulkanRenderer now allocates per-draw model descriptor sets, validates pipeline/attachment compatibility, and defers GPU buffer retirement to avoid in-flight reuse.
+- Eliminate exception-based coordination in Vulkan renderer
+  - `VulkanRingBuffer::try_allocate()` returns optional instead of throwing; intra-frame wrapping removed
+  - `VulkanTextureManager::queryDescriptor()` replaces `getDescriptor()`; always returns valid descriptor (possibly fallback)
+  - Texture upload failures (oversized, staging exhausted) mark texture as Failed instead of throwing/looping
+  - Remove "end pass and retry" exception handling from `getTextureDescriptor()`
+- VulkanRenderer uses per-frame model descriptor sets instead of per-draw allocation
+  - Explicit upload flush point in `beginFrame()` before rendering starts
+  - Serial-based texture retirement aligns with GPU completion tracking
+- VulkanDescriptorLayouts shrinks model pool from 4096×frames to frames-in-flight sets
+  - Storage buffer limit validation checks >= 1 per set, not >= pool size
+- Descriptor write state ownership moved from TextureManager to renderer layer
+- VulkanRenderer validates pipeline/attachment compatibility and defers GPU buffer retirement
 - Rendering startup is now lazy with explicit clear control; depth/G-buffer transitions consolidated under the rendering session.
 - OpenGL texture path removes the sampler-object cache, refreshes per-texture wrap state, and logs GLAD capability probes for diagnostics.
 - README refreshed and `.gitignore` ignores agent metadata files.
@@ -82,8 +94,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Removed
 - `RenderFrame` class (replaced by `VulkanFrame`)
 - `vulkan_stubs.cpp` and `vulkan_stubs.h` (no longer needed)
+- `VulkanTextureManager::setCurrentFrame()` and `m_currentFrame` (renderer owns frame tracking)
+- `TextureBindingState::descriptorWritten` array (renderer layer owns descriptor write state)
+- `kModelSetsPerPool` constant (model pool now sized to frames-in-flight)
 
 ### Fixed
+- `gr_aabitmap_list` now sets `SDR_TYPE_INTERFACE` shader type (was defaulting to `SDR_TYPE_DEFAULT_MATERIAL` which requires vertex color)
 - Guard null GL timer-query function pointers and SMAA texture allocation when ARB_texture_storage is unavailable.
 - Prevent stale model descriptor reuse across frames and assert default-material vertex colors when required.
 - Validate Vulkan pipeline vertex attributes and attachment formats before binding to avoid mismatched layouts.
