@@ -68,6 +68,7 @@ class VulkanPipelineManager {
 	VulkanPipelineManager(vk::Device device,
 		vk::PipelineLayout pipelineLayout,
 		vk::PipelineLayout modelPipelineLayout,
+		vk::PipelineLayout deferredPipelineLayout,
 		vk::PipelineCache pipelineCache,
 		bool supportsExtendedDynamicState,
 		bool supportsExtendedDynamicState2,
@@ -84,6 +85,7 @@ class VulkanPipelineManager {
 	vk::Device m_device;
 	vk::PipelineLayout m_pipelineLayout;
 	vk::PipelineLayout m_modelPipelineLayout;
+	vk::PipelineLayout m_deferredPipelineLayout;
 	vk::PipelineCache m_pipelineCache;
 	bool m_supportsExtendedDynamicState = false;
 	bool m_supportsExtendedDynamicState2 = false;

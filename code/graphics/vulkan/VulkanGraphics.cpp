@@ -322,7 +322,18 @@ void gr_vulkan_deferred_lighting_finish()
 	if (!renderer_instance) {
 		return;
 	}
+	VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
+	if (!frame) {
+		return;
+	}
+
+	// Bind G-buffer textures to global descriptor set
 	renderer_instance->bindDeferredGlobalDescriptors();
+
+	// Record deferred lighting draws
+	renderer_instance->recordDeferredLighting(*frame);
+
+	// Switch back to swapchain rendering mode for subsequent draws
 	renderer_instance->setPendingRenderTargetSwapchain();
 }
 

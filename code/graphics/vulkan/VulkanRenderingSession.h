@@ -69,7 +69,14 @@ class VulkanRenderingSession {
   private:
 	// Render pass variants
 	void beginSwapchainRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
+	void beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
 	void beginGBufferRendering(vk::CommandBuffer cmd);
+
+  public:
+	// Begin swapchain rendering without depth attachment (for deferred lighting pass)
+	void beginSwapchainRenderingNoDepth(vk::CommandBuffer cmd, uint32_t imageIndex);
+
+  private:
 
 	// Layout transitions (barriers encapsulated here)
 	void transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex);
