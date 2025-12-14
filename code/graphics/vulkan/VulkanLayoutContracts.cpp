@@ -37,7 +37,7 @@ constexpr std::array<ShaderLayoutSpec, NUM_SHADER_TYPES> buildSpecs()
 		makeSpec(SDR_TYPE_POST_PROCESS_FXAA_PREPASS, "SDR_TYPE_POST_PROCESS_FXAA_PREPASS", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_POST_PROCESS_LIGHTSHAFTS, "SDR_TYPE_POST_PROCESS_LIGHTSHAFTS", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_POST_PROCESS_TONEMAPPING, "SDR_TYPE_POST_PROCESS_TONEMAPPING", PL::Standard, VI::VertexAttributes),
-		makeSpec(SDR_TYPE_DEFERRED_LIGHTING, "SDR_TYPE_DEFERRED_LIGHTING", PL::Standard, VI::VertexAttributes),
+		makeSpec(SDR_TYPE_DEFERRED_LIGHTING, "SDR_TYPE_DEFERRED_LIGHTING", PL::Deferred, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_DEFERRED_CLEAR, "SDR_TYPE_DEFERRED_CLEAR", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_VIDEO_PROCESS, "SDR_TYPE_VIDEO_PROCESS", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_PASSTHROUGH_RENDER, "SDR_TYPE_PASSTHROUGH_RENDER", PL::Standard, VI::VertexAttributes),
@@ -89,6 +89,9 @@ PipelineLayoutKind pipelineLayoutForShader(shader_type type)
 
 } // namespace vulkan
 } // namespace graphics
+
+
+
 
 
 
