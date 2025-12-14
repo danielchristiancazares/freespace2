@@ -20,11 +20,14 @@ class VulkanDescriptorLayouts {
 	vk::PipelineLayout modelPipelineLayout() const { return m_modelPipelineLayout.get(); }
 	vk::DescriptorPool modelDescriptorPool() const { return m_modelDescriptorPool.get(); }
 
+	vk::PipelineLayout deferredPipelineLayout() const { return m_deferredPipelineLayout.get(); }
+
 	vk::DescriptorSet allocateGlobalSet();
 	vk::DescriptorSet allocateModelDescriptorSet();
 
   private:
 	void createModelLayouts();
+	void createDeferredLayouts();
 
 	vk::Device m_device;
 	vk::UniqueDescriptorPool m_descriptorPool;
@@ -35,6 +38,9 @@ class VulkanDescriptorLayouts {
 	vk::UniqueDescriptorSetLayout m_modelSetLayout;
 	vk::UniquePipelineLayout m_modelPipelineLayout;
 	vk::UniqueDescriptorPool m_modelDescriptorPool;
+
+	vk::UniqueDescriptorSetLayout m_deferredPushLayout;
+	vk::UniquePipelineLayout m_deferredPipelineLayout;
 };
 
 } // namespace vulkan

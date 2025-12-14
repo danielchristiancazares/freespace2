@@ -68,6 +68,11 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
 		const auto fragPath = fs::path(m_shaderRoot) / "vulkan.frag.spv";
 		return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
 	}
+	case shader_type::SDR_TYPE_DEFERRED_LIGHTING: {
+		const auto vertPath = fs::path(m_shaderRoot) / "deferred.vert.spv";
+		const auto fragPath = fs::path(m_shaderRoot) / "deferred.frag.spv";
+		return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+	}
 	default:
 		// Any shader type not explicitly mapped is unsupported on Vulkan; fail fast
 		throw std::runtime_error("Unsupported shader_type for Vulkan: type=" + std::to_string(static_cast<int>(type)) +
