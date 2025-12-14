@@ -1,0 +1,3669 @@
+# File purposes
+
+> Generated on 2025-12-12 from `git ls-files` (tracked files only).
+> Purposes are best-effort: uses Doxygen `@file` headers when present; otherwise inferred from path/extension.
+
+## Root
+
+- `.clang-format` — clang-format configuration.
+- `.clang-tidy` — clang-tidy configuration.
+- `.dockerignore` — Docker ignore rules.
+- `.drone.yml` — Drone CI configuration.
+- `.editorconfig` — Editor formatting configuration.
+- `.gitattributes` — Git attributes configuration.
+- `.gitignore` — Git ignore rules.
+- `.gitmodules` — Git submodule configuration.
+- `About.md` — About this project/repository.
+- `build.ps1` — PowerShell build helper script.
+- `build.sh` — Shell build helper script.
+- `CHANGELOG.md` — Project changelog.
+- `cmake-variants.yaml` — CMake build presets/variants configuration.
+- `CMakeLists.txt` — Top-level CMake build configuration.
+- `Copying.md` — Copyright/licensing information.
+- `fs2open.Doxyfile.in` — Doxygen configuration template.
+- `NEWS` — Short project news/announcements file.
+- `README.md` — Project overview, build instructions, and contribution notes.
+- `REPORT_CHANGELOG.md` — Changelog reporting template/guidance.
+- `REPORT_FIXED.md` — Template for reporting fixes.
+- `REPORT.md` — Issue/bug report template and guidance.
+- `Unlicense.md` — License/Unlicense text.
+- `UpdatingDocumentation.md` — Instructions for updating project documentation.
+
+## .circleci
+
+- `.circleci/config.yml` — YAML config under .circleci (CircleCI configuration.)
+
+## .github
+
+- `.github/CODEOWNERS` — File under .github (GitHub workflows and repository automation.)
+- `.github/workflows/build-nightly.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+- `.github/workflows/build-release.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+- `.github/workflows/build-test.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+- `.github/workflows/cache-master.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+- `.github/workflows/post-build-release.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+- `.github/workflows/test-pull_request.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+- `.github/workflows/weekly-coverity-scan.yaml` — YAML config under .github (GitHub workflows and repository automation.)
+
+## ci
+
+- `ci/bintray.template.json` — JSON data/config under ci (Continuous integration helper scripts/config.)
+- `ci/linux/clang_tidy.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/clang-tidy-diff.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/linux/configure_cmake.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/create_dist_pack.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/dist_functions.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/generate_appimage.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/run_tests.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/upload_dist_package.sh` — Shell script under ci (Continuous integration helper scripts/config.)
+- `ci/linux/valgrind.supp` — supp file under ci (Continuous integration helper scripts/config.)
+- `ci/post/changelog.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/file_list.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/forum.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/github.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/installer.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/main.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/nebula.py` — py file under ci (Continuous integration helper scripts/config.)
+- `ci/post/nightly.mako` — mako file under ci (Continuous integration helper scripts/config.)
+- `ci/post/release.mako` — mako file under ci (Continuous integration helper scripts/config.)
+- `ci/post/requirements.txt` — Text file under ci (Continuous integration helper scripts/config.)
+- `ci/post/util.py` — py file under ci (Continuous integration helper scripts/config.)
+
+## cmake
+
+- `cmake/appimage.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/AppImage.desktop.in` — Template/input file under cmake (CMake modules and build helpers.)
+- `cmake/AppRun.in` — Template/input file under cmake (CMake modules and build helpers.)
+- `cmake/clang-tidy.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/cpufeatures.cpp` — C++ source under cmake (CMake modules and build helpers.)
+- `cmake/cross_compile/mingw64.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/Cxx11.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/debug-vars.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/doxygen.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/embed_file.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/embedded_files.inc.in` — Template/input file under cmake (CMake modules and build helpers.)
+- `cmake/external/rpavlik-cmake-modules` — File under cmake (CMake modules and build helpers.)
+- `cmake/finder/FindSpeech.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/fred_rc.h.in` — Template/input file under cmake (CMake modules and build helpers.)
+- `cmake/generateHeaders.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/globals.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/headers.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/package.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platform-darwin.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platform-freebsd.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platform-solaris.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platform-unix.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platform-win32.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platformChecks.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/platformChecks.h.in` — Template/input file under cmake (CMake modules and build helpers.)
+- `cmake/platforms.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/project.h.in` — Template/input file under cmake (CMake modules and build helpers.)
+- `cmake/toolchain-apple-clang.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/toolchain-clang.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/toolchain-gcc.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/toolchain-msvc.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/toolchain.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/util.cmake` — CMake script under cmake (CMake modules and build helpers.)
+- `cmake/version.cmake` — CMake script under cmake (CMake modules and build helpers.)
+
+## code
+
+- `code/actions/Action.cpp` — C++ source for actions (engine source).
+- `code/actions/Action.h` — C/C++ header for actions (engine source).
+- `code/actions/ActionDefinition.cpp` — C++ source for actions (engine source).
+- `code/actions/ActionDefinition.h` — C/C++ header for actions (engine source).
+- `code/actions/ActionDefinitionManager.cpp` — C++ source for actions (engine source).
+- `code/actions/ActionDefinitionManager.h` — C/C++ header for actions (engine source).
+- `code/actions/BuiltinActionDefinition.h` — C/C++ header for actions (engine source).
+- `code/actions/common.cpp` — C++ source for actions (engine source).
+- `code/actions/common.h` — C/C++ header for actions (engine source).
+- `code/actions/expression/ActionExpression.cpp` — C++ source for actions/expression (engine source).
+- `code/actions/expression/ActionExpression.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/expression/ExpressionParser.cpp` — C++ source for actions/expression (engine source).
+- `code/actions/expression/ExpressionParser.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/expression/FunctionManager.cpp` — C++ source for actions/expression (engine source).
+- `code/actions/expression/FunctionManager.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/expression/nodes/AbstractExpression.cpp` — C++ source for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/AbstractExpression.h` — C/C++ header for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/FunctionCallExpression.cpp` — C++ source for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/FunctionCallExpression.h` — C/C++ header for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/LiteralExpression.cpp` — C++ source for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/LiteralExpression.h` — C/C++ header for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/RandomRangeExpression.cpp` — C++ source for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/RandomRangeExpression.h` — C/C++ header for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/VariableReferenceExpression.cpp` — C++ source for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/VariableReferenceExpression.h` — C/C++ header for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/VectorConstructorExpression.cpp` — C++ source for actions/expression/nodes (engine source).
+- `code/actions/expression/nodes/VectorConstructorExpression.h` — C/C++ header for actions/expression/nodes (engine source).
+- `code/actions/expression/ParseContext.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/expression/ProgramVariables.cpp` — C++ source for actions/expression (engine source).
+- `code/actions/expression/ProgramVariables.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/expression/TypeDefinition.cpp` — C++ source for actions/expression (engine source).
+- `code/actions/expression/TypeDefinition.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/expression/Value.cpp` — C++ source for actions/expression (engine source).
+- `code/actions/expression/Value.h` — C/C++ header for actions/expression (engine source).
+- `code/actions/Program.cpp` — C++ source for actions (engine source).
+- `code/actions/Program.h` — C/C++ header for actions (engine source).
+- `code/actions/types/MoveToSubmodel.cpp` — C++ source for actions/types (engine source).
+- `code/actions/types/MoveToSubmodel.h` — C/C++ header for actions/types (engine source).
+- `code/actions/types/ParticleEffectAction.cpp` — C++ source for actions/types (engine source).
+- `code/actions/types/ParticleEffectAction.h` — C/C++ header for actions/types (engine source).
+- `code/actions/types/PlaySoundAction.cpp` — C++ source for actions/types (engine source).
+- `code/actions/types/PlaySoundAction.h` — C/C++ header for actions/types (engine source).
+- `code/actions/types/SetDirectionAction.cpp` — C++ source for actions/types (engine source).
+- `code/actions/types/SetDirectionAction.h` — C/C++ header for actions/types (engine source).
+- `code/actions/types/SetPositionAction.cpp` — C++ source for actions/types (engine source).
+- `code/actions/types/SetPositionAction.h` — C/C++ header for actions/types (engine source).
+- `code/actions/types/WaitAction.cpp` — C++ source for actions/types (engine source).
+- `code/actions/types/WaitAction.h` — C/C++ header for actions/types (engine source).
+- `code/ai/ai_flags.h` — C/C++ header for ai (engine source).
+- `code/ai/ai_profiles.cpp` — C++ source for ai (engine source).
+- `code/ai/ai_profiles.h` — C/C++ header for ai (engine source).
+- `code/ai/ai.cpp` — The code in here is just for bookeeping, allocating AI slots and linking them to ships. See AiCode.cpp for the actual AI code.
+- `code/ai/ai.h` — C/C++ header for ai (engine source).
+- `code/ai/aibig.cpp` — C++ source for ai (engine source).
+- `code/ai/aibig.h` — C/C++ header for ai (engine source).
+- `code/ai/aicode.cpp` — Contains the actual AI code that does interesting stuff to objects.
+- `code/ai/aigoals.cpp` — C++ source for ai (engine source).
+- `code/ai/aigoals.h` — C/C++ header for ai (engine source).
+- `code/ai/aiinternal.h` — C/C++ header for ai (engine source).
+- `code/ai/ailua.cpp` — C++ source for ai (engine source).
+- `code/ai/ailua.h` — C/C++ header for ai (engine source).
+- `code/ai/aiturret.cpp` — C++ source for ai (engine source).
+- `code/anim/animplay.cpp` — C++ source for anim (engine source).
+- `code/anim/animplay.h` — C/C++ header for anim (engine source).
+- `code/anim/packunpack.cpp` — C++ source for anim (engine source).
+- `code/anim/packunpack.h` — C/C++ header for anim (engine source).
+- `code/asteroid/asteroid.cpp` — C++ source for asteroid (engine source).
+- `code/asteroid/asteroid.h` — C/C++ header for asteroid (engine source).
+- `code/autopilot/autopilot.cpp` — C++ source for autopilot (engine source).
+- `code/autopilot/autopilot.h` — C/C++ header for autopilot (engine source).
+- `code/bmpman/bm_examples.cpp` — bm_examples.cpp This file contains example code for using bmpman.
+- `code/bmpman/bm_internal.h` — C/C++ header for bmpman (engine source).
+- `code/bmpman/bmpman.cpp` — C++ source for bmpman (engine source).
+- `code/bmpman/bmpman.h` — bmpman.h Header file for the bitmap manager (bmpman)
+- `code/camera/camera.cpp` — C++ source for camera (engine source).
+- `code/camera/camera.h` — C/C++ header for camera (engine source).
+- `code/cfile/cfile.cpp` — C++ source for cfile (engine source).
+- `code/cfile/cfile.h` — C/C++ header for cfile (engine source).
+- `code/cfile/cfilearchive.cpp` — C++ source for cfile (engine source).
+- `code/cfile/cfilearchive.h` — C/C++ header for cfile (engine source).
+- `code/cfile/cfilecompression.cpp` — C++ source for cfile (engine source).
+- `code/cfile/cfilecompression.h` — C/C++ header for cfile (engine source).
+- `code/cfile/cfilelist.cpp` — C++ source for cfile (engine source).
+- `code/cfile/cfilesystem.cpp` — C++ source for cfile (engine source).
+- `code/cfile/cfilesystem.h` — C/C++ header for cfile (engine source).
+- `code/cfilearchiver/cfilearchiver.cpp` — C++ source for cfilearchiver (engine source).
+- `code/cfilearchiver/CMakeLists.txt` — Text file for cfilearchiver (engine source).
+- `code/cfileextractor/cfileextractor.cpp` — C++ source for cfileextractor (engine source).
+- `code/cfileextractor/CMakeLists.txt` — Text file for cfileextractor (engine source).
+- `code/cheats_table/cheats_table.cpp` — C++ source for cheats_table (engine source).
+- `code/cheats_table/cheats_table.h` — C/C++ header for cheats_table (engine source).
+- `code/CMakeLists.txt` — Text file under code (Engine/game source code.)
+- `code/cmdline/cmdline.cpp` — C++ source for cmdline (engine source).
+- `code/cmdline/cmdline.h` — C/C++ header for cmdline (engine source).
+- `code/cmeasure/cmeasure.cpp` — C++ source for cmeasure (engine source).
+- `code/cmeasure/cmeasure.h` — C/C++ header for cmeasure (engine source).
+- `code/controlconfig/controlsconfig.cpp` — C++ source for controlconfig (engine source).
+- `code/controlconfig/controlsconfig.h` — C/C++ header for controlconfig (engine source).
+- `code/controlconfig/controlsconfigcommon.cpp` — C++ source for controlconfig (engine source).
+- `code/controlconfig/presets.cpp` — C++ source for controlconfig (engine source).
+- `code/controlconfig/presets.h` — C/C++ header for controlconfig (engine source).
+- `code/cutscene/cutscenes.cpp` — C++ source for cutscene (engine source).
+- `code/cutscene/cutscenes.h` — C/C++ header for cutscene (engine source).
+- `code/cutscene/Decoder.cpp` — C++ source for cutscene (engine source).
+- `code/cutscene/Decoder.h` — C/C++ header for cutscene (engine source).
+- `code/cutscene/ffmpeg/AudioDecoder.cpp` — C++ source for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/AudioDecoder.h` — C/C++ header for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/FFMPEGDecoder.cpp` — C++ source for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/FFMPEGDecoder.h` — C/C++ header for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/internal.cpp` — C++ source for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/internal.h` — C/C++ header for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/SubtitleDecoder.cpp` — C++ source for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/SubtitleDecoder.h` — C/C++ header for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/VideoDecoder.cpp` — C++ source for cutscene/ffmpeg (engine source).
+- `code/cutscene/ffmpeg/VideoDecoder.h` — C/C++ header for cutscene/ffmpeg (engine source).
+- `code/cutscene/movie.cpp` — C++ source for cutscene (engine source).
+- `code/cutscene/movie.h` — C/C++ header for cutscene (engine source).
+- `code/cutscene/player.cpp` — C++ source for cutscene (engine source).
+- `code/cutscene/player.h` — C/C++ header for cutscene (engine source).
+- `code/cutscene/VideoPresenter.cpp` — C++ source for cutscene (engine source).
+- `code/cutscene/VideoPresenter.h` — C/C++ header for cutscene (engine source).
+- `code/ddsutils/bcdec.h` — C/C++ header for ddsutils (engine source).
+- `code/ddsutils/ddsutils.cpp` — C++ source for ddsutils (engine source).
+- `code/ddsutils/ddsutils.h` — C/C++ header for ddsutils (engine source).
+- `code/debris/debris.cpp` — C++ source for debris (engine source).
+- `code/debris/debris.h` — C/C++ header for debris (engine source).
+- `code/debugconsole/console.cpp` — C++ source for debugconsole (engine source).
+- `code/debugconsole/console.h` — console.h @brief An overhauled/updated debug console to allow monitoring, testing, and general debugging of new features.
+- `code/debugconsole/consolecmds.cpp` — consolecmds.cpp
+- `code/debugconsole/consoleparse.cpp` — C++ source for debugconsole (engine source).
+- `code/debugconsole/consoleparse.h` — consoleparse.h @brief Parsing functions for the command line. Previously known as the command line scanner
+- `code/decals/decals.cpp` — C++ source for decals (engine source).
+- `code/decals/decals.h` — C/C++ header for decals (engine source).
+- `code/def_files/ai_profiles.tbl` — tbl file for def_files (engine source).
+- `code/def_files/data/effects/batched-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/batched-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/bloom-comp-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/blur-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/brightpass-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/copy-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/decal-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/decal-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/deferred-clear-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/deferred-clear-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/deferred-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/deferred-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/effect-distort-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/effect-distort-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/effect-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/effect-g.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/effect-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/envmap-sphere-warp-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/fog-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/fxaa-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/fxaa-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/fxaapre-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/gamma.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/irrmap-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/lighting.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/ls-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/main_large.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/main_small.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/main-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/main-g.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/main-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/model_shader_flags.h` — C/C++ header for def_files/data/effects (engine source).
+- `code/def_files/data/effects/msaa-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/nanovg-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/nanovg-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/normals.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/passthrough-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/passthrough-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/post-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/post-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/rocketui-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/rocketui-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/shadows.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/shield-impact-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/shield-impact-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/smaa-blend-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/smaa-blend-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/smaa-edge-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/smaa-edge-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/smaa-neighbour-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/smaa-neighbour-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/SMAA.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/tonemapping-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/video-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/video-v.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/effects/volumetric-f.sdr` — sdr file for def_files/data/effects (engine source).
+- `code/def_files/data/maps/app_icon_d.png` — Image asset for def_files/data/maps (engine source).
+- `code/def_files/data/maps/app_icon_sse_d.png` — Image asset for def_files/data/maps (engine source).
+- `code/def_files/data/maps/app_icon_sse.png` — Image asset for def_files/data/maps (engine source).
+- `code/def_files/data/maps/app_icon.png` — Image asset for def_files/data/maps (engine source).
+- `code/def_files/data/scripts/cfile_include.lua` — lua file for def_files/data/scripts (engine source).
+- `code/def_files/data/scripts/cfile_require.lua` — lua file for def_files/data/scripts (engine source).
+- `code/def_files/data/scripts/dkjson.lua` — lua file for def_files/data/scripts (engine source).
+- `code/def_files/data/scripts/forwarders.lua` — lua file for def_files/data/scripts (engine source).
+- `code/def_files/data/tables/autopilot.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/cheats.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/controlconfigdefaults.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/fonts.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/game_settings.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/iff_defs.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/objecttypes.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/post_processing.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/data/tables/species_defs.tbl` — tbl file for def_files/data/tables (engine source).
+- `code/def_files/def_files.cpp` — C++ source for def_files (engine source).
+- `code/def_files/def_files.h` — C/C++ header for def_files (engine source).
+- `code/events/events.cpp` — C++ source for events (engine source).
+- `code/events/events.h` — C/C++ header for events (engine source).
+- `code/exceptionhandler/exceptionhandler.cpp` — C++ source for exceptionhandler (engine source).
+- `code/exceptionhandler/exceptionhandler.h` — C/C++ header for exceptionhandler (engine source).
+- `code/executor/CombinedExecutionContext.cpp` — C++ source for executor (engine source).
+- `code/executor/CombinedExecutionContext.h` — C/C++ header for executor (engine source).
+- `code/executor/Executor.cpp` — C++ source for executor (engine source).
+- `code/executor/Executor.h` — C/C++ header for executor (engine source).
+- `code/executor/GameStateExecutionContext.cpp` — C++ source for executor (engine source).
+- `code/executor/GameStateExecutionContext.h` — C/C++ header for executor (engine source).
+- `code/executor/global_executors.cpp` — C++ source for executor (engine source).
+- `code/executor/global_executors.h` — C/C++ header for executor (engine source).
+- `code/executor/IExecutionContext.cpp` — C++ source for executor (engine source).
+- `code/executor/IExecutionContext.h` — C/C++ header for executor (engine source).
+- `code/external_dll/externalcode.h` — C/C++ header for external_dll (engine source).
+- `code/fireball/fireballs.cpp` — C++ source for fireball (engine source).
+- `code/fireball/fireballs.h` — C/C++ header for fireball (engine source).
+- `code/fireball/warpineffect.cpp` — C++ source for fireball (engine source).
+- `code/gamehelp/contexthelp.cpp` — C++ source for gamehelp (engine source).
+- `code/gamehelp/contexthelp.h` — C/C++ header for gamehelp (engine source).
+- `code/gamehelp/gameplayhelp.cpp` — C++ source for gamehelp (engine source).
+- `code/gamehelp/gameplayhelp.h` — C/C++ header for gamehelp (engine source).
+- `code/gamesequence/gamesequence.cpp` — C++ source for gamesequence (engine source).
+- `code/gamesequence/gamesequence.h` — C/C++ header for gamesequence (engine source).
+- `code/gamesnd/eventmusic.cpp` — C++ source for gamesnd (engine source).
+- `code/gamesnd/eventmusic.h` — C/C++ header for gamesnd (engine source).
+- `code/gamesnd/gamesnd.cpp` — C++ source for gamesnd (engine source).
+- `code/gamesnd/gamesnd.h` — C/C++ header for gamesnd (engine source).
+- `code/globalincs/adjustment.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/adjustment.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/alphacolors.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/alphacolors.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/crashdump.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/crashdump.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/flagset.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/fsmemory.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/globals.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/linklist.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/memory/memory.cpp` — C++ source for globalincs/memory (engine source).
+- `code/globalincs/memory/memory.h` — C/C++ header for globalincs/memory (engine source).
+- `code/globalincs/memory/utils.h` — C/C++ header for globalincs/memory (engine source).
+- `code/globalincs/mspdb_callstack.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/mspdb_callstack.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/pstypes.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/safe_strings.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/safe_strings.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/scp_defines.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/systemvars.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/systemvars.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/toolchain.h` — @brief Macros to abstract compiler capabilities for various toolchains
+- `code/globalincs/toolchain/clang.h` — @brief Macros to abstract compiler capabilities for the Clang toolchain
+- `code/globalincs/toolchain/doxygen.h` — @brief Macros to abstract compiler capabilities (for doxygen use only)
+- `code/globalincs/toolchain/gcc.h` — @brief Macros to abstract compiler capabilities for the GCC toolchain
+- `code/globalincs/toolchain/mingw.h` — @brief Macros to abstract compiler capabilities for the Mingw toolchain
+- `code/globalincs/toolchain/msvc.h` — @brief Macros to abstract compiler capabilities for the MSVC toolchain
+- `code/globalincs/type_traits.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/undosys.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/undosys.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/utility.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/version.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/version.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/vmallocator.cpp` — C++ source for globalincs (engine source).
+- `code/globalincs/vmallocator.h` — C/C++ header for globalincs (engine source).
+- `code/globalincs/windebug.cpp` — C++ source for globalincs (engine source).
+- `code/graphics/2d.cpp` — C++ source for graphics (engine source).
+- `code/graphics/2d.h` — C/C++ header for graphics (engine source).
+- `code/graphics/color.cpp` — C++ source for graphics (engine source).
+- `code/graphics/color.h` — C/C++ header for graphics (engine source).
+- `code/graphics/debug_sphere.cpp` — C++ source for graphics (engine source).
+- `code/graphics/debug_sphere.h` — C/C++ header for graphics (engine source).
+- `code/graphics/decal_draw_list.cpp` — C++ source for graphics (engine source).
+- `code/graphics/decal_draw_list.h` — C/C++ header for graphics (engine source).
+- `code/graphics/font.h` — C/C++ header for graphics (engine source).
+- `code/graphics/generic.cpp` — C++ source for graphics (engine source).
+- `code/graphics/generic.h` — C/C++ header for graphics (engine source).
+- `code/graphics/grbatch.cpp` — C++ source for graphics (engine source).
+- `code/graphics/grbatch.h` — C/C++ header for graphics (engine source).
+- `code/graphics/grinternal.cpp` — C++ source for graphics (engine source).
+- `code/graphics/grinternal.h` — C/C++ header for graphics (engine source).
+- `code/graphics/grstub.cpp` — C++ source for graphics (engine source).
+- `code/graphics/grstub.h` — C/C++ header for graphics (engine source).
+- `code/graphics/light.cpp` — C++ source for graphics (engine source).
+- `code/graphics/light.h` — C/C++ header for graphics (engine source).
+- `code/graphics/line_draw_list.cpp` — C++ source for graphics (engine source).
+- `code/graphics/line_draw_list.h` — C/C++ header for graphics (engine source).
+- `code/graphics/line.h` — C/C++ header for graphics (engine source).
+- `code/graphics/material.cpp` — C++ source for graphics (engine source).
+- `code/graphics/material.h` — C/C++ header for graphics (engine source).
+- `code/graphics/matrix.cpp` — C++ source for graphics (engine source).
+- `code/graphics/matrix.h` — C/C++ header for graphics (engine source).
+- `code/graphics/opengl/gropengl.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengl.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglbmpman.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglbmpman.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengldeferred.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengldeferred.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengldraw.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengldraw.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglopenxr.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglopenxr.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglpostprocessing.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglpostprocessing.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglquery.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglquery.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglshader.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglshader.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglstate.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglstate.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglsync.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropenglsync.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengltexture.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengltexture.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengltnl.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/gropengltnl.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/ShaderProgram.cpp` — C++ source for graphics/opengl (engine source).
+- `code/graphics/opengl/ShaderProgram.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/SmaaAreaTex.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/opengl/SmaaSearchTex.h` — C/C++ header for graphics/opengl (engine source).
+- `code/graphics/openxr_internal.h` — C/C++ header for graphics (engine source).
+- `code/graphics/openxr.cpp` — C++ source for graphics (engine source).
+- `code/graphics/openxr.h` — C/C++ header for graphics (engine source).
+- `code/graphics/paths/nanovg/CHANGES.txt` — Text file for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/fontstash.h` — C/C++ header for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/LICENSE.txt` — Text file for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/nanovg_gl_utils.h` — C/C++ header for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/nanovg_gl.h` — C/C++ header for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/nanovg.c` — C source for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/nanovg.h` — C/C++ header for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/stb_image.h` — C/C++ header for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/nanovg/stb_truetype.h` — C/C++ header for graphics/paths/nanovg (engine source).
+- `code/graphics/paths/NanoVGRenderer.cpp` — C++ source for graphics/paths (engine source).
+- `code/graphics/paths/NanoVGRenderer.h` — C/C++ header for graphics/paths (engine source).
+- `code/graphics/paths/PathRenderer.cpp` — C++ source for graphics/paths (engine source).
+- `code/graphics/paths/PathRenderer.h` — C/C++ header for graphics/paths (engine source).
+- `code/graphics/post_processing.cpp` — C++ source for graphics (engine source).
+- `code/graphics/post_processing.h` — C/C++ header for graphics (engine source).
+- `code/graphics/render.cpp` — C++ source for graphics (engine source).
+- `code/graphics/render.h` — C/C++ header for graphics (engine source).
+- `code/graphics/shaders/batched-bitmap.frag` — frag file for graphics/shaders (engine source).
+- `code/graphics/shaders/batched-bitmap.vert` — vert file for graphics/shaders (engine source).
+- `code/graphics/shaders/compiled/default-material_structs.frag.h` — C/C++ header for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/default-material_structs.vert.h` — C/C++ header for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/default-material.frag.spv` — spv file for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/default-material.frag.spv.glsl` — glsl file for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/default-material.vert.spv` — spv file for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/default-material.vert.spv.glsl` — glsl file for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/vulkan_structs.frag.h` — C/C++ header for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/vulkan_structs.vert.h` — C/C++ header for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/vulkan.frag.spv` — spv file for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/compiled/vulkan.vert.spv` — spv file for graphics/shaders/compiled (engine source).
+- `code/graphics/shaders/default-material.frag` — frag file for graphics/shaders (engine source).
+- `code/graphics/shaders/default-material.vert` — vert file for graphics/shaders (engine source).
+- `code/graphics/shaders/interface.frag` — frag file for graphics/shaders (engine source).
+- `code/graphics/shaders/interface.vert` — vert file for graphics/shaders (engine source).
+- `code/graphics/shaders/model.frag` — frag file for graphics/shaders (engine source).
+- `code/graphics/shaders/model.vert` — vert file for graphics/shaders (engine source).
+- `code/graphics/shaders/vulkan.frag` — frag file for graphics/shaders (engine source).
+- `code/graphics/shaders/vulkan.vert` — vert file for graphics/shaders (engine source).
+- `code/graphics/shadows.cpp` — C++ source for graphics (engine source).
+- `code/graphics/shadows.h` — C/C++ header for graphics (engine source).
+- `code/graphics/software/font_internal.h` — C/C++ header for graphics/software (engine source).
+- `code/graphics/software/font.cpp` — C++ source for graphics/software (engine source).
+- `code/graphics/software/font.h` — C/C++ header for graphics/software (engine source).
+- `code/graphics/software/FontManager.cpp` — C++ source for graphics/software (engine source).
+- `code/graphics/software/FontManager.h` — C/C++ header for graphics/software (engine source).
+- `code/graphics/software/FSFont.cpp` — C++ source for graphics/software (engine source).
+- `code/graphics/software/FSFont.h` — C/C++ header for graphics/software (engine source).
+- `code/graphics/software/NVGFont.cpp` — C++ source for graphics/software (engine source).
+- `code/graphics/software/NVGFont.h` — C/C++ header for graphics/software (engine source).
+- `code/graphics/software/VFNTFont.cpp` — C++ source for graphics/software (engine source).
+- `code/graphics/software/VFNTFont.h` — C/C++ header for graphics/software (engine source).
+- `code/graphics/tmapper.h` — C/C++ header for graphics (engine source).
+- `code/graphics/uniforms.cpp` — C++ source for graphics (engine source).
+- `code/graphics/uniforms.h` — @brief Contains procedures for converting rendering data into their GPU uniform representations
+- `code/graphics/util/GPUMemoryHeap.cpp` — C++ source for graphics/util (engine source).
+- `code/graphics/util/GPUMemoryHeap.h` — C/C++ header for graphics/util (engine source).
+- `code/graphics/util/uniform_structs.h` — This file contains definitions for GPU uniform buffer structs. These structs must respect the std140 layout rules. The complete rules for this can be found here: https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Explicit_variable_layout, but the TL;DR here is that everything in here must be 16-byte aligned.
+- `code/graphics/util/UniformAligner.cpp` — C++ source for graphics/util (engine source).
+- `code/graphics/util/UniformAligner.h` — C/C++ header for graphics/util (engine source).
+- `code/graphics/util/UniformBuffer.cpp` — C++ source for graphics/util (engine source).
+- `code/graphics/util/UniformBuffer.h` — C/C++ header for graphics/util (engine source).
+- `code/graphics/util/UniformBufferManager.cpp` — C++ source for graphics/util (engine source).
+- `code/graphics/util/UniformBufferManager.h` — C/C++ header for graphics/util (engine source).
+- `code/graphics/vulkan/FrameLifecycleTracker.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/FrameLifecycleTracker.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/README.md` — Documentation: Vulkan Backend (FSO) — `code/graphics/vulkan`
+- `code/graphics/vulkan/VKREFACTOR.md` — Documentation for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanBufferManager.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanBufferManager.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanClip.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanConstants.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanDebug.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanDebug.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanDescriptorLayouts.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanDescriptorLayouts.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanDevice.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanDevice.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanFrame.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanFrame.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanGraphics.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanGraphics.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanLayoutContracts.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanLayoutContracts.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanModelTypes.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanModelValidation.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanModelValidation.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanPipelineManager.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanPipelineManager.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRenderer.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRenderer.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRenderingSession.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRenderingSession.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRenderTargets.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRenderTargets.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRingBuffer.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanRingBuffer.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanShaderManager.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanShaderManager.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanShaderReflection.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanShaderReflection.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanTextureManager.cpp` — C++ source for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanTextureManager.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/graphics/vulkan/VulkanVertexTypes.h` — C/C++ header for graphics/vulkan (engine source).
+- `code/headtracking/freetrack.cpp` — C++ source for headtracking (engine source).
+- `code/headtracking/freetrack.h` — C/C++ header for headtracking (engine source).
+- `code/headtracking/headtracking_internal.h` — C/C++ header for headtracking (engine source).
+- `code/headtracking/headtracking.cpp` — C++ source for headtracking (engine source).
+- `code/headtracking/headtracking.h` — C/C++ header for headtracking (engine source).
+- `code/headtracking/trackir.cpp` — C++ source for headtracking (engine source).
+- `code/headtracking/trackir.h` — C/C++ header for headtracking (engine source).
+- `code/headtracking/trackirpublic.cpp` — C++ source for headtracking (engine source).
+- `code/headtracking/trackirpublic.h` — C/C++ header for headtracking (engine source).
+- `code/hud/hud.cpp` — C++ source for hud (engine source).
+- `code/hud/hud.h` — C/C++ header for hud (engine source).
+- `code/hud/hudartillery.cpp` — C++ source for hud (engine source).
+- `code/hud/hudartillery.h` — C/C++ header for hud (engine source).
+- `code/hud/hudbrackets.cpp` — C++ source for hud (engine source).
+- `code/hud/hudbrackets.h` — C/C++ header for hud (engine source).
+- `code/hud/hudconfig.cpp` — C++ source for hud (engine source).
+- `code/hud/hudconfig.h` — C/C++ header for hud (engine source).
+- `code/hud/hudescort.cpp` — C++ source for hud (engine source).
+- `code/hud/hudescort.h` — C/C++ header for hud (engine source).
+- `code/hud/hudets.cpp` — C++ source for hud (engine source).
+- `code/hud/hudets.h` — C/C++ header for hud (engine source).
+- `code/hud/hudgauges.h` — C/C++ header for hud (engine source).
+- `code/hud/hudlock.cpp` — C++ source for hud (engine source).
+- `code/hud/hudlock.h` — C/C++ header for hud (engine source).
+- `code/hud/hudmessage.cpp` — C++ source for hud (engine source).
+- `code/hud/hudmessage.h` — C/C++ header for hud (engine source).
+- `code/hud/hudnavigation.cpp` — C++ source for hud (engine source).
+- `code/hud/hudnavigation.h` — C/C++ header for hud (engine source).
+- `code/hud/hudobserver.cpp` — C++ source for hud (engine source).
+- `code/hud/hudobserver.h` — C/C++ header for hud (engine source).
+- `code/hud/hudparse.cpp` — C++ source for hud (engine source).
+- `code/hud/hudparse.h` — C/C++ header for hud (engine source).
+- `code/hud/hudreticle.cpp` — C++ source for hud (engine source).
+- `code/hud/hudreticle.h` — C/C++ header for hud (engine source).
+- `code/hud/hudscripting.cpp` — C++ source for hud (engine source).
+- `code/hud/hudscripting.h` — C/C++ header for hud (engine source).
+- `code/hud/hudshield.cpp` — C++ source for hud (engine source).
+- `code/hud/hudshield.h` — C/C++ header for hud (engine source).
+- `code/hud/hudsquadmsg.cpp` — C++ source for hud (engine source).
+- `code/hud/hudsquadmsg.h` — C/C++ header for hud (engine source).
+- `code/hud/hudtarget.cpp` — C++ source for hud (engine source).
+- `code/hud/hudtarget.h` — C/C++ header for hud (engine source).
+- `code/hud/hudtargetbox.cpp` — C++ source for hud (engine source).
+- `code/hud/hudtargetbox.h` — C/C++ header for hud (engine source).
+- `code/hud/hudwingmanstatus.cpp` — C++ source for hud (engine source).
+- `code/hud/hudwingmanstatus.h` — C/C++ header for hud (engine source).
+- `code/iff_defs/iff_defs.cpp` — C++ source for iff_defs (engine source).
+- `code/iff_defs/iff_defs.h` — C/C++ header for iff_defs (engine source).
+- `code/inetfile/cftp.cpp` — C++ source for inetfile (engine source).
+- `code/inetfile/cftp.h` — C/C++ header for inetfile (engine source).
+- `code/inetfile/chttpget.cpp` — C++ source for inetfile (engine source).
+- `code/inetfile/chttpget.h` — C/C++ header for inetfile (engine source).
+- `code/inetfile/inetgetfile.cpp` — C++ source for inetfile (engine source).
+- `code/inetfile/inetgetfile.h` — C/C++ header for inetfile (engine source).
+- `code/io/cursor.cpp` — C++ source for io (engine source).
+- `code/io/cursor.h` — C/C++ header for io (engine source).
+- `code/io/joy_ff-sdl.cpp` — C++ source for io (engine source).
+- `code/io/joy_ff.h` — C/C++ header for io (engine source).
+- `code/io/joy-sdl.cpp` — C++ source for io (engine source).
+- `code/io/joy.h` — C/C++ header for io (engine source).
+- `code/io/key.cpp` — C++ source for io (engine source).
+- `code/io/key.h` — C/C++ header for io (engine source).
+- `code/io/keycontrol.cpp` — C++ source for io (engine source).
+- `code/io/keycontrol.h` — C/C++ header for io (engine source).
+- `code/io/mouse.cpp` — C++ source for io (engine source).
+- `code/io/mouse.h` — C/C++ header for io (engine source).
+- `code/io/spacemouse.cpp` — C++ source for io (engine source).
+- `code/io/spacemouse.h` — C/C++ header for io (engine source).
+- `code/io/timer.cpp` — C++ source for io (engine source).
+- `code/io/timer.h` — C/C++ header for io (engine source).
+- `code/jpgutils/jpgutils.cpp` — C++ source for jpgutils (engine source).
+- `code/jpgutils/jpgutils.h` — C/C++ header for jpgutils (engine source).
+- `code/jumpnode/jumpnode.cpp` — C++ source for jumpnode (engine source).
+- `code/jumpnode/jumpnode.h` — C/C++ header for jumpnode (engine source).
+- `code/lab/dialogs/lab_ui_helpers.cpp` — C++ source for lab/dialogs (engine source).
+- `code/lab/dialogs/lab_ui_helpers.h` — C/C++ header for lab/dialogs (engine source).
+- `code/lab/dialogs/lab_ui.cpp` — C++ source for lab/dialogs (engine source).
+- `code/lab/dialogs/lab_ui.h` — C/C++ header for lab/dialogs (engine source).
+- `code/lab/labv2_internal.h` — C/C++ header for lab (engine source).
+- `code/lab/labv2.cpp` — C++ source for lab (engine source).
+- `code/lab/labv2.h` — C/C++ header for lab (engine source).
+- `code/lab/manager/lab_manager.cpp` — C++ source for lab/manager (engine source).
+- `code/lab/manager/lab_manager.h` — C/C++ header for lab/manager (engine source).
+- `code/lab/renderer/lab_cameras.cpp` — C++ source for lab/renderer (engine source).
+- `code/lab/renderer/lab_cameras.h` — C/C++ header for lab/renderer (engine source).
+- `code/lab/renderer/lab_renderer.cpp` — C++ source for lab/renderer (engine source).
+- `code/lab/renderer/lab_renderer.h` — C/C++ header for lab/renderer (engine source).
+- `code/libs/antlr/ErrorListener.cpp` — C++ source for libs/antlr (engine source).
+- `code/libs/antlr/ErrorListener.h` — C/C++ header for libs/antlr (engine source).
+- `code/libs/discord/discord.cpp` — C++ source for libs/discord (engine source).
+- `code/libs/discord/discord.h` — C/C++ header for libs/discord (engine source).
+- `code/libs/ffmpeg/FFmpeg.cpp` — C++ source for libs/ffmpeg (engine source).
+- `code/libs/ffmpeg/FFmpeg.h` — C/C++ header for libs/ffmpeg (engine source).
+- `code/libs/ffmpeg/FFmpegContext.cpp` — C++ source for libs/ffmpeg (engine source).
+- `code/libs/ffmpeg/FFmpegContext.h` — C/C++ header for libs/ffmpeg (engine source).
+- `code/libs/ffmpeg/FFmpegHeaders.h` — C/C++ header for libs/ffmpeg (engine source).
+- `code/libs/ffmpeg/LibAVCompatibility.h` — C/C++ header for libs/ffmpeg (engine source).
+- `code/libs/jansson.cpp` — C++ source for libs (engine source).
+- `code/libs/jansson.h` — C/C++ header for libs (engine source).
+- `code/libs/renderdoc/renderdoc_app.h` — C/C++ header for libs/renderdoc (engine source).
+- `code/libs/renderdoc/renderdoc.cpp` — C++ source for libs/renderdoc (engine source).
+- `code/libs/renderdoc/renderdoc.h` — C/C++ header for libs/renderdoc (engine source).
+- `code/lighting/lighting_profiles.cpp` — C++ source for lighting (engine source).
+- `code/lighting/lighting_profiles.h` — C/C++ header for lighting (engine source).
+- `code/lighting/lighting.cpp` — C++ source for lighting (engine source).
+- `code/lighting/lighting.h` — C/C++ header for lighting (engine source).
+- `code/localization/fhash.cpp` — C++ source for localization (engine source).
+- `code/localization/fhash.h` — C/C++ header for localization (engine source).
+- `code/localization/localize.cpp` — C++ source for localization (engine source).
+- `code/localization/localize.h` — C/C++ header for localization (engine source).
+- `code/math/bitarray.h` — C/C++ header for math (engine source).
+- `code/math/curve.cpp` — C++ source for math (engine source).
+- `code/math/curve.h` — C/C++ header for math (engine source).
+- `code/math/fix.cpp` — C++ source for math (engine source).
+- `code/math/fix.h` — C/C++ header for math (engine source).
+- `code/math/floating.cpp` — C++ source for math (engine source).
+- `code/math/floating.h` — C/C++ header for math (engine source).
+- `code/math/fvi.cpp` — C++ source for math (engine source).
+- `code/math/fvi.h` — C/C++ header for math (engine source).
+- `code/math/ik_solver.cpp` — C++ source for math (engine source).
+- `code/math/ik_solver.h` — C/C++ header for math (engine source).
+- `code/math/spline.cpp` — C++ source for math (engine source).
+- `code/math/spline.h` — C/C++ header for math (engine source).
+- `code/math/staticrand.cpp` — C++ source for math (engine source).
+- `code/math/staticrand.h` — C/C++ header for math (engine source).
+- `code/math/vecmat.cpp` — C++ source for math (engine source).
+- `code/math/vecmat.h` — C/C++ header for math (engine source).
+- `code/menuui/barracks.cpp` — C++ source for menuui (engine source).
+- `code/menuui/barracks.h` — C/C++ header for menuui (engine source).
+- `code/menuui/credits.cpp` — C++ source for menuui (engine source).
+- `code/menuui/credits.h` — C/C++ header for menuui (engine source).
+- `code/menuui/fishtank.cpp` — C++ source for menuui (engine source).
+- `code/menuui/fishtank.h` — C/C++ header for menuui (engine source).
+- `code/menuui/mainhallmenu.cpp` — C++ source for menuui (engine source).
+- `code/menuui/mainhallmenu.h` — C/C++ header for menuui (engine source).
+- `code/menuui/optionsmenu.cpp` — C++ source for menuui (engine source).
+- `code/menuui/optionsmenu.h` — C/C++ header for menuui (engine source).
+- `code/menuui/optionsmenumulti.cpp` — C++ source for menuui (engine source).
+- `code/menuui/optionsmenumulti.h` — C/C++ header for menuui (engine source).
+- `code/menuui/playermenu.cpp` — C++ source for menuui (engine source).
+- `code/menuui/playermenu.h` — C/C++ header for menuui (engine source).
+- `code/menuui/readyroom.cpp` — C++ source for menuui (engine source).
+- `code/menuui/readyroom.h` — C/C++ header for menuui (engine source).
+- `code/menuui/snazzyui.cpp` — C++ source for menuui (engine source).
+- `code/menuui/snazzyui.h` — C/C++ header for menuui (engine source).
+- `code/menuui/techmenu.cpp` — C++ source for menuui (engine source).
+- `code/menuui/techmenu.h` — C/C++ header for menuui (engine source).
+- `code/menuui/trainingmenu.cpp` — C++ source for menuui (engine source).
+- `code/menuui/trainingmenu.h` — C/C++ header for menuui (engine source).
+- `code/mission/mission_flags.h` — C/C++ header for mission (engine source).
+- `code/mission/missionbriefcommon.cpp` — C++ source for mission (engine source).
+- `code/mission/missionbriefcommon.h` — C/C++ header for mission (engine source).
+- `code/mission/missioncampaign.cpp` — C++ source for mission (engine source).
+- `code/mission/missioncampaign.h` — C/C++ header for mission (engine source).
+- `code/mission/missiongoals.cpp` — C++ source for mission (engine source).
+- `code/mission/missiongoals.h` — C/C++ header for mission (engine source).
+- `code/mission/missiongrid.cpp` — C++ source for mission (engine source).
+- `code/mission/missiongrid.h` — C/C++ header for mission (engine source).
+- `code/mission/missionhotkey.cpp` — C++ source for mission (engine source).
+- `code/mission/missionhotkey.h` — C/C++ header for mission (engine source).
+- `code/mission/missionload.cpp` — C++ source for mission (engine source).
+- `code/mission/missionload.h` — C/C++ header for mission (engine source).
+- `code/mission/missionlog.cpp` — C++ source for mission (engine source).
+- `code/mission/missionlog.h` — C/C++ header for mission (engine source).
+- `code/mission/missionmessage.cpp` — C++ source for mission (engine source).
+- `code/mission/missionmessage.h` — C/C++ header for mission (engine source).
+- `code/mission/missionparse.cpp` — C++ source for mission (engine source).
+- `code/mission/missionparse.h` — C/C++ header for mission (engine source).
+- `code/mission/missiontraining.cpp` — C++ source for mission (engine source).
+- `code/mission/missiontraining.h` — C/C++ header for mission (engine source).
+- `code/missioneditor/common.cpp` — C++ source for missioneditor (engine source).
+- `code/missioneditor/common.h` — C/C++ header for missioneditor (engine source).
+- `code/missionui/chatbox.cpp` — C++ source for missionui (engine source).
+- `code/missionui/chatbox.h` — C/C++ header for missionui (engine source).
+- `code/missionui/fictionviewer.cpp` — C++ source for missionui (engine source).
+- `code/missionui/fictionviewer.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missionbrief.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missionbrief.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missioncmdbrief.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missioncmdbrief.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missiondebrief.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missiondebrief.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missionloopbrief.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missionloopbrief.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missionpause.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missionpause.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missionscreencommon.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missionscreencommon.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missionshipchoice.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missionshipchoice.h` — C/C++ header for missionui (engine source).
+- `code/missionui/missionweaponchoice.cpp` — C++ source for missionui (engine source).
+- `code/missionui/missionweaponchoice.h` — C/C++ header for missionui (engine source).
+- `code/missionui/redalert.cpp` — C++ source for missionui (engine source).
+- `code/missionui/redalert.h` — C/C++ header for missionui (engine source).
+- `code/mod_table/mod_table.cpp` — C++ source for mod_table (engine source).
+- `code/mod_table/mod_table.h` — C/C++ header for mod_table (engine source).
+- `code/model/animation/modelanimation_driver.cpp` — C++ source for model/animation (engine source).
+- `code/model/animation/modelanimation_driver.h` — C/C++ header for model/animation (engine source).
+- `code/model/animation/modelanimation_moveables.cpp` — C++ source for model/animation (engine source).
+- `code/model/animation/modelanimation_moveables.h` — C/C++ header for model/animation (engine source).
+- `code/model/animation/modelanimation_segments.cpp` — C++ source for model/animation (engine source).
+- `code/model/animation/modelanimation_segments.h` — C/C++ header for model/animation (engine source).
+- `code/model/animation/modelanimation.cpp` — C++ source for model/animation (engine source).
+- `code/model/animation/modelanimation.h` — C/C++ header for model/animation (engine source).
+- `code/model/model_flags.h` — C/C++ header for model (engine source).
+- `code/model/model.h` — C/C++ header for model (engine source).
+- `code/model/modelcollide.cpp` — C++ source for model (engine source).
+- `code/model/modelinterp.cpp` — C++ source for model (engine source).
+- `code/model/modelread.cpp` — C++ source for model (engine source).
+- `code/model/modelrender.cpp` — C++ source for model (engine source).
+- `code/model/modelrender.h` — C/C++ header for model (engine source).
+- `code/model/modelreplace.cpp` — C++ source for model (engine source).
+- `code/model/modelreplace.h` — C/C++ header for model (engine source).
+- `code/model/modelsinc.h` — C/C++ header for model (engine source).
+- `code/nebula/neb.cpp` — C++ source for nebula (engine source).
+- `code/nebula/neb.h` — C/C++ header for nebula (engine source).
+- `code/nebula/neblightning.cpp` — C++ source for nebula (engine source).
+- `code/nebula/neblightning.h` — C/C++ header for nebula (engine source).
+- `code/nebula/volumetrics.cpp` — C++ source for nebula (engine source).
+- `code/nebula/volumetrics.h` — C/C++ header for nebula (engine source).
+- `code/network/chat_api.cpp` — C++ source for network (engine source).
+- `code/network/chat_api.h` — C/C++ header for network (engine source).
+- `code/network/gtrack.cpp` — C++ source for network (engine source).
+- `code/network/gtrack.h` — C/C++ header for network (engine source).
+- `code/network/multi_campaign.cpp` — C++ source for network (engine source).
+- `code/network/multi_campaign.h` — C/C++ header for network (engine source).
+- `code/network/multi_data.cpp` — C++ source for network (engine source).
+- `code/network/multi_data.h` — C/C++ header for network (engine source).
+- `code/network/multi_dogfight.cpp` — C++ source for network (engine source).
+- `code/network/multi_dogfight.h` — C/C++ header for network (engine source).
+- `code/network/multi_endgame.cpp` — C++ source for network (engine source).
+- `code/network/multi_endgame.h` — C/C++ header for network (engine source).
+- `code/network/multi_fstracker.cpp` — C++ source for network (engine source).
+- `code/network/multi_fstracker.h` — C/C++ header for network (engine source).
+- `code/network/multi_ingame.cpp` — C++ source for network (engine source).
+- `code/network/multi_ingame.h` — C/C++ header for network (engine source).
+- `code/network/multi_interpolate.cpp` — C++ source for network (engine source).
+- `code/network/multi_interpolate.h` — C/C++ header for network (engine source).
+- `code/network/multi_kick.cpp` — C++ source for network (engine source).
+- `code/network/multi_kick.h` — C/C++ header for network (engine source).
+- `code/network/multi_log.cpp` — C++ source for network (engine source).
+- `code/network/multi_log.h` — C/C++ header for network (engine source).
+- `code/network/multi_lua.cpp` — C++ source for network (engine source).
+- `code/network/multi_lua.h` — C/C++ header for network (engine source).
+- `code/network/multi_mdns.cpp` — C++ source for network (engine source).
+- `code/network/multi_mdns.h` — C/C++ header for network (engine source).
+- `code/network/multi_obj.cpp` — C++ source for network (engine source).
+- `code/network/multi_obj.h` — C/C++ header for network (engine source).
+- `code/network/multi_observer.cpp` — C++ source for network (engine source).
+- `code/network/multi_observer.h` — C/C++ header for network (engine source).
+- `code/network/multi_options.cpp` — C++ source for network (engine source).
+- `code/network/multi_options.h` — C/C++ header for network (engine source).
+- `code/network/multi_pause.cpp` — C++ source for network (engine source).
+- `code/network/multi_pause.h` — C/C++ header for network (engine source).
+- `code/network/multi_pinfo.cpp` — C++ source for network (engine source).
+- `code/network/multi_pinfo.h` — C/C++ header for network (engine source).
+- `code/network/multi_ping.cpp` — C++ source for network (engine source).
+- `code/network/multi_ping.h` — C/C++ header for network (engine source).
+- `code/network/multi_pmsg.cpp` — C++ source for network (engine source).
+- `code/network/multi_pmsg.h` — C/C++ header for network (engine source).
+- `code/network/multi_portfwd.cpp` — C++ source for network (engine source).
+- `code/network/multi_portfwd.h` — C/C++ header for network (engine source).
+- `code/network/multi_pxo.cpp` — C++ source for network (engine source).
+- `code/network/multi_pxo.h` — C/C++ header for network (engine source).
+- `code/network/multi_rate.cpp` — C++ source for network (engine source).
+- `code/network/multi_rate.h` — C/C++ header for network (engine source).
+- `code/network/multi_respawn.cpp` — C++ source for network (engine source).
+- `code/network/multi_respawn.h` — C/C++ header for network (engine source).
+- `code/network/multi_sexp.cpp` — C++ source for network (engine source).
+- `code/network/multi_sexp.h` — C/C++ header for network (engine source).
+- `code/network/multi_sw.cpp` — C++ source for network (engine source).
+- `code/network/multi_sw.h` — C/C++ header for network (engine source).
+- `code/network/multi_team.cpp` — C++ source for network (engine source).
+- `code/network/multi_team.h` — C/C++ header for network (engine source).
+- `code/network/multi_time_manager.cpp` — C++ source for network (engine source).
+- `code/network/multi_time_manager.h` — C/C++ header for network (engine source).
+- `code/network/multi_turret_manager.cpp` — C++ source for network (engine source).
+- `code/network/multi_turret_manager.h` — C/C++ header for network (engine source).
+- `code/network/multi_update.cpp` — C++ source for network (engine source).
+- `code/network/multi_update.h` — C/C++ header for network (engine source).
+- `code/network/multi_voice.cpp` — C++ source for network (engine source).
+- `code/network/multi_voice.h` — C/C++ header for network (engine source).
+- `code/network/multi_xfer.cpp` — C++ source for network (engine source).
+- `code/network/multi_xfer.h` — C/C++ header for network (engine source).
+- `code/network/multi.cpp` — C++ source for network (engine source).
+- `code/network/multi.h` — C/C++ header for network (engine source).
+- `code/network/multilag.cpp` — C++ source for network (engine source).
+- `code/network/multilag.h` — C/C++ header for network (engine source).
+- `code/network/multimsgs.cpp` — C++ source for network (engine source).
+- `code/network/multimsgs.h` — C/C++ header for network (engine source).
+- `code/network/multiteamselect.cpp` — C++ source for network (engine source).
+- `code/network/multiteamselect.h` — C/C++ header for network (engine source).
+- `code/network/multiui.cpp` — C++ source for network (engine source).
+- `code/network/multiui.h` — C/C++ header for network (engine source).
+- `code/network/multiutil.cpp` — C++ source for network (engine source).
+- `code/network/multiutil.h` — C/C++ header for network (engine source).
+- `code/network/psnet2.cpp` — C++ source for network (engine source).
+- `code/network/psnet2.h` — C/C++ header for network (engine source).
+- `code/network/ptrack.cpp` — C++ source for network (engine source).
+- `code/network/ptrack.h` — C/C++ header for network (engine source).
+- `code/network/stand_gui-unix.cpp` — C++ source for network (engine source).
+- `code/network/stand_gui.cpp` — C++ source for network (engine source).
+- `code/network/stand_gui.h` — C/C++ header for network (engine source).
+- `code/network/valid.cpp` — C++ source for network (engine source).
+- `code/network/valid.h` — C/C++ header for network (engine source).
+- `code/object/collidedebrisship.cpp` — C++ source for object (engine source).
+- `code/object/collidedebrisweapon.cpp` — C++ source for object (engine source).
+- `code/object/collideshipship.cpp` — C++ source for object (engine source).
+- `code/object/collideshipweapon.cpp` — C++ source for object (engine source).
+- `code/object/collideweaponweapon.cpp` — C++ source for object (engine source).
+- `code/object/deadobjectdock.cpp` — C++ source for object (engine source).
+- `code/object/deadobjectdock.h` — C/C++ header for object (engine source).
+- `code/object/objcollide.cpp` — C++ source for object (engine source).
+- `code/object/objcollide.h` — C/C++ header for object (engine source).
+- `code/object/object_flags.h` — C/C++ header for object (engine source).
+- `code/object/object_instance.h` — C/C++ header for object (engine source).
+- `code/object/object.cpp` — C++ source for object (engine source).
+- `code/object/object.h` — C/C++ header for object (engine source).
+- `code/object/objectdock.cpp` — C++ source for object (engine source).
+- `code/object/objectdock.h` — C/C++ header for object (engine source).
+- `code/object/objectshield.cpp` — C++ source for object (engine source).
+- `code/object/objectshield.h` — C/C++ header for object (engine source).
+- `code/object/objectsnd.cpp` — C++ source for object (engine source).
+- `code/object/objectsnd.h` — C/C++ header for object (engine source).
+- `code/object/objectsort.cpp` — C++ source for object (engine source).
+- `code/object/parseobjectdock.cpp` — C++ source for object (engine source).
+- `code/object/parseobjectdock.h` — C/C++ header for object (engine source).
+- `code/object/waypoint.cpp` — C++ source for object (engine source).
+- `code/object/waypoint.h` — C/C++ header for object (engine source).
+- `code/observer/observer.cpp` — C++ source for observer (engine source).
+- `code/observer/observer.h` — C/C++ header for observer (engine source).
+- `code/options/default_settings_table.cpp` — C++ source for options (engine source).
+- `code/options/default_settings_table.h` — C/C++ header for options (engine source).
+- `code/options/dialogs/ingame_options_ui.cpp` — C++ source for options/dialogs (engine source).
+- `code/options/dialogs/ingame_options_ui.h` — C/C++ header for options/dialogs (engine source).
+- `code/options/Ingame_Options_internal.h` — C/C++ header for options (engine source).
+- `code/options/Ingame_Options.cpp` — C++ source for options (engine source).
+- `code/options/Ingame_Options.h` — C/C++ header for options (engine source).
+- `code/options/manager/ingame_options_manager.cpp` — C++ source for options/manager (engine source).
+- `code/options/manager/ingame_options_manager.h` — C/C++ header for options/manager (engine source).
+- `code/options/Option.cpp` — C++ source for options (engine source).
+- `code/options/Option.h` — C/C++ header for options (engine source).
+- `code/options/OptionsManager.cpp` — C++ source for options (engine source).
+- `code/options/OptionsManager.h` — C/C++ header for options (engine source).
+- `code/osapi/DebugWindow.cpp` — C++ source for osapi (engine source).
+- `code/osapi/DebugWindow.h` — C/C++ header for osapi (engine source).
+- `code/osapi/dialogs.cpp` — C++ source for osapi (engine source).
+- `code/osapi/dialogs.h` — C/C++ header for osapi (engine source).
+- `code/osapi/osapi.cpp` — C++ source for osapi (engine source).
+- `code/osapi/osapi.h` — @ingroup osapi
+- `code/osapi/osregistry.cpp` — C++ source for osapi (engine source).
+- `code/osapi/osregistry.h` — C/C++ header for osapi (engine source).
+- `code/osapi/outwnd.cpp` — C++ source for osapi (engine source).
+- `code/osapi/outwnd.h` — C/C++ header for osapi (engine source).
+- `code/parse/encrypt.cpp` — C++ source for parse (engine source).
+- `code/parse/encrypt.h` — C/C++ header for parse (engine source).
+- `code/parse/generic_log.cpp` — C++ source for parse (engine source).
+- `code/parse/generic_log.h` — C/C++ header for parse (engine source).
+- `code/parse/md5_hash.cpp` — C++ source for parse (engine source).
+- `code/parse/md5_hash.h` — C/C++ header for parse (engine source).
+- `code/parse/parsehi.cpp` — C++ source for parse (engine source).
+- `code/parse/parsehi.h` — C/C++ header for parse (engine source).
+- `code/parse/parselo.cpp` — C++ source for parse (engine source).
+- `code/parse/parselo.h` — C/C++ header for parse (engine source).
+- `code/parse/sexp_container.cpp` — C++ source for parse (engine source).
+- `code/parse/sexp_container.h` — C/C++ header for parse (engine source).
+- `code/parse/sexp.cpp` — C++ source for parse (engine source).
+- `code/parse/sexp.h` — C/C++ header for parse (engine source).
+- `code/parse/sexp/DynamicSEXP.cpp` — C++ source for parse/sexp (engine source).
+- `code/parse/sexp/DynamicSEXP.h` — C/C++ header for parse/sexp (engine source).
+- `code/parse/sexp/EngineSEXP.cpp` — C++ source for parse/sexp (engine source).
+- `code/parse/sexp/EngineSEXP.h` — C/C++ header for parse/sexp (engine source).
+- `code/parse/sexp/LuaAISEXP.cpp` — C++ source for parse/sexp (engine source).
+- `code/parse/sexp/LuaAISEXP.h` — C/C++ header for parse/sexp (engine source).
+- `code/parse/sexp/LuaSEXP.cpp` — C++ source for parse/sexp (engine source).
+- `code/parse/sexp/LuaSEXP.h` — C/C++ header for parse/sexp (engine source).
+- `code/parse/sexp/sexp_lookup.cpp` — C++ source for parse/sexp (engine source).
+- `code/parse/sexp/sexp_lookup.h` — C/C++ header for parse/sexp (engine source).
+- `code/parse/sexp/SEXPParameterExtractor.cpp` — C++ source for parse/sexp (engine source).
+- `code/parse/sexp/SEXPParameterExtractor.h` — C/C++ header for parse/sexp (engine source).
+- `code/particle/EffectHost.h` — C/C++ header for particle (engine source).
+- `code/particle/hosts/EffectHostBeam.cpp` — C++ source for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostBeam.h` — C/C++ header for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostObject.cpp` — C++ source for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostObject.h` — C/C++ header for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostParticle.cpp` — C++ source for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostParticle.h` — C/C++ header for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostSubmodel.cpp` — C++ source for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostSubmodel.h` — C/C++ header for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostTurret.cpp` — C++ source for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostTurret.h` — C/C++ header for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostVector.cpp` — C++ source for particle/hosts (engine source).
+- `code/particle/hosts/EffectHostVector.h` — C/C++ header for particle/hosts (engine source).
+- `code/particle/particle.cpp` — C++ source for particle (engine source).
+- `code/particle/particle.h` — C/C++ header for particle (engine source).
+- `code/particle/ParticleEffect.cpp` — C++ source for particle (engine source).
+- `code/particle/ParticleEffect.h` — C/C++ header for particle (engine source).
+- `code/particle/ParticleManager.cpp` — C++ source for particle (engine source).
+- `code/particle/ParticleManager.h` — C/C++ header for particle (engine source).
+- `code/particle/ParticleParse.cpp` — C++ source for particle (engine source).
+- `code/particle/ParticleSource.cpp` — C++ source for particle (engine source).
+- `code/particle/ParticleSource.h` — C/C++ header for particle (engine source).
+- `code/particle/ParticleVolume.h` — C/C++ header for particle (engine source).
+- `code/particle/volumes/ConeVolume.cpp` — C++ source for particle/volumes (engine source).
+- `code/particle/volumes/ConeVolume.h` — C/C++ header for particle/volumes (engine source).
+- `code/particle/volumes/LegacyAACuboidVolume.cpp` — C++ source for particle/volumes (engine source).
+- `code/particle/volumes/LegacyAACuboidVolume.h` — C/C++ header for particle/volumes (engine source).
+- `code/particle/volumes/PointVolume.cpp` — C++ source for particle/volumes (engine source).
+- `code/particle/volumes/PointVolume.h` — C/C++ header for particle/volumes (engine source).
+- `code/particle/volumes/RingVolume.cpp` — C++ source for particle/volumes (engine source).
+- `code/particle/volumes/RingVolume.h` — C/C++ header for particle/volumes (engine source).
+- `code/particle/volumes/SpheroidVolume.cpp` — C++ source for particle/volumes (engine source).
+- `code/particle/volumes/SpheroidVolume.h` — C/C++ header for particle/volumes (engine source).
+- `code/pcxutils/pcxutils.cpp` — C++ source for pcxutils (engine source).
+- `code/pcxutils/pcxutils.h` — C/C++ header for pcxutils (engine source).
+- `code/physics/physics_state.cpp` — C++ source for physics (engine source).
+- `code/physics/physics_state.h` — C/C++ header for physics (engine source).
+- `code/physics/physics.cpp` — C++ source for physics (engine source).
+- `code/physics/physics.h` — C/C++ header for physics (engine source).
+- `code/pilotfile/BinaryFileHandler.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/BinaryFileHandler.h` — C/C++ header for pilotfile (engine source).
+- `code/pilotfile/csg_convert.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/csg.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/FileHandler.h` — C/C++ header for pilotfile (engine source).
+- `code/pilotfile/JSONFileHandler.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/JSONFileHandler.h` — C/C++ header for pilotfile (engine source).
+- `code/pilotfile/pilotfile_convert.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/pilotfile_convert.h` — C/C++ header for pilotfile (engine source).
+- `code/pilotfile/pilotfile.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/pilotfile.h` — C/C++ header for pilotfile (engine source).
+- `code/pilotfile/plr_convert.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/plr_hudprefs.cpp` — C++ source for pilotfile (engine source).
+- `code/pilotfile/plr_hudprefs.h` — C/C++ header for pilotfile (engine source).
+- `code/pilotfile/plr.cpp` — C++ source for pilotfile (engine source).
+- `code/playerman/managepilot.cpp` — C++ source for playerman (engine source).
+- `code/playerman/managepilot.h` — C/C++ header for playerman (engine source).
+- `code/playerman/player.h` — C/C++ header for playerman (engine source).
+- `code/playerman/playercontrol.cpp` — C++ source for playerman (engine source).
+- `code/pngutils/pngutils.cpp` — C++ source for pngutils (engine source).
+- `code/pngutils/pngutils.h` — C/C++ header for pngutils (engine source).
+- `code/popup/popup.cpp` — C++ source for popup (engine source).
+- `code/popup/popup.h` — C/C++ header for popup (engine source).
+- `code/popup/popupdead.cpp` — C++ source for popup (engine source).
+- `code/popup/popupdead.h` — C/C++ header for popup (engine source).
+- `code/prefix_header.h` — C/C++ header under code (Engine/game source code.)
+- `code/radar/radar.cpp` — C++ source for radar (engine source).
+- `code/radar/radar.h` — C/C++ header for radar (engine source).
+- `code/radar/radardradis.cpp` — C++ source for radar (engine source).
+- `code/radar/radardradis.h` — C/C++ header for radar (engine source).
+- `code/radar/radarngon.cpp` — C++ source for radar (engine source).
+- `code/radar/radarngon.h` — C/C++ header for radar (engine source).
+- `code/radar/radarorb.cpp` — C++ source for radar (engine source).
+- `code/radar/radarorb.h` — C/C++ header for radar (engine source).
+- `code/radar/radarsetup.cpp` — C++ source for radar (engine source).
+- `code/radar/radarsetup.h` — C/C++ header for radar (engine source).
+- `code/render/3d.h` — C/C++ header for render (engine source).
+- `code/render/3dclipper.cpp` — C++ source for render (engine source).
+- `code/render/3ddraw.cpp` — C++ source for render (engine source).
+- `code/render/3dinternal.h` — C/C++ header for render (engine source).
+- `code/render/3dlaser.cpp` — C++ source for render (engine source).
+- `code/render/3dmath.cpp` — C++ source for render (engine source).
+- `code/render/3dsetup.cpp` — C++ source for render (engine source).
+- `code/render/batching.cpp` — C++ source for render (engine source).
+- `code/render/batching.h` — C/C++ header for render (engine source).
+- `code/scpui/elements/AnimationElement.cpp` — C++ source for scpui/elements (engine source).
+- `code/scpui/elements/AnimationElement.h` — C/C++ header for scpui/elements (engine source).
+- `code/scpui/elements/ScrollingTextElement.cpp` — C++ source for scpui/elements (engine source).
+- `code/scpui/elements/ScrollingTextElement.h` — C/C++ header for scpui/elements (engine source).
+- `code/scpui/IncludeNodeHandler.cpp` — C++ source for scpui (engine source).
+- `code/scpui/IncludeNodeHandler.h` — C/C++ header for scpui (engine source).
+- `code/scpui/rocket_ui.cpp` — C++ source for scpui (engine source).
+- `code/scpui/rocket_ui.h` — C/C++ header for scpui (engine source).
+- `code/scpui/RocketDecorators.cpp` — C++ source for scpui (engine source).
+- `code/scpui/RocketDecorators.h` — C/C++ header for scpui (engine source).
+- `code/scpui/RocketDecoratorsInstancer.cpp` — C++ source for scpui (engine source).
+- `code/scpui/RocketDecoratorsInstancer.h` — C/C++ header for scpui (engine source).
+- `code/scpui/RocketFileInterface.cpp` — C++ source for scpui (engine source).
+- `code/scpui/RocketFileInterface.h` — C/C++ header for scpui (engine source).
+- `code/scpui/RocketLuaSystemInterface.cpp` — C++ source for scpui (engine source).
+- `code/scpui/RocketLuaSystemInterface.h` — C/C++ header for scpui (engine source).
+- `code/scpui/RocketRenderingInterface.cpp` — C++ source for scpui (engine source).
+- `code/scpui/RocketRenderingInterface.h` — C/C++ header for scpui (engine source).
+- `code/scpui/RocketSystemInterface.cpp` — C++ source for scpui (engine source).
+- `code/scpui/RocketSystemInterface.h` — C/C++ header for scpui (engine source).
+- `code/scpui/SoundPlugin.cpp` — C++ source for scpui (engine source).
+- `code/scpui/SoundPlugin.h` — C/C++ header for scpui (engine source).
+- `code/scripting/ade_api.h` — C/C++ header for scripting (engine source).
+- `code/scripting/ade_args.cpp` — C++ source for scripting (engine source).
+- `code/scripting/ade_args.h` — C/C++ header for scripting (engine source).
+- `code/scripting/ade_doc.cpp` — C++ source for scripting (engine source).
+- `code/scripting/ade_doc.h` — C/C++ header for scripting (engine source).
+- `code/scripting/ade_external_serializer.h` — C/C++ header for scripting (engine source).
+- `code/scripting/ade.cpp` — C++ source for scripting (engine source).
+- `code/scripting/ade.h` — C/C++ header for scripting (engine source).
+- `code/scripting/api/libs/async.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/async.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/audio.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/audio.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/base.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/base.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/bitops.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/bitops.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/cfile.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/cfile.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/controls.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/controls.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/engine.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/engine.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/globals.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/globals.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/graphics.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/graphics.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/hookvars.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/hookvars.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/hud.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/hud.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/mission.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/mission.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/multi.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/multi.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/options.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/options.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/parse.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/parse.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/tables.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/tables.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/testing.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/testing.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/time_lib.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/time_lib.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/ui.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/ui.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/libs/utf8.cpp` — C++ source for scripting/api/libs (engine source).
+- `code/scripting/api/libs/utf8.h` — C/C++ header for scripting/api/libs (engine source).
+- `code/scripting/api/LuaCoroutineRunner.cpp` — C++ source for scripting/api (engine source).
+- `code/scripting/api/LuaCoroutineRunner.h` — C/C++ header for scripting/api (engine source).
+- `code/scripting/api/LuaEventCallback.cpp` — C++ source for scripting/api (engine source).
+- `code/scripting/api/LuaEventCallback.h` — C/C++ header for scripting/api (engine source).
+- `code/scripting/api/LuaExecutionContext.cpp` — C++ source for scripting/api (engine source).
+- `code/scripting/api/LuaExecutionContext.h` — C/C++ header for scripting/api (engine source).
+- `code/scripting/api/LuaPromise.cpp` — C++ source for scripting/api (engine source).
+- `code/scripting/api/LuaPromise.h` — C/C++ header for scripting/api (engine source).
+- `code/scripting/api/objs/ai_helper.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ai_helper.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/animation_handle.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/animation_handle.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/asteroid.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/asteroid.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/audio_stream.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/audio_stream.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/background_element.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/background_element.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/beam.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/beam.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/briefing.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/briefing.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/bytearray.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/bytearray.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/camera.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/camera.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/cmd_brief.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/cmd_brief.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/cockpit_display.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/cockpit_display.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/color.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/color.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/comm_order.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/comm_order.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/control_binding.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/control_binding.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/control_config.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/control_config.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/control_info.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/control_info.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/debriefing.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/debriefing.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/debris.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/debris.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/decaldefinition.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/decaldefinition.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/enums.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/enums.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/event.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/event.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/execution_context.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/execution_context.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/executor.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/executor.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/eye.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/eye.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/fictionviewer.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/fictionviewer.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/file.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/file.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/fireball.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/fireball.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/fireballclass.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/fireballclass.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/font.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/font.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/gameevent.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/gameevent.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/gamehelp.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/gamehelp.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/gamestate.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/gamestate.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/goal.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/goal.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/hudconfig.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/hudconfig.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/hudgauge.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/hudgauge.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/intelentry.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/intelentry.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/loop_brief.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/loop_brief.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/luaaisexp.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/luaaisexp.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/LuaEnum.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/LuaEnum.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/LuaSEXP.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/LuaSEXP.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/mc_info.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/mc_info.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/medals.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/medals.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/message.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/message.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/missionhotkey.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/missionhotkey.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/missionlog.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/missionlog.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/model_path.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/model_path.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/model.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/model.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/modelinstance.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/modelinstance.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/movie_player.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/movie_player.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/multi_objects.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/multi_objects.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/object.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/object.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/option.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/option.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/order.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/order.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/oswpt.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/oswpt.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/parse_object.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/parse_object.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/particle.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/particle.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/physics_info.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/physics_info.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/player.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/player.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/promise.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/promise.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/rank.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/rank.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/redalert.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/redalert.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/rpc.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/rpc.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/sexpvar.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/sexpvar.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shields.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shields.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ship_bank.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ship_bank.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ship_registry_entry.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ship_registry_entry.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ship.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/ship.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shipclass.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shipclass.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shiptype.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shiptype.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shipwepselect.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/shipwepselect.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/sound.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/sound.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/species.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/species.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/streaminganim.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/streaminganim.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/subsystem.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/subsystem.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/team_colors.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/team_colors.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/team.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/team.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/techroom.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/techroom.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/texture.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/texture.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/texturemap.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/texturemap.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/time_obj.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/time_obj.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/tracing_category.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/tracing_category.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/vecmath.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/vecmath.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/waypoint.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/waypoint.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/weapon.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/weapon.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/weaponclass.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/weaponclass.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/wing.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/wing.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/api/objs/wingformation.cpp` — C++ source for scripting/api/objs (engine source).
+- `code/scripting/api/objs/wingformation.h` — C/C++ header for scripting/api/objs (engine source).
+- `code/scripting/doc_html.cpp` — C++ source for scripting (engine source).
+- `code/scripting/doc_html.h` — C/C++ header for scripting (engine source).
+- `code/scripting/doc_json.cpp` — C++ source for scripting (engine source).
+- `code/scripting/doc_json.h` — C/C++ header for scripting (engine source).
+- `code/scripting/doc_luastub.cpp` — C++ source for scripting (engine source).
+- `code/scripting/doc_luastub.h` — C/C++ header for scripting (engine source).
+- `code/scripting/doc_parser.cpp` — C++ source for scripting (engine source).
+- `code/scripting/doc_parser.h` — C/C++ header for scripting (engine source).
+- `code/scripting/global_hooks.cpp` — C++ source for scripting (engine source).
+- `code/scripting/global_hooks.h` — C/C++ header for scripting (engine source).
+- `code/scripting/hook_api.cpp` — C++ source for scripting (engine source).
+- `code/scripting/hook_api.h` — C/C++ header for scripting (engine source).
+- `code/scripting/hook_conditions.cpp` — C++ source for scripting (engine source).
+- `code/scripting/hook_conditions.h` — C/C++ header for scripting (engine source).
+- `code/scripting/lua.cpp` — C++ source for scripting (engine source).
+- `code/scripting/lua/bitop/bit.c` — C source for scripting/lua/bitop (engine source).
+- `code/scripting/lua/bitop/README` — File for scripting/lua/bitop (engine source).
+- `code/scripting/lua/lua_ext.c` — C source for scripting/lua (engine source).
+- `code/scripting/lua/lua_ext.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaArgs.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaArgs.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaConvert.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaConvert.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaException.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaFunction.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaFunction.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaHeaders.h` — LuaHeaders.hpp
+- `code/scripting/lua/LuaReference.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaReference.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaTable.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaTable.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaThread.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaThread.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaTypes.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaUtil.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaUtil.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/lua/LuaValue.cpp` — C++ source for scripting/lua (engine source).
+- `code/scripting/lua/LuaValue.h` — C/C++ header for scripting/lua (engine source).
+- `code/scripting/scripting_doc.h` — C/C++ header for scripting (engine source).
+- `code/scripting/scripting.cpp` — C++ source for scripting (engine source).
+- `code/scripting/scripting.h` — C/C++ header for scripting (engine source).
+- `code/scripting/util/LuaValueDeserializer.cpp` — C++ source for scripting/util (engine source).
+- `code/scripting/util/LuaValueDeserializer.h` — C/C++ header for scripting/util (engine source).
+- `code/scripting/util/LuaValueSerializer.cpp` — C++ source for scripting/util (engine source).
+- `code/scripting/util/LuaValueSerializer.h` — C/C++ header for scripting/util (engine source).
+- `code/shaders.cmake` — CMake script under code (Engine/game source code.)
+- `code/ship/afterburner.cpp` — C++ source for ship (engine source).
+- `code/ship/afterburner.h` — C/C++ header for ship (engine source).
+- `code/ship/awacs.cpp` — C++ source for ship (engine source).
+- `code/ship/awacs.h` — C/C++ header for ship (engine source).
+- `code/ship/shield.cpp` — C++ source for ship (engine source).
+- `code/ship/ship_flags.h` — C/C++ header for ship (engine source).
+- `code/ship/ship.cpp` — C++ source for ship (engine source).
+- `code/ship/ship.h` — C/C++ header for ship (engine source).
+- `code/ship/shipcontrails.cpp` — C++ source for ship (engine source).
+- `code/ship/shipcontrails.h` — C/C++ header for ship (engine source).
+- `code/ship/shipfx.cpp` — C++ source for ship (engine source).
+- `code/ship/shipfx.h` — C/C++ header for ship (engine source).
+- `code/ship/shiphit.cpp` — C++ source for ship (engine source).
+- `code/ship/shiphit.h` — C/C++ header for ship (engine source).
+- `code/ship/subsysdamage.h` — C/C++ header for ship (engine source).
+- `code/sound/audiostr.cpp` — C++ source for sound (engine source).
+- `code/sound/audiostr.h` — C/C++ header for sound (engine source).
+- `code/sound/channel.h` — C/C++ header for sound (engine source).
+- `code/sound/ds.cpp` — C++ source for sound (engine source).
+- `code/sound/ds.h` — C/C++ header for sound (engine source).
+- `code/sound/ds3d.cpp` — C++ source for sound (engine source).
+- `code/sound/ds3d.h` — C/C++ header for sound (engine source).
+- `code/sound/dscap.cpp` — C++ source for sound (engine source).
+- `code/sound/dscap.h` — C/C++ header for sound (engine source).
+- `code/sound/ffmpeg/FFmpegAudioReader.cpp` — C++ source for sound/ffmpeg (engine source).
+- `code/sound/ffmpeg/FFmpegAudioReader.h` — C/C++ header for sound/ffmpeg (engine source).
+- `code/sound/ffmpeg/FFmpegWaveFile.cpp` — C++ source for sound/ffmpeg (engine source).
+- `code/sound/ffmpeg/FFmpegWaveFile.h` — C/C++ header for sound/ffmpeg (engine source).
+- `code/sound/fsspeech.cpp` — C++ source for sound (engine source).
+- `code/sound/fsspeech.h` — C/C++ header for sound (engine source).
+- `code/sound/gc.exe` — exe file for sound (engine source).
+- `code/sound/IAudioFile.h` — C/C++ header for sound (engine source).
+- `code/sound/openal.cpp` — C++ source for sound (engine source).
+- `code/sound/openal.h` — C/C++ header for sound (engine source).
+- `code/sound/phrases.xml` — xml file for sound (engine source).
+- `code/sound/rtvoice.cpp` — C++ source for sound (engine source).
+- `code/sound/rtvoice.h` — C/C++ header for sound (engine source).
+- `code/sound/sound.cpp` — C++ source for sound (engine source).
+- `code/sound/sound.h` — C/C++ header for sound (engine source).
+- `code/sound/speech.cpp` — C++ source for sound (engine source).
+- `code/sound/speech.h` — C/C++ header for sound (engine source).
+- `code/sound/speech.mm` — mm file for sound (engine source).
+- `code/sound/voicerec.cpp` — C++ source for sound (engine source).
+- `code/sound/voicerec.h` — C/C++ header for sound (engine source).
+- `code/source_groups.cmake` — CMake script under code (Engine/game source code.)
+- `code/species_defs/species_defs.cpp` — C++ source for species_defs (engine source).
+- `code/species_defs/species_defs.h` — C/C++ header for species_defs (engine source).
+- `code/starfield/nebula.cpp` — C++ source for starfield (engine source).
+- `code/starfield/nebula.h` — C/C++ header for starfield (engine source).
+- `code/starfield/starfield_flags.h` — C/C++ header for starfield (engine source).
+- `code/starfield/starfield.cpp` — C++ source for starfield (engine source).
+- `code/starfield/starfield.h` — C/C++ header for starfield (engine source).
+- `code/starfield/supernova.cpp` — C++ source for starfield (engine source).
+- `code/starfield/supernova.h` — C/C++ header for starfield (engine source).
+- `code/stats/medals.cpp` — C++ source for stats (engine source).
+- `code/stats/medals.h` — C/C++ header for stats (engine source).
+- `code/stats/scoring.cpp` — C++ source for stats (engine source).
+- `code/stats/scoring.h` — C/C++ header for stats (engine source).
+- `code/stats/stats.cpp` — C++ source for stats (engine source).
+- `code/stats/stats.h` — C/C++ header for stats (engine source).
+- `code/tgautils/tgautils.cpp` — C++ source for tgautils (engine source).
+- `code/tgautils/tgautils.h` — C/C++ header for tgautils (engine source).
+- `code/tracing/categories.cpp` — C++ source for tracing (engine source).
+- `code/tracing/categories.h` — @ingroup tracing
+- `code/tracing/FrameProfiler.cpp` — C++ source for tracing (engine source).
+- `code/tracing/FrameProfiler.h` — @ingroup tracing
+- `code/tracing/MainFrameTimer.cpp` — C++ source for tracing (engine source).
+- `code/tracing/MainFrameTimer.h` — @ingroup tracing
+- `code/tracing/Monitor.cpp` — C++ source for tracing (engine source).
+- `code/tracing/Monitor.h` — C/C++ header for tracing (engine source).
+- `code/tracing/scopes.cpp` — C++ source for tracing (engine source).
+- `code/tracing/scopes.h` — @ingroup tracing
+- `code/tracing/ThreadedEventProcessor.h` — @ingroup tracing
+- `code/tracing/TraceEventWriter.cpp` — C++ source for tracing (engine source).
+- `code/tracing/TraceEventWriter.h` — @ingroup tracing
+- `code/tracing/tracing.cpp` — C++ source for tracing (engine source).
+- `code/tracing/tracing.h` — @ingroup tracing
+- `code/ui/button.cpp` — C++ source for ui (engine source).
+- `code/ui/checkbox.cpp` — C++ source for ui (engine source).
+- `code/ui/gadget.cpp` — C++ source for ui (engine source).
+- `code/ui/icon.cpp` — C++ source for ui (engine source).
+- `code/ui/inputbox.cpp` — C++ source for ui (engine source).
+- `code/ui/keytrap.cpp` — C++ source for ui (engine source).
+- `code/ui/listbox.cpp` — C++ source for ui (engine source).
+- `code/ui/radio.cpp` — C++ source for ui (engine source).
+- `code/ui/scroll.cpp` — C++ source for ui (engine source).
+- `code/ui/slider.cpp` — C++ source for ui (engine source).
+- `code/ui/slider2.cpp` — C++ source for ui (engine source).
+- `code/ui/ui.h` — C/C++ header for ui (engine source).
+- `code/ui/uidefs.h` — C/C++ header for ui (engine source).
+- `code/ui/uidraw.cpp` — C++ source for ui (engine source).
+- `code/ui/uimouse.cpp` — C++ source for ui (engine source).
+- `code/ui/window.cpp` — C++ source for ui (engine source).
+- `code/utils/base64.cpp` — C++ source for utils (engine source).
+- `code/utils/base64.h` — C/C++ header for utils (engine source).
+- `code/utils/boost/hash_combine.h` — C/C++ header for utils/boost (engine source).
+- `code/utils/boost/syncboundedqueue.h` — C/C++ header for utils/boost (engine source).
+- `code/utils/encoding.cpp` — C++ source for utils (engine source).
+- `code/utils/encoding.h` — C/C++ header for utils (engine source).
+- `code/utils/event.h` — C/C++ header for utils (engine source).
+- `code/utils/finally.h` — C/C++ header for utils (engine source).
+- `code/utils/HeapAllocator.cpp` — C++ source for utils (engine source).
+- `code/utils/HeapAllocator.h` — C/C++ header for utils (engine source).
+- `code/utils/id.h` — C/C++ header for utils (engine source).
+- `code/utils/join_string.h` — C/C++ header for utils (engine source).
+- `code/utils/modular_curves.h` — C/C++ header for utils (engine source).
+- `code/utils/Random.cpp` — C++ source for utils (engine source).
+- `code/utils/Random.h` — C/C++ header for utils (engine source).
+- `code/utils/RandomRange.h` — C/C++ header for utils (engine source).
+- `code/utils/string_utils.cpp` — C++ source for utils (engine source).
+- `code/utils/string_utils.h` — C/C++ header for utils (engine source).
+- `code/utils/strings.h` — C/C++ header for utils (engine source).
+- `code/utils/threading.cpp` — C++ source for utils (engine source).
+- `code/utils/threading.h` — C/C++ header for utils (engine source).
+- `code/utils/tuples.h` — C/C++ header for utils (engine source).
+- `code/utils/unicode.cpp` — C++ source for utils (engine source).
+- `code/utils/unicode.h` — C/C++ header for utils (engine source).
+- `code/voice_rec.cmake` — CMake script under code (Engine/game source code.)
+- `code/weapon/beam.cpp` — C++ source for weapon (engine source).
+- `code/weapon/beam.h` — C/C++ header for weapon (engine source).
+- `code/weapon/corkscrew.cpp` — C++ source for weapon (engine source).
+- `code/weapon/corkscrew.h` — C/C++ header for weapon (engine source).
+- `code/weapon/emp.cpp` — C++ source for weapon (engine source).
+- `code/weapon/emp.h` — C/C++ header for weapon (engine source).
+- `code/weapon/flak.cpp` — C++ source for weapon (engine source).
+- `code/weapon/flak.h` — C/C++ header for weapon (engine source).
+- `code/weapon/muzzleflash.cpp` — C++ source for weapon (engine source).
+- `code/weapon/muzzleflash.h` — C/C++ header for weapon (engine source).
+- `code/weapon/shockwave.cpp` — C++ source for weapon (engine source).
+- `code/weapon/shockwave.h` — C/C++ header for weapon (engine source).
+- `code/weapon/swarm.cpp` — C++ source for weapon (engine source).
+- `code/weapon/swarm.h` — C/C++ header for weapon (engine source).
+- `code/weapon/trails.cpp` — C++ source for weapon (engine source).
+- `code/weapon/trails.h` — C/C++ header for weapon (engine source).
+- `code/weapon/weapon_flags.h` — C/C++ header for weapon (engine source).
+- `code/weapon/weapon.h` — C/C++ header for weapon (engine source).
+- `code/weapon/weapons.cpp` — C++ source for weapon (engine source).
+- `code/windows_stub/config.h` — C/C++ header for windows_stub (engine source).
+- `code/windows_stub/stubs.cpp` — C++ source for windows_stub (engine source).
+
+## coverity
+
+- `coverity/modeling.cpp` — C++ source under coverity (Coverity scan configuration.)
+
+## docs
+
+- `docs/vulkan-bug-report-2025-12-12.md` — Documentation: Vulkan Renderer Bug Report
+
+## documentation
+
+- `documentation/doxygen/.gitkeep` — gitkeep file under documentation (Additional/legacy documentation assets.)
+
+## fred2
+
+- `fred2/addmodifycontainerdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/addmodifycontainerdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/addvariabledlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/addvariabledlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/adjustgriddlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/adjustgriddlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/AltShipClassDlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/AltShipClassDlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/asteroideditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/asteroideditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/bgbitmapdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/bgbitmapdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/briefingeditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/briefingeditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/calcrelativecoordsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/calcrelativecoordsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/campaigneditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/campaigneditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/campaignfilelistbox.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/campaignfilelistbox.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/campaigntreeview.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/campaigntreeview.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/campaigntreewnd.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/campaigntreewnd.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/checkboxlistdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/checkboxlistdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/CMakeLists.txt` — Text file under fred2 (FRED2 mission editor sources.)
+- `fred2/cmdbrief.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/cmdbrief.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/createwingdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/createwingdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/customdatadlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/customdatadlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/customstringsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/customstringsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/customwingnames.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/customwingnames.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/debriefingeditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/debriefingeditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/dumpstats.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/dumpstats.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/editcontainernamedlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/editcontainernamedlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/editor.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/eventeditor.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/eventeditor.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/FictionViewerDlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/FictionViewerDlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/fred.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/fred.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/fred.rc` — rc file under fred2 (FRED2 mission editor sources.)
+- `fred2/freddoc.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/freddoc.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/fredrender.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/fredrender.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/fredstubs.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/fredview.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/fredview.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/grid.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/grid.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/afxcore.rtf` — rtf file under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/afxhelp.hm` — hm file under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/afxprint.rtf` — rtf file under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/appexit.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/bullet.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/curarw2.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/curarw4.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/curhelp.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/editcopy.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/editcut.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/editpast.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/editundo.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/filenew.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/fileopen.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/fileprnt.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/filesave.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/fred.hm` — hm file under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/fred.hpj` — hpj file under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/help.log` — log file under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/hlpsbar.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/hlptbar.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/recfirst.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/reclast.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/recnext.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/recprev.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/scmax.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/scmenu.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/hlp/scmin.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/ignoreordersdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/ignoreordersdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/initialships.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/initialships.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/initialstatus.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/initialstatus.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/jumpnodedlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/jumpnodedlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/listitemchooser.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/listitemchooser.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/mainfrm.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/mainfrm.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/makehelp.bat` — bat file under fred2 (FRED2 mission editor sources.)
+- `fred2/management.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/management.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/messageeditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/messageeditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/MFCGraphicsOperations.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/MFCGraphicsOperations.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/missioncutscenesdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/missioncutscenesdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/missiongoalsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/missiongoalsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/missionnotesdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/missionnotesdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/missionsave.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/missionsave.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/modifyvariabledlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/modifyvariabledlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/musicplayerdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/musicplayerdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/operatorargtypeselect.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/operatorargtypeselect.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/OperatorComboBox.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/OperatorComboBox.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/orienteditor.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/orienteditor.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/playerstarteditor.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/playerstarteditor.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/prefsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/prefsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/reinforcementeditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/reinforcementeditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/res/bitmap1.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/black_do.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/chained_directive.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/chained.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/comment.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/container_data.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/container_name.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/cursor1.cur` — cur file under fred2 (FRED2 mission editor sources.)
+- `fred2/res/cursor2.cur` — cur file under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data00.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data05.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data10.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data15.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data20.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data25.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data30.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data35.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data40.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data45.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data50.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data55.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data60.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data65.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data70.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data75.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data80.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data85.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data90.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/data95.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/fred.ico` — ico file under fred2 (FRED2 mission editor sources.)
+- `fred2/res/fred.rc2` — rc2 file under fred2 (FRED2 mission editor sources.)
+- `fred2/res/freddoc.ico` — ico file under fred2 (FRED2 mission editor sources.)
+- `fred2/res/green_do.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/next.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/play.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/prev.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/root_directive.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/root.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/stop.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/toolbar.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/toolbar1.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/res/V_fred.ico` — ico file under fred2 (FRED2 mission editor sources.)
+- `fred2/res/variable.bmp` — Image asset under fred2 (FRED2 mission editor sources.)
+- `fred2/resource.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/resource.hm` — hm file under fred2 (FRED2 mission editor sources.)
+- `fred2/restrictpaths.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/restrictpaths.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/setglobalshipflags.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/setglobalshipflags.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/sexp_tree.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/sexp_tree.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shieldsysdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shieldsysdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/ship_select.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/ship_select.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipchecklistbox.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipchecklistbox.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipclasseditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipclasseditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipeditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipeditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipflagsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipflagsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipgoalsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipgoalsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipspecialdamage.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipspecialdamage.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shipspecialhitpoints.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shipspecialhitpoints.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/shiptexturesdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/shiptexturesdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/soundenvironmentdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/soundenvironmentdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/starfieldeditor.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/starfieldeditor.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/stdafx.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/stdafx.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/textviewdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/textviewdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/version.rc2` — rc2 file under fred2 (FRED2 mission editor sources.)
+- `fred2/voiceactingmanager.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/voiceactingmanager.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/volumetricsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/volumetricsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/warpparamsdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/warpparamsdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/waypointpathdlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/waypointpathdlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/weaponeditordlg.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/weaponeditordlg.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/wing_editor.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/wing_editor.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+- `fred2/wing.cpp` — C++ source under fred2 (FRED2 mission editor sources.)
+- `fred2/wing.h` — C/C++ header under fred2 (FRED2 mission editor sources.)
+
+## freespace2
+
+- `freespace2/CMakeLists.txt` — Text file under freespace2 (Game project sources/resources.)
+- `freespace2/freespace.cpp` — C++ source under freespace2 (Game project sources/resources.)
+- `freespace2/freespace.h` — C/C++ header under freespace2 (Game project sources/resources.)
+- `freespace2/freespaceresource.h` — C/C++ header under freespace2 (Game project sources/resources.)
+- `freespace2/levelpaging.cpp` — C++ source under freespace2 (Game project sources/resources.)
+- `freespace2/levelpaging.h` — C/C++ header under freespace2 (Game project sources/resources.)
+- `freespace2/resources.cmake` — CMake script under freespace2 (Game project sources/resources.)
+- `freespace2/resources/app_icon.png` — Image asset under freespace2 (Game project sources/resources.)
+- `freespace2/resources/mac/Info.plist.in` — Template/input file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/mac/Resources/FS2_Open.icns` — icns file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/app_icon_glow.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/app_icon.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/dbg_icon.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/default.manifest` — manifest file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/freespace.rc` — rc file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/goal_com.bmp` — Image asset under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/goal_fail.bmp` — Image asset under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/goal_inc.bmp` — Image asset under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/goal_none.bmp` — Image asset under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/goal_ord.bmp` — Image asset under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/V_app.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/V_debug.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/V_sse-d.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/V_sse.ico` — ico file under freespace2 (Game project sources/resources.)
+- `freespace2/resources/win/version.rc2` — rc2 file under freespace2 (Game project sources/resources.)
+- `freespace2/SDLGraphicsOperations.cpp` — C++ source under freespace2 (Game project sources/resources.)
+- `freespace2/SDLGraphicsOperations.h` — C/C++ header under freespace2 (Game project sources/resources.)
+
+## lib
+
+- `lib/accidental-noise/anl_impl.cpp` — C++ source for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/anl.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/CMakeLists.txt` — Text file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/Expression/expressionbuilder.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/Expression/expressionbuilder.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/Expression/parsing.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/Expression/parsing.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/Imaging/imaging.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/Imaging/imaging.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/LICENSE` — File for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tarray1.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tarray2.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tarray3.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tarrays.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tcurve.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tvec2d.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tvec3d.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/templates/tvec4d.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/vectortypes.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/coordinate.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/coordinate.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/hashing.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/hashing.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/instruction.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/kernel.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/kernel.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/noise_gen.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/noise_gen.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/noise_lut.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/noise_lut.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/random_gen.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/utility.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/vm.h` — C/C++ header for vendored dependency 'accidental-noise'.
+- `lib/accidental-noise/VM/vm.inl` — inl file for vendored dependency 'accidental-noise'.
+- `lib/antlr4-cpp-runtime/CHANGES` — File for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/cmake/antlr4-generator.cmake.in` — Template/input file for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/cmake/antlr4-runtime.cmake.in` — Template/input file for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/cmake/Antlr4Package.md` — Documentation: CMake Antlr4 Package Usage
+- `lib/antlr4-cpp-runtime/cmake/ExternalAntlr4Cpp.cmake` — CMake script for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/cmake/FindANTLR.cmake` — CMake script for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/cmake/README.md` — Documentation: Getting started with Antlr4Cpp
+- `lib/antlr4-cpp-runtime/CMakeLists.txt` — Text file for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/README.md` — Documentation: C++ target for ANTLR 4
+- `lib/antlr4-cpp-runtime/runtime/CMakeLists.txt` — Text file for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/antlr4-common.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/antlr4-runtime.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRErrorListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRErrorListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRErrorStrategy.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRErrorStrategy.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRFileStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRFileStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRInputStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ANTLRInputStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ActionTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ActionTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/AmbiguityInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/AmbiguityInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ArrayPredictionContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ArrayPredictionContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATN.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATN.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNConfig.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNConfig.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNConfigSet.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNConfigSet.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNDeserializationOptions.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNDeserializationOptions.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNDeserializer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNDeserializer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNSimulator.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNSimulator.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNState.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNStateType.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNStateType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ATNType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/AtomTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/AtomTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/BasicBlockStartState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/BasicState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/BlockEndState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/BlockStartState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ContextSensitivityInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ContextSensitivityInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/DecisionEventInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/DecisionEventInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/DecisionInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/DecisionInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/DecisionState.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/DecisionState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/EpsilonTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/EpsilonTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ErrorInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ErrorInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/HashUtils.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerActionExecutor.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerActionExecutor.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerActionType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerATNConfig.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerATNConfig.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerATNSimulator.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerATNSimulator.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerChannelAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerChannelAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerCustomAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerCustomAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerIndexedCustomAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerIndexedCustomAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerModeAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerModeAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerMoreAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerMoreAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerPopModeAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerPopModeAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerPushModeAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerPushModeAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerSkipAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerSkipAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerTypeAction.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LexerTypeAction.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LL1Analyzer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LL1Analyzer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LookaheadEventInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LookaheadEventInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/LoopEndState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/NotSetTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/NotSetTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/OrderedATNConfigSet.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/OrderedATNConfigSet.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ParseInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ParseInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ParserATNSimulator.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ParserATNSimulator.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ParserATNSimulatorOptions.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PlusBlockStartState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PlusLoopbackState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PrecedencePredicateTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PrecedencePredicateTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredicateEvalInfo.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredicateEvalInfo.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredicateTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredicateTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContextCache.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContextCache.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContextMergeCache.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContextMergeCache.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContextMergeCacheOptions.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionContextType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionMode.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/PredictionMode.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ProfilingATNSimulator.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/ProfilingATNSimulator.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/RangeTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/RangeTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/RuleStartState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/RuleStopState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/RuleTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/RuleTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SemanticContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SemanticContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SemanticContextType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SerializedATNView.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SetTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SetTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SingletonPredictionContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/SingletonPredictionContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/StarBlockStartState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/StarLoopbackState.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/StarLoopbackState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/StarLoopEntryState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/TokensStartState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/Transition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/Transition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/TransitionType.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/TransitionType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/WildcardTransition.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/atn/WildcardTransition.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/BailErrorStrategy.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/BailErrorStrategy.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/BaseErrorListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/BaseErrorListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/BufferedTokenStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/BufferedTokenStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CharStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CharStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CommonToken.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CommonToken.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CommonTokenFactory.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CommonTokenFactory.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CommonTokenStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/CommonTokenStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ConsoleErrorListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ConsoleErrorListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/DefaultErrorStrategy.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/DefaultErrorStrategy.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/DFA.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/DFA.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/DFASerializer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/DFASerializer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/DFAState.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/DFAState.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/LexerDFASerializer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/dfa/LexerDFASerializer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/DiagnosticErrorListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/DiagnosticErrorListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Exceptions.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Exceptions.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/FailedPredicateException.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/FailedPredicateException.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/FlatHashMap.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/FlatHashSet.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/InputMismatchException.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/InputMismatchException.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/internal/Synchronization.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/internal/Synchronization.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/InterpreterRuleContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/InterpreterRuleContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/IntStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/IntStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Lexer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Lexer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/LexerInterpreter.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/LexerInterpreter.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/LexerNoViableAltException.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/LexerNoViableAltException.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ListTokenSource.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ListTokenSource.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/InterpreterDataReader.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/InterpreterDataReader.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/Interval.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/Interval.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/IntervalSet.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/IntervalSet.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/MurmurHash.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/MurmurHash.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/Predicate.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/misc/Predicate.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/NoViableAltException.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/NoViableAltException.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Parser.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Parser.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ParserInterpreter.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ParserInterpreter.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ParserRuleContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ParserRuleContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ProxyErrorListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/ProxyErrorListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RecognitionException.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RecognitionException.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Recognizer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Recognizer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RuleContext.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RuleContext.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RuleContextWithAltNum.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RuleContextWithAltNum.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RuntimeMetaData.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/RuntimeMetaData.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/AntlrUtf8.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Any.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Any.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Arrays.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Arrays.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/BitSet.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Casts.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/CPPUtils.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/CPPUtils.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Declarations.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/StringUtils.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/StringUtils.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Unicode.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/support/Utf8.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Token.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Token.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenFactory.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenSource.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenSource.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenStreamRewriter.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/TokenStreamRewriter.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/AbstractParseTreeVisitor.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ErrorNode.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ErrorNodeImpl.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ErrorNodeImpl.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/IterativeParseTreeWalker.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/IterativeParseTreeWalker.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTree.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTree.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeProperty.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeType.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeVisitor.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeVisitor.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeWalker.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/ParseTreeWalker.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/Chunk.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/Chunk.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/ParseTreeMatch.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/ParseTreeMatch.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/ParseTreePattern.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/ParseTreePattern.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/ParseTreePatternMatcher.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/ParseTreePatternMatcher.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/RuleTagToken.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/RuleTagToken.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/TagChunk.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/TagChunk.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/TextChunk.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/TextChunk.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/TokenTagToken.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/pattern/TokenTagToken.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/TerminalNode.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/TerminalNodeImpl.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/TerminalNodeImpl.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/Trees.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/Trees.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPath.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPath.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathLexer.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathLexer.g4` — g4 file for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathLexer.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathLexer.tokens` — tokens file for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathLexerErrorListener.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathLexerErrorListener.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathRuleAnywhereElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathRuleAnywhereElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathRuleElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathRuleElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathTokenAnywhereElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathTokenAnywhereElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathTokenElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathTokenElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathWildcardAnywhereElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathWildcardAnywhereElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathWildcardElement.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/tree/xpath/XPathWildcardElement.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/UnbufferedCharStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/UnbufferedCharStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/UnbufferedTokenStream.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/UnbufferedTokenStream.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Version.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Vocabulary.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/Vocabulary.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/WritableToken.cpp` — C++ source for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/runtime/src/WritableToken.h` — C/C++ header for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4-cpp-runtime/VERSION` — File for vendored dependency 'antlr4-cpp-runtime'.
+- `lib/antlr4.cmake` — CMake script for vendored dependency 'antlr4.cmake'.
+- `lib/CMakeLists.txt` — Text file for vendored dependency 'CMakeLists.txt'.
+- `lib/discord/CMakeLists.txt` — Text file for vendored dependency 'discord'.
+- `lib/discord/include/discord_register.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/include/discord_rpc.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/LICENSE` — File for vendored dependency 'discord'.
+- `lib/discord/src/backoff.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/src/CMakeLists.txt` — Text file for vendored dependency 'discord'.
+- `lib/discord/src/connection_unix.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/connection_win.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/connection.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/src/discord_register_linux.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/discord_register_osx.m` — m file for vendored dependency 'discord'.
+- `lib/discord/src/discord_register_win.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/discord_rpc.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/msg_queue.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/src/rpc_connection.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/rpc_connection.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/src/serialization.cpp` — C++ source for vendored dependency 'discord'.
+- `lib/discord/src/serialization.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/allocators.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/document.h` — document.h */
+- `lib/discord/thirdparty/rapidjson/encodedstream.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/encodings.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/error/en.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/error/error.h` — error.h */
+- `lib/discord/thirdparty/rapidjson/filereadstream.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/filewritestream.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/fwd.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/biginteger.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/diyfp.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/dtoa.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/ieee754.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/itoa.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/meta.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/pow10.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/regex.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/stack.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/strfunc.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/strtod.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/internal/swap.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/istreamwrapper.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/memorybuffer.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/memorystream.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/msinttypes/inttypes.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/msinttypes/stdint.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/ostreamwrapper.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/pointer.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/prettywriter.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/rapidjson.h` — rapidjson.h \brief common definitions and configuration
+- `lib/discord/thirdparty/rapidjson/reader.h` — reader.h */
+- `lib/discord/thirdparty/rapidjson/schema.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/stream.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/stringbuffer.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/discord/thirdparty/rapidjson/writer.h` — C/C++ header for vendored dependency 'discord'.
+- `lib/FFmpeg.cmake` — CMake script for vendored dependency 'FFmpeg.cmake'.
+- `lib/freetype.cmake` — CMake script for vendored dependency 'freetype.cmake'.
+- `lib/hidapi/AUTHORS.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/CMakeLists.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/hidapi/hidapi.h` — @defgroup API hidapi API
+- `lib/hidapi/libusb/.gitignore` — gitignore file for vendored dependency 'hidapi'.
+- `lib/hidapi/libusb/CMakeLists.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/libusb/hid.c` — C source for vendored dependency 'hidapi'.
+- `lib/hidapi/libusb/hidapi_libusb.h` — @defgroup API hidapi API
+- `lib/hidapi/LICENSE-orig.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/linux/.gitignore` — gitignore file for vendored dependency 'hidapi'.
+- `lib/hidapi/linux/CMakeLists.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/linux/hid.c` — C source for vendored dependency 'hidapi'.
+- `lib/hidapi/mac/.gitignore` — gitignore file for vendored dependency 'hidapi'.
+- `lib/hidapi/mac/CMakeLists.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/mac/hid.c` — C source for vendored dependency 'hidapi'.
+- `lib/hidapi/mac/hidapi_darwin.h` — @defgroup API hidapi API
+- `lib/hidapi/pc/.gitignore` — gitignore file for vendored dependency 'hidapi'.
+- `lib/hidapi/pc/hidapi-hidraw.pc.in` — Template/input file for vendored dependency 'hidapi'.
+- `lib/hidapi/pc/hidapi-libusb.pc.in` — Template/input file for vendored dependency 'hidapi'.
+- `lib/hidapi/pc/hidapi.pc.in` — Template/input file for vendored dependency 'hidapi'.
+- `lib/hidapi/src/cmake/hidapi-config.cmake.in` — Template/input file for vendored dependency 'hidapi'.
+- `lib/hidapi/src/CMakeLists.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/VERSION` — File for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/.gitignore` — gitignore file for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/CMakeLists.txt` — Text file for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/hid.c` — C source for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/hidapi_cfgmgr32.h` — C/C++ header for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/hidapi_hidclass.h` — C/C++ header for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/hidapi_hidpi.h` — C/C++ header for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/hidapi_hidsdi.h` — C/C++ header for vendored dependency 'hidapi'.
+- `lib/hidapi/windows/hidapi_winapi.h` — @defgroup API hidapi API
+- `lib/hidapi/windows/hidapi.rc` — rc file for vendored dependency 'hidapi'.
+- `lib/imgui/.editorconfig` — editorconfig file for vendored dependency 'imgui'.
+- `lib/imgui/.gitattributes` — gitattributes file for vendored dependency 'imgui'.
+- `lib/imgui/.gitignore` — gitignore file for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_allegro5.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_allegro5.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_android.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_android.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx10.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx10.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx11.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx11.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx12.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx12.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx9.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_dx9.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_glfw.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_glfw.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_glut.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_glut.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_metal.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_metal.mm` — mm file for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_opengl2.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_opengl2.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_opengl3_loader.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_opengl3.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_opengl3.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_osx.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_osx.mm` — mm file for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_sdl.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_sdl.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_sdlrenderer.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_sdlrenderer.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_vulkan.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_vulkan.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_wgpu.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_wgpu.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_win32.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/backends/imgui_impl_win32.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/backends/vulkan/generate_spv.sh` — Shell script for vendored dependency 'imgui'.
+- `lib/imgui/backends/vulkan/glsl_shader.frag` — frag file for vendored dependency 'imgui'.
+- `lib/imgui/backends/vulkan/glsl_shader.vert` — vert file for vendored dependency 'imgui'.
+- `lib/imgui/CMakeLists.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/docs/BACKENDS.md` — Documentation: Dear ImGui: Backends
+- `lib/imgui/docs/CHANGELOG.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/docs/CONTRIBUTING.md` — Documentation: Contributing Guidelines
+- `lib/imgui/docs/EXAMPLES.md` — Documentation: Dear ImGui: Examples
+- `lib/imgui/docs/FAQ.md` — Documentation: FAQ (Frequently Asked Questions)
+- `lib/imgui/docs/FONTS.md` — Documentation: Dear ImGui: Using Fonts
+- `lib/imgui/docs/README.md` — Documentation: The Pitch
+- `lib/imgui/docs/TODO.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_allegro5/example_allegro5.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_allegro5/example_allegro5.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_allegro5/imconfig_allegro5.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_allegro5/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_allegro5/README.md` — Documentation: Configuration
+- `lib/imgui/examples/example_android_opengl3/android/.gitignore` — gitignore file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/android/app/build.gradle` — gradle file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/android/app/src/main/AndroidManifest.xml` — xml file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/android/app/src/main/java/MainActivity.kt` — kt file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/android/build.gradle` — gradle file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/android/settings.gradle` — gradle file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/CMakeLists.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_android_opengl3/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/example_apple_metal.xcodeproj/project.pbxproj` — pbxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/iOS/Info-iOS.plist` — plist file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/iOS/LaunchScreen.storyboard` — storyboard file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/macOS/Info-macOS.plist` — plist file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/macOS/MainMenu.storyboard` — storyboard file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/main.mm` — mm file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_metal/README.md` — Documentation: iOS / OSX Metal example
+- `lib/imgui/examples/example_apple_opengl2/example_apple_opengl2.xcodeproj/project.pbxproj` — pbxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_apple_opengl2/main.mm` — mm file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_emscripten_opengl3/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_emscripten_opengl3/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_emscripten_opengl3/README.md` — Documentation: How to Build
+- `lib/imgui/examples/example_emscripten_opengl3/shell_minimal.html` — html file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_emscripten_wgpu/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_emscripten_wgpu/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_emscripten_wgpu/README.md` — Documentation: How to Build
+- `lib/imgui/examples/example_glfw_metal/main.mm` — mm file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_metal/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl2/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl2/example_glfw_opengl2.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl2/example_glfw_opengl2.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl2/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl2/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl3/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl3/example_glfw_opengl3.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl3/example_glfw_opengl3.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl3/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_opengl3/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_vulkan/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_vulkan/build_win64.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_vulkan/CMakeLists.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_vulkan/example_glfw_vulkan.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_vulkan/example_glfw_vulkan.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glfw_vulkan/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glut_opengl2/example_glut_opengl2.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glut_opengl2/example_glut_opengl2.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glut_opengl2/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_glut_opengl2/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_null/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_null/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_null/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_directx11/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_directx11/example_sdl_directx11.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_directx11/example_sdl_directx11.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_directx11/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_metal/main.mm` — mm file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_metal/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl2/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl2/example_sdl_opengl2.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl2/example_sdl_opengl2.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl2/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl2/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl2/README.md` — Documentation: How to Build
+- `lib/imgui/examples/example_sdl_opengl3/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl3/example_sdl_opengl3.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl3/example_sdl_opengl3.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl3/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl3/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_opengl3/README.md` — Documentation: How to Build
+- `lib/imgui/examples/example_sdl_sdlrenderer/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_sdlrenderer/example_sdl_sdlrenderer.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_sdlrenderer/example_sdl_sdlrenderer.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_sdlrenderer/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_sdlrenderer/Makefile` — File for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_sdlrenderer/README.md` — Documentation: How to Build
+- `lib/imgui/examples/example_sdl_vulkan/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_vulkan/example_sdl_vulkan.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_vulkan/example_sdl_vulkan.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_sdl_vulkan/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx10/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx10/example_win32_directx10.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx10/example_win32_directx10.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx10/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx11/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx11/example_win32_directx11.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx11/example_win32_directx11.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx11/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx12/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx12/example_win32_directx12.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx12/example_win32_directx12.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx12/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx9/build_win32.bat` — bat file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx9/example_win32_directx9.vcxproj` — vcxproj file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx9/example_win32_directx9.vcxproj.filters` — filters file for vendored dependency 'imgui'.
+- `lib/imgui/examples/example_win32_directx9/main.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/examples/imgui_examples.sln` — sln file for vendored dependency 'imgui'.
+- `lib/imgui/examples/libs/glfw/COPYING.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/examples/libs/glfw/include/GLFW/glfw3.h` — glfw3.h @brief The header of the GLFW 3 API.
+- `lib/imgui/examples/libs/glfw/include/GLFW/glfw3native.h` — glfw3native.h @brief The header of the native access functions.
+- `lib/imgui/examples/libs/usynergy/README.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/examples/libs/usynergy/uSynergy.c` — C source for vendored dependency 'imgui'.
+- `lib/imgui/examples/libs/usynergy/uSynergy.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/examples/README.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/extensions/imgui_sugar.hpp` — C++ header for vendored dependency 'imgui'.
+- `lib/imgui/extensions/ImGuizmo.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/extensions/ImGuizmo.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/imconfig.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/imgui_demo.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/imgui_draw.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/imgui_internal.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/imgui_tables.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/imgui_widgets.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/imgui.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/imgui.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/imstb_rectpack.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/imstb_textedit.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/imstb_truetype.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/LICENSE.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/misc/cpp/imgui_stdlib.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/misc/cpp/imgui_stdlib.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/misc/cpp/README.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/misc/debuggers/imgui.gdb` — gdb file for vendored dependency 'imgui'.
+- `lib/imgui/misc/debuggers/imgui.natstepfilter` — natstepfilter file for vendored dependency 'imgui'.
+- `lib/imgui/misc/debuggers/imgui.natvis` — natvis file for vendored dependency 'imgui'.
+- `lib/imgui/misc/debuggers/README.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/binary_to_compressed_c.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/Cousine-Regular.ttf` — ttf file for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/DroidSans.ttf` — ttf file for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/Karla-Regular.ttf` — ttf file for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/ProggyClean.ttf` — ttf file for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/ProggyTiny.ttf` — ttf file for vendored dependency 'imgui'.
+- `lib/imgui/misc/fonts/Roboto-Medium.ttf` — ttf file for vendored dependency 'imgui'.
+- `lib/imgui/misc/freetype/imgui_freetype.cpp` — C++ source for vendored dependency 'imgui'.
+- `lib/imgui/misc/freetype/imgui_freetype.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/imgui/misc/freetype/README.md` — Documentation: imgui_freetype
+- `lib/imgui/misc/README.txt` — Text file for vendored dependency 'imgui'.
+- `lib/imgui/misc/single_file/imgui_single_file.h` — C/C++ header for vendored dependency 'imgui'.
+- `lib/jansson/cmake/CheckFunctionKeywords.cmake` — CMake script for vendored dependency 'jansson'.
+- `lib/jansson/cmake/jansson_config.h.cmake` — CMake script for vendored dependency 'jansson'.
+- `lib/jansson/cmake/jansson_private_config.h.cmake` — CMake script for vendored dependency 'jansson'.
+- `lib/jansson/cmake/JanssonConfig.cmake.in` — Template/input file for vendored dependency 'jansson'.
+- `lib/jansson/cmake/JanssonConfigVersion.cmake.in` — Template/input file for vendored dependency 'jansson'.
+- `lib/jansson/CMakeLists.txt` — Text file for vendored dependency 'jansson'.
+- `lib/jansson/jansson_private_config.h.in` — Template/input file for vendored dependency 'jansson'.
+- `lib/jansson/LICENSE` — File for vendored dependency 'jansson'.
+- `lib/jansson/src/dump.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/error.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/hashtable_seed.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/hashtable.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/hashtable.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/jansson_config.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/jansson_config.h.in` — Template/input file for vendored dependency 'jansson'.
+- `lib/jansson/src/jansson_private.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/jansson.def` — def file for vendored dependency 'jansson'.
+- `lib/jansson/src/jansson.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/load.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/lookup3.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/Makefile.am` — am file for vendored dependency 'jansson'.
+- `lib/jansson/src/memory.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/pack_unpack.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/strbuffer.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/strbuffer.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/strconv.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/utf.c` — C source for vendored dependency 'jansson'.
+- `lib/jansson/src/utf.h` — C/C++ header for vendored dependency 'jansson'.
+- `lib/jansson/src/value.c` — C source for vendored dependency 'jansson'.
+- `lib/libjpeg/change.log` — log file for vendored dependency 'libjpeg'.
+- `lib/libjpeg/CMakeLists.txt` — Text file for vendored dependency 'libjpeg'.
+- `lib/libjpeg/install.txt` — Text file for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jaricom.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jcapimin.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jcapistd.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jcomapi.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jconfig.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jconfig.txt` — Text file for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jcparam.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jctrans.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdapimin.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdapistd.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdarith.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdatasrc.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdcoefct.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdcolor.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdct.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jddctmgr.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdhuff.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdinput.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdmainct.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdmarker.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdmaster.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdmerge.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdpostct.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdsample.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jdtrans.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jerror.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jerror.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jidctflt.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jidctfst.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jidctint.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jinclude.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jmemmgr.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jmemnobs.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jmemsys.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jmorecfg.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jpegint.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jpeglib.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jquant1.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jquant2.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jutils.c` — C source for vendored dependency 'libjpeg'.
+- `lib/libjpeg/jversion.h` — C/C++ header for vendored dependency 'libjpeg'.
+- `lib/libjpeg/libjpeg.txt` — Text file for vendored dependency 'libjpeg'.
+- `lib/libjpeg/README` — File for vendored dependency 'libjpeg'.
+- `lib/libpcpnatpmp/CMakeLists.txt` — Text file for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/COPYING` — File for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/default_config.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/include/pcpnatpmp.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/libpcpnatpmp.pc.in` — Template/input file for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/Makefile.am` — am file for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/README.md` — Documentation for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/findsaddr-udp.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/findsaddr.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/gateway.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/gateway.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/pcp_socket.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/pcp_socket.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/sock_ntop.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/net/unp.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_api.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_client_db.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_client_db.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_event_handler.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_event_handler.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_logger.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_logger.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_msg_structs.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_msg.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_msg.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_server_discovery.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_server_discovery.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/pcp_utils.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/windows/pcp_gettimeofday.c` — C source for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/windows/pcp_gettimeofday.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpcpnatpmp/src/windows/pcp_win_defines.h` — C/C++ header for vendored dependency 'libpcpnatpmp'.
+- `lib/libpng/CMakeLists.txt` — Text file for vendored dependency 'libpng'.
+- `lib/libpng/png.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/png.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pngconf.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pngdebug.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pngerror.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngget.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pnginfo.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pnglibconf.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pngmem.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngpread.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngpriv.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pngread.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngrio.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngrtran.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngrutil.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngset.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngstruct.h` — C/C++ header for vendored dependency 'libpng'.
+- `lib/libpng/pngtrans.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngwio.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngwrite.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngwtran.c` — C source for vendored dependency 'libpng'.
+- `lib/libpng/pngwutil.c` — C source for vendored dependency 'libpng'.
+- `lib/libRocket` — File for vendored dependency 'libRocket'.
+- `lib/libRocket.cmake` — CMake script for vendored dependency 'libRocket.cmake'.
+- `lib/lua/CMakeLists.txt` — Text file for vendored dependency 'lua'.
+- `lib/lua/lapi.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lapi.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lauxlib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lauxlib.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lbaselib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lcode.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lcode.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/ldblib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ldebug.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ldebug.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/ldo.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ldo.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/ldump.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lfunc.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lfunc.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lgc.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lgc.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/linit.c` — C source for vendored dependency 'lua'.
+- `lib/lua/liolib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/llex.c` — C source for vendored dependency 'lua'.
+- `lib/lua/llex.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/llimits.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lmathlib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lmem.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lmem.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/loadlib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lobject.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lobject.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lopcodes.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lopcodes.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/loslib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lparser.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lparser.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lstate.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lstate.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lstring.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lstring.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lstrlib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ltable.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ltable.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/ltablib.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ltm.c` — C source for vendored dependency 'lua'.
+- `lib/lua/ltm.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lua.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lua.natvis` — natvis file for vendored dependency 'lua'.
+- `lib/lua/luaconf.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lualib.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lundump.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lundump.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lvm.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lvm.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/lzio.c` — C source for vendored dependency 'lua'.
+- `lib/lua/lzio.h` — C/C++ header for vendored dependency 'lua'.
+- `lib/lua/print.c` — C source for vendored dependency 'lua'.
+- `lib/lz4/CMakeLists.txt` — Text file for vendored dependency 'lz4'.
+- `lib/lz4/lz4.c` — C source for vendored dependency 'lz4'.
+- `lib/lz4/lz4.h` — C/C++ header for vendored dependency 'lz4'.
+- `lib/lz4/lz4frame_static.h` — C/C++ header for vendored dependency 'lz4'.
+- `lib/lz4/lz4frame.c` — C source for vendored dependency 'lz4'.
+- `lib/lz4/lz4frame.h` — C/C++ header for vendored dependency 'lz4'.
+- `lib/lz4/lz4hc.c` — C source for vendored dependency 'lz4'.
+- `lib/lz4/lz4hc.h` — C/C++ header for vendored dependency 'lz4'.
+- `lib/lz4/xxhash.c` — C source for vendored dependency 'lz4'.
+- `lib/lz4/xxhash.h` — C/C++ header for vendored dependency 'lz4'.
+- `lib/md5/CMakeLists.txt` — Text file for vendored dependency 'md5'.
+- `lib/md5/md5.cpp` — C++ source for vendored dependency 'md5'.
+- `lib/md5/md5.h` — C/C++ header for vendored dependency 'md5'.
+- `lib/mdns/CHANGELOG` — File for vendored dependency 'mdns'.
+- `lib/mdns/CMakeLists.txt` — Text file for vendored dependency 'mdns'.
+- `lib/mdns/LICENSE` — File for vendored dependency 'mdns'.
+- `lib/mdns/mdns.c` — C source for vendored dependency 'mdns'.
+- `lib/mdns/mdns.h` — C/C++ header for vendored dependency 'mdns'.
+- `lib/mdns/README.md` — Documentation: Public domain mDNS/DNS-SD library in C
+- `lib/mongoose/CMakeLists.txt` — Text file for vendored dependency 'mongoose'.
+- `lib/mongoose/LICENSE` — File for vendored dependency 'mongoose'.
+- `lib/mongoose/Makefile.am` — am file for vendored dependency 'mongoose'.
+- `lib/mongoose/mongoose.c` — C source for vendored dependency 'mongoose'.
+- `lib/mongoose/mongoose.h` — C/C++ header for vendored dependency 'mongoose'.
+- `lib/OpenAL.cmake` — CMake script for vendored dependency 'OpenAL.cmake'.
+- `lib/opengl/CMakeLists.txt` — Text file for vendored dependency 'opengl'.
+- `lib/opengl/gl/CMakeLists.txt` — Text file for vendored dependency 'opengl'.
+- `lib/opengl/gl/extensions.txt` — Text file for vendored dependency 'opengl'.
+- `lib/opengl/gl/gen_cmd.txt` — Text file for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad_glx/include/glad/glad_glx.h` — C/C++ header for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad_glx/include/KHR/khrplatform.h` — C/C++ header for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad_glx/src/glad_glx.c` — C source for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad_wgl/include/glad/glad_wgl.h` — C/C++ header for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad_wgl/include/KHR/khrplatform.h` — C/C++ header for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad_wgl/src/glad_wgl.c` — C source for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad/include/glad/glad.h` — C/C++ header for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad/include/KHR/khrplatform.h` — C/C++ header for vendored dependency 'opengl'.
+- `lib/opengl/gl/glad/src/glad.c` — C source for vendored dependency 'opengl'.
+- `lib/opengl/gl/wgl_exts.txt` — Text file for vendored dependency 'opengl'.
+- `lib/openxr/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/COPYING.adoc` — adoc file for vendored dependency 'openxr'.
+- `lib/openxr/include/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/include/generated_header_list.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/include/generated_header_list.txt.license` — license file for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/openxr_platform_defines.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/openxr_platform.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/openxr_reflection_parent_structs.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/openxr_reflection_structs.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/openxr_reflection.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/include/openxr/openxr.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/LICENSE` — File for vendored dependency 'openxr'.
+- `lib/openxr/specification/registry/xr.xml` — xml file for vendored dependency 'openxr'.
+- `lib/openxr/src/.clang-format` — clang-format file for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/cmake_uninstall.cmake.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/FindEGL.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/FindJsonCpp.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/FindOpenGLES.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/FindVulkanHeaders.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/metaconfig.cmake.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/presentation.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/cmake/StdFilesystemFlags.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/common_config.h.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/common/extra_algorithms.h` — Additional functions along the lines of the standard library algorithms.
+- `lib/openxr/src/common/filesystem_utils.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/common/filesystem_utils.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/hex_and_handles.h` — Some utilities, primarily for working with OpenXR handles in a generic way.
+- `lib/openxr/src/common/loader_interfaces.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/object_info.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/common/object_info.h` — The core of an XR_EXT_debug_utils implementation, used/shared by the loader and several SDK layers.
+- `lib/openxr/src/common/platform_utils.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/stdfs_conditions.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/unique_asset.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/vulkan_debug_object_namer.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/xr_dependencies.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/common/xr_linear.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/.clang-format` — clang-format file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/.clang-tidy` — clang-tidy file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/.gitattributes` — gitattributes file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/.github/ISSUE_TEMPLATE/bug_report.md` — Documentation for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/.github/ISSUE_TEMPLATE/feature_request.md` — Documentation for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/.gitignore` — gitignore file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/amalgamate.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/appveyor.yml` — YAML config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/AUTHORS` — File for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/BUILD.bazel` — bazel file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/cmake/JoinPaths.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/CONTRIBUTING.md` — Documentation: Contributing to JsonCpp
+- `lib/openxr/src/external/jsoncpp/CTestConfig.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/dev.makefile` — makefile file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/__init__.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/agent_vmw7.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/agent_vmxp.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/antglob.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/batchbuild.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/fixeol.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/licenseupdater.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/devtools/tarball.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/doxyfile.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/footer.html` — html file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/header.html` — html file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/jsoncpp.dox` — dox file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/readme.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/roadmap.dox` — dox file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doc/web_doxyfile.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/doxybuild.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/readFromStream/errorFormat.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/readFromStream/readFromStream.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/readFromStream/withComment.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/readFromString/readFromString.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/README.md` — Documentation for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/streamWrite/streamWrite.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/example/stringWrite/stringWrite.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/get_version.pl` — pl file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/allocator.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/assertions.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/config.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/forwards.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/json_features.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/json.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/reader.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/value.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/version.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/json/writer.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/PreventInBuildInstalls.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/include/PreventInSourceBuilds.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/jsoncpp-namespaced-targets.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/jsoncppConfig.cmake.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/LICENSE` — File for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/meson_options.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/meson.build` — build file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/pkg-config/jsoncpp.pc.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/README.md` — Documentation: JsonCpp
+- `lib/openxr/src/external/jsoncpp/reformat.sh` — Shell script for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/jsontestrunner/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/jsontestrunner/main.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/lib_json/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/lib_json/json_reader.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/lib_json/json_tool.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/lib_json/json_value.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/lib_json/json_valueiterator.inl` — inl file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/lib_json/json_writer.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/fuzz.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/fuzz.dict` — dict file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/fuzz.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/jsontest.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/jsontest.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/src/test_lib_json/main.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/cleantests.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/fail_invalid_quote.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/fail_test_array_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/fail_test_array_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/fail_test_object_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/fail_test_stack_limit.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_06.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_06.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_07.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_array_07.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_06.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_06.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_07.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_07.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_08.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_08.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_09.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_basic_09.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_comment_00.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_comment_00.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_comment_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_comment_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_comment_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_comment_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_complex_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_complex_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_06_64bits.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_06_64bits.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_07_64bits.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_07_64bits.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_08_64bits.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_integer_08_64bits.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_large_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_large_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_object_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_preserve_comment_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_preserve_comment_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_06.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_06.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_07.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_07.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_08.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_08.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_09.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_09.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_10.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_10.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_11.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_11.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_12.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_real_12.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_01.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_01.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_02.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_02.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_03.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_03.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_04.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_04.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/legacy_test_string_unicode_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/test_array_08.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/test_array_08.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/test_object_05.expected` — expected file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/data/test_object_05.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/generate_expected.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail1.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail10.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail11.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail12.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail13.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail14.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail15.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail16.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail17.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail18.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail19.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail2.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail20.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail21.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail22.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail23.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail24.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail25.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail26.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail27.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail28.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail29.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail3.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail30.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail31.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail32.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail33.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail4.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail5.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail6.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail7.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail8.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/fail9.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/pass1.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/pass2.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/pass3.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/jsonchecker/readme.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/pyjsontestrunner.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/runjsontests.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/test/rununittests.py` — py file for vendored dependency 'openxr'.
+- `lib/openxr/src/external/jsoncpp/version.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/.gitignore` — gitignore file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/abi.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/abi.json.license` — license file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/android_utilities.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/android_utilities.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/AndroidManifest.xml` — xml file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/AndroidManifest.xml.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/api_layer_interface.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/api_layer_interface.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/CMakeLists.txt` — Text file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/exception_handling.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_core.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_instance.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_instance.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_logger_recorders.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_logger_recorders.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_logger.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_logger.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader_platform.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/loader.rc` — rc file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/manifest_file.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/manifest_file.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/module.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/module.json.license` — license file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr_loader_for_android.pom` — pom file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr-loader.def` — def file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr-loader.expsym` — expsym file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr-loader.map` — map file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr-loader.map.license` — license file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr.pc.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/openxr.pc.in.license` — license file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/OpenXRConfig.cmake.in` — Template/input file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/prefab.json` — JSON data/config for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/prefab.json.license` — license file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/runtime_interface.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/runtime_interface.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/settings.gradle` — gradle file for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/xr_generated_loader.cpp` — C++ source for vendored dependency 'openxr'.
+- `lib/openxr/src/loader/xr_generated_loader.hpp` — C++ header for vendored dependency 'openxr'.
+- `lib/openxr/src/version.cmake` — CMake script for vendored dependency 'openxr'.
+- `lib/openxr/src/xr_generated_dispatch_table.c` — C source for vendored dependency 'openxr'.
+- `lib/openxr/src/xr_generated_dispatch_table.h` — C/C++ header for vendored dependency 'openxr'.
+- `lib/prebuilt.cmake` — CMake script for vendored dependency 'prebuilt.cmake'.
+- `lib/SDL2.cmake` — CMake script for vendored dependency 'SDL2.cmake'.
+- `lib/utfcpp/CMakeLists.txt` — Text file for vendored dependency 'utfcpp'.
+- `lib/utfcpp/utf8.h` — C/C++ header for vendored dependency 'utfcpp'.
+- `lib/utfcpp/utf8/checked.h` — C/C++ header for vendored dependency 'utfcpp'.
+- `lib/utfcpp/utf8/core.h` — C/C++ header for vendored dependency 'utfcpp'.
+- `lib/utfcpp/utf8/unchecked.h` — C/C++ header for vendored dependency 'utfcpp'.
+- `lib/vulkan.cmake` — CMake script for vendored dependency 'vulkan.cmake'.
+- `lib/zlib/adler32.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/CMakeLists.txt` — Text file for vendored dependency 'zlib'.
+- `lib/zlib/compress.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/crc32.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/crc32.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/deflate.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/deflate.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/gzguts.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/infback.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/inffast.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/inffast.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/inffixed.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/inflate.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/inflate.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/inftrees.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/inftrees.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/trees.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/trees.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/uncompr.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/zconf.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/zlib.h` — C/C++ header for vendored dependency 'zlib'.
+- `lib/zlib/zutil.c` — C source for vendored dependency 'zlib'.
+- `lib/zlib/zutil.h` — C/C++ header for vendored dependency 'zlib'.
+
+## parsers
+
+- `parsers/action_expression/ActionExpression.g4` — g4 file under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpression.interp` — interp file under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpression.tokens` — tokens file under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionBaseVisitor.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionBaseVisitor.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionLexer.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionLexer.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionLexer.interp` — interp file under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionLexer.tokens` — tokens file under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionParser.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionParser.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionVisitor.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/action_expression/generated/ActionExpressionVisitor.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/ArgumentList.g4` — g4 file under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentList.interp` — interp file under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentList.tokens` — tokens file under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListBaseVisitor.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListBaseVisitor.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListLexer.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListLexer.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListLexer.interp` — interp file under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListLexer.tokens` — tokens file under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListParser.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListParser.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListVisitor.cpp` — C++ source under parsers (Parser-related sources and data.)
+- `parsers/arg_parser/generated/ArgumentListVisitor.h` — C/C++ header under parsers (Parser-related sources and data.)
+- `parsers/CMakeLists.txt` — Text file under parsers (Parser-related sources and data.)
+
+## qtfred
+
+- `qtfred/CHANGELOG.md` — Documentation: [Unreleased][Unreleased]
+- `qtfred/cmake/AppImage.desktop.in` — Template/input file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/cmake/AppRun.in` — Template/input file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/CMakeLists.txt` — Text file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/README.md` — Documentation: OS-specific notes
+- `qtfred/resources/fred_icon.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/arrow_down.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/arrow_left.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/arrow_right.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/arrow_up.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/bitmap1.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/black_do.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/bmp00001.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/chained_directive.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/chained.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/comment.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/constx.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/constxy.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/constxz.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/consty.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/constyz.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/constz.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/container_data.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/container_name.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/cursor_rotate.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data00.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data05.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data10.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data15.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data20.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data25.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data30.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data35.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data40.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data45.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data50.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data55.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data60.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data65.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data70.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data75.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data80.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data85.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data90.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/data95.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/fred_app.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/fred_debug.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/fred_splash.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/fred.ico` — ico file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/freddoc.ico` — ico file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/fredknows.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/green_do.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/next.bmp` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/next.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/orbitsel.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/play.bmp` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/play.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/prev.bmp` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/prev.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/root_directive.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/root.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/rotlocal.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/select.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/selectlist.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/selectlock.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/selectmove.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/selectrot.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/showdist.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/splash.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/stop.bmp` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/stop.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/toolbar.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/toolbar1.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/V_fred.ico` — ico file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/variable.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/wingdisband.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/wingform.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/zoomext.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/images/zoomsel.png` — Image asset under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/resources.qrc` — Qt resource collection under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/win/qtfred.manifest` — manifest file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/resources/win/qtfred.rc` — rc file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/source_groups.cmake` — CMake script under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/AssociatedPlainTextDocument.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/CheckedDataListModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/FredApplication.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/FredApplication.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/fredstubs.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/main.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/AbstractDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/AbstractDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/AsteroidEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/AsteroidEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/BackgroundEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/BackgroundEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/BriefingEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/BriefingEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/CampaignEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/CampaignEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/CommandBriefingDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/CommandBriefingDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/DebriefingDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/DebriefingDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/FictionViewerDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/FictionViewerDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/FormWingDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/FormWingDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/GlobalShipFlagsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/GlobalShipFlagsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/JumpNodeEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/JumpNodeEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionCutscenesDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionCutscenesDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionEventsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionEventsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionGoalsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionGoalsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/CustomDataDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/CustomDataDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/CustomStringsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/CustomStringsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/CustomWingNamesDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/CustomWingNamesDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/SoundEnvironmentDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MissionSpecs/SoundEnvironmentDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MusicPlayerDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MusicPlayerDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MusicTBLViewerModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/MusicTBLViewerModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ObjectOrientEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ObjectOrientEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ReinforcementsEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ReinforcementsEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/RelativeCoordinatesDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/RelativeCoordinatesDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/SelectionDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/SelectionDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShieldSystemDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShieldSystemDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipAltShipClassModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipAltShipClassModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipCustomWarpDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipCustomWarpDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipFlagsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipFlagsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipGoalsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipGoalsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipInitialStatusDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipInitialStatusDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipSpecialStatsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipSpecialStatsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipTBLViewerModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipTBLViewerModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipTextureReplacementDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipTextureReplacementDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipWeaponsDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/ShipWeaponsDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/WeaponsTBLViewerModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/ShipEditor/WeaponsTBLViewerModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/TeamLoadoutDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/TeamLoadoutDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/VariableDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/VariableDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/VoiceActingManagerModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/VoiceActingManagerModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/VolumetricNebulaDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/VolumetricNebulaDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/WaypointEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/WaypointEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/WingEditorDialogModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/dialogs/WingEditorDialogModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/Editor.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/Editor.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/EditorViewport.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/EditorViewport.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/EditorWing.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/FredRenderer.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/FredRenderer.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/IDialogProvider.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/management.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/management.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/missionsave.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/missionsave.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/object.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/object.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/util.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/mission/util.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/qmain.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/AboutDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/AboutDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/AsteroidEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/AsteroidEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/BackgroundEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/BackgroundEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/BriefingEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/BriefingEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/CampaignEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/CampaignEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/CommandBriefingDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/CommandBriefingDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/DebriefingDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/DebriefingDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/FictionViewerDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/FictionViewerDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/FormWingDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/FormWingDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/General/CheckBoxListDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/General/CheckBoxListDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/General/ImagePickerDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/General/ImagePickerDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/GlobalShipFlagsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/GlobalShipFlagsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/JumpNodeEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/JumpNodeEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionCutscenesDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionCutscenesDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionEventsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionEventsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionGoalsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionGoalsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/CustomDataDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/CustomDataDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/CustomStringsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/CustomStringsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/CustomWingNamesDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/CustomWingNamesDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/SoundEnvironmentDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MissionSpecs/SoundEnvironmentDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MusicPlayerDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MusicPlayerDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MusicTBLViewer.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/MusicTBLViewer.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ObjectOrientEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ObjectOrientEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ReinforcementsEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ReinforcementsEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/RelativeCoordinatesDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/RelativeCoordinatesDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/SelectionDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/SelectionDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShieldSystemDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShieldSystemDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/BankModel.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/BankModel.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipAltShipClass.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipAltShipClass.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipCustomWarpDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipCustomWarpDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipFlagsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipFlagsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipGoalsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipGoalsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipInitialStatusDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipInitialStatusDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipSpecialStatsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipSpecialStatsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipTBLViewer.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipTBLViewer.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipTextureReplacementDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipTextureReplacementDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipWeaponsDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/ShipWeaponsDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/WeaponsTBLViewer.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/ShipEditor/WeaponsTBLViewer.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/TeamLoadoutDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/TeamLoadoutDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/VariableDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/VariableDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/VoiceActingManager.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/VoiceActingManager.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/VolumetricNebulaDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/VolumetricNebulaDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/WaypointEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/WaypointEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/WingEditorDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/dialogs/WingEditorDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/FredView.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/FredView.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/QtGraphicsOperations.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/QtGraphicsOperations.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/util/ImageRenderer.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/util/ImageRenderer.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/util/menu.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/util/menu.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/util/SignalBlockers.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/util/SignalBlockers.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/bankTree.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/bankTree.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/CampaignMissionGraph.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/CampaignMissionGraph.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/ColorComboBox.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/ColorComboBox.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/FlagList.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/FlagList.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/LineEditDelegate.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/LineEditDelegate.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/NoWheelComboBox.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/NoWheelComboBox.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/NoWheelSpinBox.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/NoWheelSpinBox.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/PersonaColorComboBox.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/PersonaColorComboBox.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/renderwidget.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/renderwidget.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/sexp_tree.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/sexp_tree.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/ShipFlagCheckbox.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/ShipFlagCheckbox.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/SimpleListSelectDialog.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/SimpleListSelectDialog.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/weaponList.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/ui/widgets/weaponList.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/util.cpp` — C++ source under qtfred (Qt-based FRED editor sources.)
+- `qtfred/src/util.h` — C/C++ header under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/AboutDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/AsteroidEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/BackgroundEditor.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/BriefingEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/CampaignEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/CheckBoxListDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/CommandBriefingDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/CustomDataDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/CustomStringsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/CustomWingNamesDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/DebriefingDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/FictionViewerDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/FormWingDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/FredView.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/GlobalShipFlags.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/GlobalShipFlagsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/JumpNodeEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/MissionCutscenesDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/MissionEventsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/MissionGoalsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/MissionSpecDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/MusicPlayerDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ObjectOrientationDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ReinforcementsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/RelativeCoordinatesDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/SelectionDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShieldSystemDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipAltShipClass.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipCustomWarpDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipFlagsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipGoalsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipInitialStatus.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipSpecialStatsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipTBLViewer.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipTextureReplacementDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/ShipWeaponsDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/SoundEnvironmentDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/TeamLoadoutDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/VariableDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/VoiceActingManager.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/VolumetricNebulaDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/WaypointEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+- `qtfred/ui/WingEditorDialog.ui` — Qt Designer UI file under qtfred (Qt-based FRED editor sources.)
+
+## scripts
+
+- `scripts/analyze.ps1` — PowerShell script under scripts (Automation and helper scripts.)
+- `scripts/performance_check.sh` — Shell script under scripts (Automation and helper scripts.)
+- `scripts/performance_graph.py` — py file under scripts (Automation and helper scripts.)
+
+## test
+
+- `test/CMakeLists.txt` — Text file under test (Automated tests and fixtures.)
+- `test/gtest/cmake/Config.cmake.in` — Template/input file under test (Automated tests and fixtures.)
+- `test/gtest/cmake/gtest_main.pc.in` — Template/input file under test (Automated tests and fixtures.)
+- `test/gtest/cmake/gtest.pc.in` — Template/input file under test (Automated tests and fixtures.)
+- `test/gtest/cmake/internal_utils.cmake` — CMake script under test (Automated tests and fixtures.)
+- `test/gtest/cmake/libgtest.la.in` — Template/input file under test (Automated tests and fixtures.)
+- `test/gtest/CMakeLists.txt` — Text file under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest_pred_impl.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest_prod.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-assertion-result.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-death-test.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-matchers.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-message.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-param-test.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-printers.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-spi.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-test-part.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest-typed-test.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/gtest.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/custom/gtest-port.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/custom/gtest-printers.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/custom/gtest.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/custom/README.md` — Documentation: Customization Points
+- `test/gtest/include/gtest/internal/gtest-death-test-internal.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-filepath.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-internal.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-param-util.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-port-arch.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-port.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-string.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/include/gtest/internal/gtest-type-util.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/LICENSE` — File under test (Automated tests and fixtures.)
+- `test/gtest/README.md` — Documentation: Generic Build Instructions
+- `test/gtest/src/gtest_main.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-all.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-assertion-result.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-death-test.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-filepath.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-internal-inl.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-matchers.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-port.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-printers.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-test-part.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest-typed-test.cc` — cc file under test (Automated tests and fixtures.)
+- `test/gtest/src/gtest.cc` — cc file under test (Automated tests and fixtures.)
+- `test/src/actions/expression/test_ExpressionParser.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/cfile/cfile.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/CMakeLists.txt` — Text file under test (Automated tests and fixtures.)
+- `test/src/globalincs/test_flagset.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/globalincs/test_safe_strings.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/globalincs/test_version.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/it_vulkan_model_present.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_font.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_model_shader_spirv.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_opengl_postprocessing_smaa_fallback.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_post_processing_null_safety.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_uniform_buffer_manager.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_blend_enable.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_buffer_manager_retirement.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_clip_scissor.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_depth_format_selection.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_descriptor_layouts.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_device_scoring.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_dynstate.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_fallback_texture.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_frame_lifecycle.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_pipeline_manager.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_renderer_shutdown.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_shader_alignment.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_shader_layout_contracts.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_shader_manager_model.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_swapchain_acquire.cpp` — test_vulkan_swapchain_acquire.cpp @brief Tests for swapchain acquire retry logic after recreation
+- `test/src/graphics/test_vulkan_texture_contract.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_texture_helpers.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/graphics/test_vulkan_texture_upload_alignment.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/main.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/math/test_vecmat.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/menuui/test_intel_parse.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/mod/test_mod_table.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/model/test_modelread.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/parse/test_parselo.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/parse/test_replace.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/pilotfile/plr.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/ade_args.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/api/async.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/api/base.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/api/bitops.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/api/enums.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/api/hookvars.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/doc_parser.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Args.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Convert.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Function.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Reference.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Table.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/TestUtil.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Thread.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Util.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/lua/Value.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/require.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/script_state.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/ScriptingTestFixture.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/scripting/ScriptingTestFixture.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/src/source_groups.cmake` — CMake script under test (Automated tests and fixtures.)
+- `test/src/test_stubs.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/util/FSTestFixture.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/util/FSTestFixture.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/src/util/test_util.h` — C/C++ header under test (Automated tests and fixtures.)
+- `test/src/utils/HeapAllocatorTest.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/src/weapon/weapons.cpp` — C++ source under test (Automated tests and fixtures.)
+- `test/test_data/.gitignore` — gitignore file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/list_files_in_vps_and_dirs/data/tables/dir.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/list_files_in_vps_and_dirs/data/tables/dir2.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/list_files_in_vps_and_dirs/test.vp` — vp file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/override_default_file/data/tables/controlconfigdefaults.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/right_data_case/data/tables/ships.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/subfolder_list/data/tables/file.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/subfolder_list/data/tables/folder/file.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/subfolders/data/tables/file.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/subfolders/data/tables/sub/file2.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/subfolders/data/tables/sub/folder/file3.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/cfile/wrong_data_case/Data/tables/ships.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/data/cfile_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/fonts/BankGothic BT Light.ttf` — ttf file under test (Automated tests and fixtures.)
+- `test/test_data/data/fonts/font01.vf` — vf file under test (Automated tests and fixtures.)
+- `test/test_data/data/fonts/font02.vf` — vf file under test (Automated tests and fixtures.)
+- `test/test_data/data/fonts/font03.vf` — vf file under test (Automated tests and fixtures.)
+- `test/test_data/data/graphics_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/hud/attacker.png` — Image asset under test (Automated tests and fixtures.)
+- `test/test_data/data/interface/CursorWeb.ani` — ani file under test (Automated tests and fixtures.)
+- `test/test_data/data/menuui_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/mod_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/model_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/parselo_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/pilotfile_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/players/asdf.plr` — plr file under test (Automated tests and fixtures.)
+- `test/test_data/data/players/presets/asdf.json` — JSON data/config under test (Automated tests and fixtures.)
+- `test/test_data/data/Scenario_NullManager_DoesNotCrash_ReturnsFalse_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/scripting_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/vecmat_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/data/weapon_settings.ini` — ini file under test (Automated tests and fixtures.)
+- `test/test_data/graphics/fonts/additional_font_ttf/data/tables/test-fnt.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/graphics/fonts/data/fonts/arial.ttf` — ttf file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/data/tables/tstrings.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/empty_file/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/invalid_start/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/missing_name/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/only_white_space/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/single_translate/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/single/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/menuui/intel_parse/three/data/tables/species.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/mod/correct_targeted_version/data/tables/test-mod.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/mod/future_targeted_version/data/tables/test-mod.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/mod/mod_support_test/data/tables/test-mod.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/parselo/data/tables/test.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/parselo/parse_pausing/data/tables/test2.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/parselo/utf8_with_bom/data/tables/bom_test.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/parselo/utf8_with_bom/data/tables/fonts.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/parselo/utf8_with_bom/data/tables/unicode-mod.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/pilotfile/data/asdf.hdp` — hdp file under test (Automated tests and fixtures.)
+- `test/test_data/pilotfile/data/players/asdf.plr` — plr file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/callBothResolveReject/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/callRejectTwice/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/callResolveTwice/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/callWithNonFunction/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/catchErrors/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/resolveWithValues/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/promise/thenCatchChains/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/run/runWithErroredAwait/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/run/runWithoutAwait/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/async/run/runWithResolvedAwait/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/data/scripts/serializeTest.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/print/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/serializeBoolean/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/serializeNil/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/serializeNumber/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/serializeString/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/base/serializeTable/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/AND/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/checkBit/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/OR/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/setBit/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/toggleBit/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/unsetBit/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/bitops/XOR/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/data/scripts/assert.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/enums/__eq/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/enums/__tostring/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/enums/enumExistance/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/hookvars/empty/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/hookvars/withHookVars/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/require/defaultRequire/data/scripts/lib.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/require/defaultRequire/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/require/overrideRequire/data/scripts/cfile_require.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/require/overrideRequire/data/scripts/test.lua` — lua file under test (Automated tests and fixtures.)
+- `test/test_data/scripting/require/overrideRequire/data/tables/scripting-mod.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/weapon/data/tables/weapons.tbl` — tbl file under test (Automated tests and fixtures.)
+- `test/test_data/weapon/description_line_too_long/data/tables/test-wep.tbm` — tbm file under test (Automated tests and fixtures.)
+- `test/test_data/weapon/description_too_many_lines/data/tables/test-wep.tbm` — tbm file under test (Automated tests and fixtures.)
+
+## tools
+
+- `tools/CMakeLists.txt` — Text file under tools (Developer tools and utilities.)
+- `tools/embedfile/CMakeLists.txt` — Text file under tools (Developer tools and utilities.)
+- `tools/embedfile/embedfile.cpp` — C++ source under tools (Developer tools and utilities.)
+- `tools/strings_tool/CMakeLists.txt` — Text file under tools (Developer tools and utilities.)
+- `tools/strings_tool/strings_tool.cpp` — C++ source under tools (Developer tools and utilities.)
+
+## wxfred2
+
+- `wxfred2/base/wxFRED_base.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/base/wxFRED_base.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/base/wxFRED_base.xrc` — xrc file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/CMakeLists.txt` — Text file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgAsteroidFieldEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgAsteroidFieldEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgBackgroundEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgBackgroundEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgEventsEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgEventsEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgFictionViewer.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgFictionViewer.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgMissionObjectivesEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgMissionObjectivesEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgMissionSpecsEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgMissionSpecsEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgObjectEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgObjectEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgReinforcementsEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgReinforcementsEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgReinforcementsPicker.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgReinforcementsPicker.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgSetGlobalShipFlagsEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgSetGlobalShipFlagsEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgShieldSystemEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgShieldSystemEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgSoundEnvironment.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgSoundEnvironment.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgVoiceActingManager.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/dlgVoiceActingManager.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmBriefingEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmBriefingEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmCampaignEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmCampaignEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmCommandBriefingEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmCommandBriefingEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmDebriefingEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmDebriefingEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmShipsEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmShipsEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmTeamLoadoutEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmTeamLoadoutEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmWaypointEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmWaypointEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmWingEditor.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/editors/frmWingEditor.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/frmFRED2.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/frmFRED2.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/glcViewport.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/help/dlgAboutBox.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/help/dlgAboutBox.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/help/dlgSexpHelp.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/help/dlgSexpHelp.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/misc/dlgMissionStats.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/misc/dlgMissionStats.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/README` — File under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/bitmap1.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/black_do.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/bmp00001.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/chained_directive.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/chained.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/constx.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/constxy.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/constxz.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/consty.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/constyz.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/constz.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data00.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data05.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data10.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data15.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data20.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data25.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data30.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data35.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data40.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data45.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data50.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data55.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data60.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data65.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data70.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data75.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data80.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data85.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data90.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/data95.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/fred_app.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/fred_debug.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/fred_splash.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/fred.ico` — ico file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/freddoc.ico` — ico file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/fredknows.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/green_do.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/orbitsel.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/play.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/root_directive.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/root.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/rotlocal.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/select.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/selectlist.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/selectlock.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/selectmove.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/selectrot.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/showdist.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/toolbar.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/toolbar1_x2.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/toolbar1.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/V_fred.ico` — ico file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/V_fred.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/variable.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/wingdisband.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/wingform.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/wxfred_icon-d.ico` — ico file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/wxfred_icon.ico` — ico file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/wxFREDicon.rc` — rc file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/wxFREDIcon.xpm` — xpm file under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/zoomext.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/res/zoomsel.png` — Image asset under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/source_groups.cmake` — CMake script under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/wxfred2.cpp` — C++ source under wxfred2 (wxWidgets-based FRED2 editor sources.)
+- `wxfred2/wxfred2.h` — C/C++ header under wxfred2 (wxWidgets-based FRED2 editor sources.)
+
+

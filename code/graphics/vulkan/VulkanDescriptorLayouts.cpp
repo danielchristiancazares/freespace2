@@ -18,10 +18,10 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 	          "Vulkan model rendering not supported on this device.",
 	          limits.maxDescriptorSetSampledImages, kMaxBindlessTextures);
 
-	// Validate storage buffer limits - we only bind 1 storage buffer per set at binding 0
-	Assertion(limits.maxDescriptorSetStorageBuffers >= 1,
-	          "Device maxDescriptorSetStorageBuffers (%u) < required 1",
-	          limits.maxDescriptorSetStorageBuffers);
+	// Also validate storage buffer limits
+	Assertion(limits.maxDescriptorSetStorageBuffers >= kModelSetsPerPool,
+	          "Device maxDescriptorSetStorageBuffers (%u) < required %u",
+	          limits.maxDescriptorSetStorageBuffers, kModelSetsPerPool);
 }
 
 VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(device)
@@ -154,19 +154,19 @@ void VulkanDescriptorLayouts::createModelLayouts()
 
 	m_modelPipelineLayout = m_device.createPipelineLayoutUnique(pipelineLayoutInfo);
 
-	// Descriptor pool - sizes derived from kFramesInFlight (one set per frame)
+	// Descriptor pool - sizes derived from kFramesInFlight, not magic numbers
 	std::array<vk::DescriptorPoolSize, 3> poolSizes{};
 	poolSizes[0].type = vk::DescriptorType::eStorageBuffer;
-	poolSizes[0].descriptorCount = kFramesInFlight; // 1 SSBO per set (vertex heap)
+	poolSizes[0].descriptorCount = kModelSetsPerPool; // 1 SSBO per set (vertex heap)
 	poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
-	poolSizes[1].descriptorCount = kFramesInFlight * kMaxBindlessTextures;
+	poolSizes[1].descriptorCount = kModelSetsPerPool * kMaxBindlessTextures;
 	poolSizes[2].type = vk::DescriptorType::eUniformBufferDynamic;
-	poolSizes[2].descriptorCount = kFramesInFlight; // 1 dynamic UBO per set
+	poolSizes[2].descriptorCount = kModelSetsPerPool; // 1 dynamic UBO per set
 
 	vk::DescriptorPoolCreateInfo poolInfo;
 	// eFreeDescriptorSet not strictly needed for fixed ring, but harmless
 	poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-	poolInfo.maxSets = kFramesInFlight; // One set per frame-in-flight
+	poolInfo.maxSets = kModelSetsPerPool; // Exactly what we need, no slack
 	poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 	poolInfo.pPoolSizes = poolSizes.data();
 

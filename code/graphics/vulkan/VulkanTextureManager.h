@@ -106,6 +106,7 @@ class VulkanTextureManager {
 
 	struct TextureBindingState {
 		uint32_t arrayIndex = 0;
+		std::array<bool, kFramesInFlight> descriptorWritten{};
 	};
 
 	struct TextureRecord {
@@ -126,17 +127,13 @@ class VulkanTextureManager {
 		}
 	};
 
-	struct TextureDescriptorQuery {
-		vk::DescriptorImageInfo info;
-		bool isFallback = false;
-		bool queuedUpload = false;
-	};
-
-	// Query descriptor for a bitmap; queues upload if needed but never throws.
-	// Returns fallback descriptor if texture is not resident.
-	TextureDescriptorQuery queryDescriptor(int bitmapHandle, const SamplerKey& samplerKey);
-
-	// Flush pending uploads (only callable when no rendering is active).
+	// Get descriptor for a bitmap; schedules upload if needed. Refuses to return dummy fallbacks.
+	vk::DescriptorImageInfo getDescriptor(int bitmapHandle,
+		VulkanFrame& frame,
+		vk::CommandBuffer cmd,
+		uint32_t currentFrameIndex,
+		bool renderPassActive,
+		const SamplerKey& samplerKey);
 	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 	void markUploadsCompleted(uint32_t completedFrameIndex);
 
@@ -151,12 +148,13 @@ class VulkanTextureManager {
 
 	// Descriptor binding management
 	void onTextureResident(int textureHandle, uint32_t arrayIndex);
-	void retireTexture(int textureHandle, uint64_t retireSerial);
+	void retireTexture(int textureHandle);
 
 	const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
 	void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
 	int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
-	void processPendingDestructions(uint64_t completedSerial);
+	void processPendingDestructions(uint64_t currentFrame);
+	void setCurrentFrame(uint64_t frame) { m_currentFrame = frame; }
 
 	// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
 	std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
@@ -203,8 +201,11 @@ class VulkanTextureManager {
 	// Fallback "black" texture for retired slots (initialized at startup)
 	int m_fallbackTextureHandle = -1;
 
-	// Pending destructions: {textureHandle, retireSerial}
+	// Pending destructions: {textureHandle, safeFrame}
 	std::vector<std::pair<int, uint64_t>> m_pendingDestructions;
+
+	// Current frame counter for deferred destruction tracking
+	uint64_t m_currentFrame = 0;
 };
 
 } // namespace vulkan

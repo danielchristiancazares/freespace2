@@ -4,9 +4,9 @@
 #include "VulkanModelTypes.h"
 #include "VulkanRenderer.h"
 #include "VulkanPipelineManager.h"
+#include "VulkanRenderTargets.h"
 #include "VulkanVertexTypes.h"
 #include "VulkanDebug.h"
-#include "VulkanClip.h"
 
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_vulkan.h"
@@ -48,14 +48,27 @@ vk::Viewport createFullScreenViewport()
 	return viewport;
 }
 
-	vk::Rect2D createClipScissor()
-	{
-		const auto clip = getClipScissorFromScreen(gr_screen);
-		vk::Rect2D scissor{};
-		scissor.offset = vk::Offset2D{clip.x, clip.y};
-		scissor.extent = vk::Extent2D{clip.width, clip.height};
-		return scissor;
-	}
+vk::Rect2D createClipScissor()
+{
+	vk::Rect2D scissor{};
+	scissor.offset = vk::Offset2D{
+		static_cast<int32_t>(gr_screen.clip_left),
+		static_cast<int32_t>(gr_screen.clip_top)};
+	scissor.extent = vk::Extent2D{
+		static_cast<uint32_t>(gr_screen.clip_width),
+		static_cast<uint32_t>(gr_screen.clip_height)};
+	return scissor;
+}
+
+vk::Rect2D createFullScreenScissor()
+{
+	vk::Rect2D scissor{};
+	scissor.offset = vk::Offset2D{0, 0};
+	scissor.extent = vk::Extent2D{
+		static_cast<uint32_t>(gr_screen.max_w),
+		static_cast<uint32_t>(gr_screen.max_h)};
+	return scissor;
+}
 
 vk::PrimitiveTopology convertPrimitiveType(primitive_type prim_type)
 {
@@ -100,9 +113,9 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 // Begin a new frame for rendering and set initial dynamic state.
 // Called immediately after flip() via gr_setup_frame() per API contract.
 // Injects g_currentFrame for use by render functions.
-	void gr_vulkan_setup_frame()
-	{
-		Assertion(renderer_instance != nullptr, "setup_frame called without renderer");
+void gr_vulkan_setup_frame()
+{
+	Assertion(renderer_instance != nullptr, "setup_frame called without renderer");
 
 	// Inject frame into module context - render functions will use g_currentFrame
 	g_currentFrame = renderer_instance->getCurrentRecordingFrame();
@@ -117,14 +130,14 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 	// DO NOT start the render pass here - allow gr_clear to set clear flags first.
 	// The render pass will start lazily when the first draw or clear occurs.
 
-		// Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
-		vk::Viewport viewport = createFullScreenViewport();
-		cmd.setViewport(0, 1, &viewport);
+	// Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
+	vk::Viewport viewport = createFullScreenViewport();
+	cmd.setViewport(0, 1, &viewport);
 
-		// Scissor: current clip region
-		vk::Rect2D scissor = createClipScissor();
-		cmd.setScissor(0, 1, &scissor);
-	}
+	// Scissor: full-screen to ensure clears cover the entire framebuffer
+	vk::Rect2D scissor = createFullScreenScissor();
+	cmd.setScissor(0, 1, &scissor);
+}
 
 void gr_vulkan_delete_buffer(gr_buffer_handle handle)
 {
@@ -186,8 +199,8 @@ void stub_print_screen(const char* /*filename*/) {}
 
 SCP_string stub_blob_screen() { return {}; }
 
-	void gr_vulkan_reset_clip()
-	{
+void gr_vulkan_reset_clip()
+{
 	gr_screen.offset_x = gr_screen.offset_x_unscaled = 0;
 	gr_screen.offset_y = gr_screen.offset_y_unscaled = 0;
 
@@ -201,21 +214,13 @@ SCP_string stub_blob_screen() { return {}; }
 	gr_screen.clip_center_x = (gr_screen.clip_left + gr_screen.clip_right) * 0.5f;
 	gr_screen.clip_center_y = (gr_screen.clip_top + gr_screen.clip_bottom) * 0.5f;
 
-		if (gr_screen.custom_size) {
-			gr_unsize_screen_pos(&gr_screen.max_w_unscaled, &gr_screen.max_h_unscaled);
-			gr_unsize_screen_pos(&gr_screen.max_w_unscaled_zoomed, &gr_screen.max_h_unscaled_zoomed);
-			gr_unsize_screen_pos(&gr_screen.clip_right_unscaled, &gr_screen.clip_bottom_unscaled);
-			gr_unsize_screen_pos(&gr_screen.clip_width_unscaled, &gr_screen.clip_height_unscaled);
-		}
-
-		if (g_currentFrame != nullptr) {
-			vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-			if (cmd) {
-				vk::Rect2D scissor = createClipScissor();
-				cmd.setScissor(0, 1, &scissor);
-			}
-		}
+	if (gr_screen.custom_size) {
+		gr_unsize_screen_pos(&gr_screen.max_w_unscaled, &gr_screen.max_h_unscaled);
+		gr_unsize_screen_pos(&gr_screen.max_w_unscaled_zoomed, &gr_screen.max_h_unscaled_zoomed);
+		gr_unsize_screen_pos(&gr_screen.clip_right_unscaled, &gr_screen.clip_bottom_unscaled);
+		gr_unsize_screen_pos(&gr_screen.clip_width_unscaled, &gr_screen.clip_height_unscaled);
 	}
+}
 
 void stub_restore_screen(int /*id*/) {}
 
@@ -247,18 +252,61 @@ void stub_update_transform_buffer(void* /*data*/, size_t /*size*/) {}
 
 void stub_set_clear_color(int /*r*/, int /*g*/, int /*b*/) {}
 
-	void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode)
-	{
-		applyClipToScreen(x, y, w, h, resize_mode);
+void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode)
+{
+	// Store unscaled values
+	gr_screen.offset_x_unscaled = x;
+	gr_screen.offset_y_unscaled = y;
+	gr_screen.clip_width_unscaled = w;
+	gr_screen.clip_height_unscaled = h;
 
-		if (g_currentFrame != nullptr) {
-			vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-			if (cmd) {
-				vk::Rect2D scissor = createClipScissor();
-				cmd.setScissor(0, 1, &scissor);
-			}
-		}
+	// Apply resize scaling if not GR_RESIZE_NONE
+	if (resize_mode != GR_RESIZE_NONE) {
+		gr_resize_screen_pos(&x, &y, &w, &h, resize_mode);
 	}
+
+	// Clamp to screen bounds
+	if (x < 0) {
+		w += x;
+		x = 0;
+	}
+	if (y < 0) {
+		h += y;
+		y = 0;
+	}
+	if (x + w > gr_screen.max_w) {
+		w = gr_screen.max_w - x;
+	}
+	if (y + h > gr_screen.max_h) {
+		h = gr_screen.max_h - y;
+	}
+
+	// Ensure valid dimensions
+	if (w < 1) {
+		w = 1;
+	}
+	if (h < 1) {
+		h = 1;
+	}
+
+	gr_screen.offset_x = x;
+	gr_screen.offset_y = y;
+	gr_screen.clip_left = x;
+	gr_screen.clip_top = y;
+	gr_screen.clip_right = x + w - 1;
+	gr_screen.clip_bottom = y + h - 1;
+	gr_screen.clip_width = w;
+	gr_screen.clip_height = h;
+	gr_screen.clip_aspect = i2fl(w) / i2fl(h);
+	gr_screen.clip_center_x = (gr_screen.clip_left + gr_screen.clip_right) * 0.5f;
+	gr_screen.clip_center_y = (gr_screen.clip_top + gr_screen.clip_bottom) * 0.5f;
+
+	// Set unscaled clip bounds
+	gr_screen.clip_left_unscaled = gr_screen.offset_x_unscaled;
+	gr_screen.clip_top_unscaled = gr_screen.offset_y_unscaled;
+	gr_screen.clip_right_unscaled = gr_screen.offset_x_unscaled + gr_screen.clip_width_unscaled - 1;
+	gr_screen.clip_bottom_unscaled = gr_screen.offset_y_unscaled + gr_screen.clip_height_unscaled - 1;
+}
 
 int stub_set_cull(int /*cull*/) { return 0; }
 
@@ -554,9 +602,28 @@ void gr_vulkan_render_model(model_material* material_info,
 	pcs.matrixIndex    = 0;  // Unused
 	pcs.flags          = material_info->get_shader_flags();
 
-	// Use the per-frame model descriptor set (allocated and synced at frame start)
-	Assertion(frame.modelDescriptorSet, "Model descriptor set must be allocated at frame start");
-	vk::DescriptorSet modelSet = frame.modelDescriptorSet;
+	// Allocate fresh descriptor set for this draw to avoid race conditions
+	vk::DescriptorSet modelSet = renderer_instance->allocateModelDescriptorSet();
+	Assertion(modelSet, "Failed to allocate model descriptor set");
+
+	std::vector<std::pair<uint32_t, int>> texturesToBind;
+	texturesToBind.reserve(4);
+	for (const auto& entry : {
+	         std::pair<uint32_t, int>{pcs.baseMapIndex,   baseTex},
+	         std::pair<uint32_t, int>{pcs.glowMapIndex,   glowTex},
+	         std::pair<uint32_t, int>{pcs.normalMapIndex, normalTex},
+	         std::pair<uint32_t, int>{pcs.specMapIndex,   specTex}}) {
+		if (entry.first != MODEL_OFFSET_ABSENT) {
+			texturesToBind.emplace_back(entry);
+		}
+	}
+
+	renderer_instance->updateModelDescriptors(
+		modelSet,
+		vertexBuffer,
+		texturesToBind,
+		frame,
+		cmd);
 
 	// Ensure rendering has started
 	renderer_instance->ensureRenderingStarted(cmd);
@@ -877,15 +944,20 @@ void gr_vulkan_render_primitives(material* material_info,
 	cmd.setStencilTestEnable(VK_FALSE);
 	if (renderer_instance->supportsExtendedDynamicState3()) {
 		const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+		// Must set dynamic state for ALL active color attachments, not just attachment 0.
+		// Otherwise MRT G-buffer attachments 1..N remain undefined and get write-masked off.
+		const uint32_t attachmentCount = renderer_instance->getCurrentColorAttachmentCount();
 		if (caps.colorBlendEnable) {
-			// H7 fix: respect material blend mode instead of unconditionally disabling
-			vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
-			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+			std::array<vk::Bool32, VulkanRenderTargets::kGBufferCount> blendEnables{};
+			blendEnables.fill(VK_FALSE);
+			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(attachmentCount, blendEnables.data()));
 		}
 		if (caps.colorWriteMask) {
 			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
 				vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+			std::array<vk::ColorComponentFlags, VulkanRenderTargets::kGBufferCount> masks{};
+			masks.fill(mask);
+			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(attachmentCount, masks.data()));
 		}
 		if (caps.polygonMode) {
 			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
@@ -897,11 +969,11 @@ void gr_vulkan_render_primitives(material* material_info,
 
 	// Viewport and scissor (should be set per-frame, but ensure they're set)
 	// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
-		vk::Viewport viewport = createFullScreenViewport();
-		cmd.setViewport(0, 1, &viewport);
+	vk::Viewport viewport = createFullScreenViewport();
+	cmd.setViewport(0, 1, &viewport);
 
-		vk::Rect2D scissor = createClipScissor();
-		cmd.setScissor(0, 1, &scissor);
+	vk::Rect2D scissor = createFullScreenScissor();
+	cmd.setScissor(0, 1, &scissor);
 
 	// Draw
 	cmd.draw(static_cast<uint32_t>(n_verts), 1, static_cast<uint32_t>(offset), 0);
@@ -1125,16 +1197,21 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	// Set extended dynamic state 3 (if supported)
 	if (renderer_instance->supportsExtendedDynamicState3()) {
 		const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+		// Must set dynamic state for ALL active color attachments, not just attachment 0.
+		// Otherwise MRT G-buffer attachments 1..N remain undefined and get write-masked off.
+		const uint32_t attachmentCount = renderer_instance->getCurrentColorAttachmentCount();
 		if (caps.colorBlendEnable) {
-			// H7 fix: respect material blend mode instead of unconditionally disabling
-			vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
-			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+			std::array<vk::Bool32, VulkanRenderTargets::kGBufferCount> blendEnables{};
+			blendEnables.fill(VK_FALSE);
+			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(attachmentCount, blendEnables.data()));
 		}
 		if (caps.colorWriteMask) {
 			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR |
 				vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
 				vk::ColorComponentFlagBits::eA;
-			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+			std::array<vk::ColorComponentFlags, VulkanRenderTargets::kGBufferCount> masks{};
+			masks.fill(mask);
+			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(attachmentCount, masks.data()));
 		}
 		if (caps.polygonMode) {
 			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
@@ -1144,11 +1221,11 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 		}
 	}
 
-		// Set viewport and scissor
-		vk::Viewport viewport = createFullScreenViewport();
-		cmd.setViewport(0, 1, &viewport);
-		vk::Rect2D scissor = createClipScissor();
-		cmd.setScissor(0, 1, &scissor);
+	// Set viewport and scissor
+	vk::Viewport viewport = createFullScreenViewport();
+	cmd.setViewport(0, 1, &viewport);
+	vk::Rect2D scissor = createFullScreenScissor();
+	cmd.setScissor(0, 1, &scissor);
 
 	// Draw call
 	cmd.draw(static_cast<uint32_t>(n_verts), 1, static_cast<uint32_t>(offset), 0);

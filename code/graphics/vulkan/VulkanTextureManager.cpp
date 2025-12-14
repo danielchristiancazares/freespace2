@@ -580,6 +580,8 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 			continue;
 		}
 
+		try {
+
 		int numFrames = 1;
 		bm_get_base_frame(baseFrame, &numFrames);
 		const bool isArray = bm_is_texture_array(baseFrame);
@@ -628,11 +630,10 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 			                                              : static_cast<size_t>(width) * height * 4;
 		}
 
-		// Textures that can never fit in the staging buffer are marked as Failed
-		if (totalUploadSize > stagingBudget) {
-			record.state = TextureState::Failed;
-			continue;
-		}
+		// Catch textures that can never fit in the staging buffer - these would loop forever
+		Assertion(totalUploadSize <= stagingBudget,
+			"Texture %d (%zu bytes, %ux%ux%u) exceeds staging budget (%zu bytes)",
+			baseFrame, totalUploadSize, width, height, layers, static_cast<size_t>(stagingBudget));
 
 		if (stagingUsed + totalUploadSize > stagingBudget) {
 			remaining.push_back(baseFrame);
@@ -641,14 +642,12 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 
 		std::vector<vk::BufferImageCopy> regions;
 		regions.reserve(layers);
-		bool stagingFailed = false;
 
 		for (uint32_t layer = 0; layer < layers; ++layer) {
 			const int frameHandle = isArray ? baseFrame + static_cast<int>(layer) : baseFrame;
 			auto* frameBmp = bm_lock(frameHandle, 32, flags);
 			if (!frameBmp) {
 				record.state = TextureState::Failed;
-				stagingFailed = true;
 				break;
 			}
 
@@ -656,16 +655,14 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 			                              : singleChannel ? static_cast<size_t>(width) * height
 			                                              : static_cast<size_t>(width) * height * 4;
 
-			auto allocOpt = frame.stagingBuffer().try_allocate(static_cast<vk::DeviceSize>(layerSize));
-			if (!allocOpt) {
-				// Staging buffer exhausted - defer to next frame
-				record.state = TextureState::Queued;
+			VulkanRingBuffer::Allocation alloc;
+			try {
+				alloc = frame.stagingBuffer().allocate(static_cast<vk::DeviceSize>(layerSize));
+			} catch (const std::exception&) {
+				record.state = TextureState::Missing; // try again next frame
 				bm_unlock(frameHandle);
-				remaining.push_back(baseFrame);
-				stagingFailed = true;
 				break;
 			}
-			auto& alloc = *allocOpt;
 
 			if (!compressed && !singleChannel && frameBmp->bpp == 24) {
 				auto* src = reinterpret_cast<uint8_t*>(frameBmp->data);
@@ -709,7 +706,7 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 			bm_unlock(frameHandle);
 		}
 
-		if (stagingFailed || record.state == TextureState::Failed || record.state == TextureState::Missing) {
+		if (record.state == TextureState::Failed || record.state == TextureState::Missing) {
 			continue;
 		}
 
@@ -797,6 +794,12 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 		record.pendingFrameIndex = currentFrameIndex;
 		record.lastUsedFrame = currentFrameIndex;
 		onTextureResident(baseFrame, bm_get_array_index(baseFrame));
+
+		} catch (...) {
+			// Isolate per-texture failures to prevent poisoning the entire frame
+			record.state = TextureState::Failed;
+			continue;
+		}
 	}
 
 	m_pendingUploads.swap(remaining);
@@ -818,59 +821,78 @@ bool VulkanTextureManager::isUploadQueued(int baseFrame) const
 	return std::find(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrame) != m_pendingUploads.end();
 }
 
-VulkanTextureManager::TextureDescriptorQuery VulkanTextureManager::queryDescriptor(int bitmapHandle,
+vk::DescriptorImageInfo VulkanTextureManager::getDescriptor(int bitmapHandle,
+	VulkanFrame& frame,
+	vk::CommandBuffer cmd,
+	uint32_t currentFrameIndex,
+	bool renderPassActive,
 	const SamplerKey& samplerKey)
 {
-	TextureDescriptorQuery result{};
-	result.isFallback = false;
-	result.queuedUpload = false;
+	bool usedStaging = false;
+	bool uploadQueued = false;
+	TextureRecord* record = ensureTextureResident(
+		bitmapHandle, frame, cmd, currentFrameIndex, samplerKey, usedStaging, uploadQueued);
+	(void)usedStaging;
+	(void)uploadQueued;
 
-	int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
-	if (baseFrame < 0) {
-		// Invalid bitmap handle - return fallback
-		result.isFallback = true;
-		return result;
+	vk::DescriptorImageInfo info{};
+	if (!record) {
+		throw std::runtime_error("Requested Vulkan texture descriptor for missing bitmap");
 	}
 
-	auto it = m_textures.find(baseFrame);
-	if (it == m_textures.end()) {
-		it = m_textures.emplace(baseFrame, TextureRecord{}).first;
+	if (record->state != TextureState::Resident || !record->gpu.imageView) {
+		if (renderPassActive) {
+			throw std::runtime_error("Texture requested during active render pass before residency; end pass and retry");
+		}
+
+		// Attempt to upload immediately and try again
+		flushPendingUploads(frame, cmd, currentFrameIndex);
+		record = ensureTextureResident(
+			bitmapHandle, frame, cmd, currentFrameIndex, samplerKey, usedStaging, uploadQueued);
+		if (!record || record->state != TextureState::Resident || !record->gpu.imageView) {
+			throw std::runtime_error("Vulkan texture residency failed; refusing to bind dummy descriptor");
+		}
 	}
-	auto& record = it->second;
 
-	// Update sampler
-	record.gpu.sampler = getOrCreateSampler(samplerKey);
-
-	// If not resident, queue upload (if needed) and return fallback
-	if (record.state != TextureState::Resident || !record.gpu.imageView) {
-		// Queue upload if state allows it (Missing, Failed, or Retired that we want to reload)
-		if (record.state == TextureState::Missing || record.state == TextureState::Failed) {
-			// Queue upload if not already queued
-			if (!isUploadQueued(baseFrame)) {
-				m_pendingUploads.push_back(baseFrame);
-				record.state = TextureState::Queued;
+	if (record->state == TextureState::Resident && record->gpu.imageView) {
+		if (record->gpu.currentLayout != vk::ImageLayout::eShaderReadOnlyOptimal) {
+			if (renderPassActive) {
+				throw std::runtime_error(
+					"Texture layout transition required during active render pass; end pass and retry");
 			}
-			result.queuedUpload = true;
-		} else if (record.state == TextureState::Queued || record.state == TextureState::Uploading) {
-			result.queuedUpload = true;
-		}
-		// Return fallback descriptor
-		result.isFallback = true;
-		auto fallbackIt = m_textures.find(kFallbackTextureHandle);
-		if (fallbackIt != m_textures.end() && fallbackIt->second.gpu.imageView) {
-			result.info.imageView = fallbackIt->second.gpu.imageView.get();
-			result.info.sampler = getOrCreateSampler(samplerKey);
-			result.info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-		}
-		return result;
-	}
+			vk::ImageMemoryBarrier2 toShader{};
+			// Choose conservative source scopes based on current layout.
+			if (record->gpu.currentLayout == vk::ImageLayout::eTransferDstOptimal) {
+				toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+				toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+			} else {
+				toShader.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+				toShader.srcAccessMask = vk::AccessFlagBits2::eMemoryWrite;
+			}
+			toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+			toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+			toShader.oldLayout = record->gpu.currentLayout;
+			toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+			Assertion(record->gpu.imageView, "Image view must exist when transitioning texture to shader layout");
+			toShader.image = record->gpu.image.get();
+			toShader.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+			toShader.subresourceRange.levelCount = record->gpu.mipLevels;
+			toShader.subresourceRange.layerCount = record->gpu.layers;
 
-	// Texture is resident - return real descriptor
-	result.info.imageView = record.gpu.imageView.get();
-	Assertion(record.gpu.sampler, "Sampler must be set for resident texture");
-	result.info.sampler = record.gpu.sampler;
-	result.info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-	return result;
+			vk::DependencyInfo dep{};
+			dep.imageMemoryBarrierCount = 1;
+			dep.pImageMemoryBarriers = &toShader;
+			cmd.pipelineBarrier2(dep);
+			record->gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		}
+
+		info.imageView = record->gpu.imageView.get();
+		Assertion(record->gpu.sampler, "Sampler must be set for resident texture");
+		info.sampler = record->gpu.sampler;
+		info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		return info;
+	}
+	throw std::runtime_error("Vulkan texture descriptor unresolved after upload attempt");
 }
 
 bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool /*isAABitmap*/)
@@ -905,9 +927,12 @@ void VulkanTextureManager::onTextureResident(int textureHandle, uint32_t arrayIn
 
 	auto& record = it->second;
 	record.bindingState.arrayIndex = arrayIndex;
+	for (size_t f = 0; f < record.bindingState.descriptorWritten.size(); ++f) {
+		record.bindingState.descriptorWritten[f] = false;
+	}
 }
 
-void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial)
+void VulkanTextureManager::retireTexture(int textureHandle)
 {
 	auto it = m_textures.find(textureHandle);
 	Assertion(it != m_textures.end(), "retireTexture called for unknown texture handle %d", textureHandle);
@@ -920,12 +945,18 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
 	// Mark as retired (no longer usable for new draws)
 	record.state = TextureState::Retired;
 
+	// Mark all frames as needing re-write for this slot
+	for (size_t f = 0; f < record.bindingState.descriptorWritten.size(); ++f) {
+		record.bindingState.descriptorWritten[f] = false;
+	}
+
 	// Track this slot for fallback descriptor writes
 	// The renderer will write fallback descriptors to these slots at frame start
 	m_retiredSlots.push_back(slot);
 
-	// Queue actual VkImage/VkImageView destruction for after GPU completes the serial
-	m_pendingDestructions.push_back({textureHandle, retireSerial});
+	// Queue actual VkImage/VkImageView destruction for after all frames drain
+	// safeFrame = current frame + frames in flight (ensures no in-flight CB references it)
+	m_pendingDestructions.push_back({textureHandle, m_currentFrame + kFramesInFlight});
 }
 
 void VulkanTextureManager::clearRetiredSlotsIfAllFramesUpdated(uint32_t /*completedFrameIndex*/)
@@ -941,12 +972,12 @@ void VulkanTextureManager::clearRetiredSlotsIfAllFramesUpdated(uint32_t /*comple
 	}
 }
 
-void VulkanTextureManager::processPendingDestructions(uint64_t completedSerial)
+void VulkanTextureManager::processPendingDestructions(uint64_t currentFrame)
 {
 	auto it = m_pendingDestructions.begin();
 	while (it != m_pendingDestructions.end()) {
-		if (completedSerial >= it->second) {
-			// Safe to destroy - GPU has completed the serial that retired this texture
+		if (currentFrame >= it->second) {
+			// Safe to destroy - all frames that could reference this texture have completed
 			int handle = it->first;
 
 			auto texIt = m_textures.find(handle);

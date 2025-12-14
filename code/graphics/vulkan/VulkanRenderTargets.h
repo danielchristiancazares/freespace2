@@ -17,7 +17,6 @@ class VulkanRenderTargets {
 	void create(vk::Extent2D extent);
 	void resize(vk::Extent2D newExtent);
 
-	// Depth access
 	vk::Format depthFormat() const { return m_depthFormat; }
 	vk::ImageView depthAttachmentView() const { return m_depthImageView.get(); }
 	vk::ImageView depthSampledView() const { return m_depthSampleView.get(); }
@@ -25,7 +24,6 @@ class VulkanRenderTargets {
 	bool isDepthInitialized() const { return m_depthInitialized; }
 	void markDepthInitialized() { m_depthInitialized = true; }
 
-	// G-buffer access
 	vk::Format gbufferFormat() const { return m_gbufferFormat; }
 	vk::Image gbufferImage(uint32_t index) const { return m_gbufferImages[index].get(); }
 	vk::ImageView gbufferView(uint32_t index) const { return m_gbufferViews[index].get(); }
@@ -38,7 +36,6 @@ class VulkanRenderTargets {
 
 	VulkanDevice& m_device;
 
-	// Depth resources
 	vk::UniqueImage m_depthImage;
 	vk::UniqueDeviceMemory m_depthMemory;
 	vk::UniqueImageView m_depthImageView;
@@ -47,7 +44,6 @@ class VulkanRenderTargets {
 	bool m_depthInitialized = false;
 	vk::SampleCountFlagBits m_sampleCount = vk::SampleCountFlagBits::e1;
 
-	// G-buffer resources
 	std::array<vk::UniqueImage, kGBufferCount> m_gbufferImages;
 	std::array<vk::UniqueDeviceMemory, kGBufferCount> m_gbufferMemories;
 	std::array<vk::UniqueImageView, kGBufferCount> m_gbufferViews;

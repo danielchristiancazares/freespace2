@@ -13,61 +13,34 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <chrono>
-#include <fstream>
 
 namespace graphics {
 namespace vulkan {
 
-// Maps vertex_format_data::vertex_format to Vulkan format and shader location
 struct VertexFormatMapping {
 	vk::Format format;
 	uint32_t location;
-	uint32_t componentCount; // Number of components (1-4)
+	uint32_t componentCount;
 };
 
-// Maps FSO vertex format types to Vulkan formats and locations
-// Location mapping follows OpenGL convention:
-// 0 = POSITION, 1 = COLOR, 2 = TEXCOORD, 3 = NORMAL, 4 = TANGENT, etc.
+// Location mapping: 0=position, 1=color, 2=texcoord, 3=normal, 4=tangent, etc.
 static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatMapping> VERTEX_FORMAT_MAP = {
-	// Position formats -> location 0
 	{vertex_format_data::POSITION4, {vk::Format::eR32G32B32A32Sfloat, 0, 4}},
 	{vertex_format_data::POSITION3, {vk::Format::eR32G32B32Sfloat, 0, 3}},
 	{vertex_format_data::POSITION2, {vk::Format::eR32G32Sfloat, 0, 2}},
 	{vertex_format_data::SCREEN_POS, {vk::Format::eR32G32Sfloat, 0, 2}},
-
-	// Color formats -> location 1
 	{vertex_format_data::COLOR3, {vk::Format::eR8G8B8Unorm, 1, 3}},
 	{vertex_format_data::COLOR4, {vk::Format::eR8G8B8A8Unorm, 1, 4}},
 	{vertex_format_data::COLOR4F, {vk::Format::eR32G32B32A32Sfloat, 1, 4}},
-
-	// Texture coordinate formats -> location 2
 	{vertex_format_data::TEX_COORD2, {vk::Format::eR32G32Sfloat, 2, 2}},
 	{vertex_format_data::TEX_COORD4, {vk::Format::eR32G32B32A32Sfloat, 2, 4}},
-
-	// Normal -> location 3
 	{vertex_format_data::NORMAL, {vk::Format::eR32G32B32Sfloat, 3, 3}},
-
-	// Tangent -> location 4
 	{vertex_format_data::TANGENT, {vk::Format::eR32G32B32A32Sfloat, 4, 4}},
-
-	// Model ID -> location 5
 	{vertex_format_data::MODEL_ID, {vk::Format::eR32Sfloat, 5, 1}},
-
-	// Radius -> location 6
 	{vertex_format_data::RADIUS, {vk::Format::eR32Sfloat, 6, 1}},
-
-	// UVec -> location 7
 	{vertex_format_data::UVEC, {vk::Format::eR32G32B32Sfloat, 7, 3}},
-
-	// Matrix4 -> locations 8-11 (4 vec4s)
-	{vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}}, // handled specially
+	{vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}},
 };
-
-// Vulkan allows gaps in vertex attribute locations - a layout with position (0) and
-// texcoord (2) but no color (1) is valid. The shader simply won't receive data for
-// unused locations. Validation layer warnings about mismatched locations indicate
-// shader/layout incompatibility, not an invalid layout.
 
 static const char* vertexFormatToString(vertex_format_data::vertex_format fmt)
 {
@@ -158,8 +131,6 @@ static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend
 VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 {
 	VertexInputState result;
-
-	// Group components by buffer_number to create bindings
 	std::unordered_map<size_t, std::vector<const vertex_format_data*>> componentsByBuffer;
 
 	for (size_t i = 0; i < layout.get_num_vertex_components(); ++i) {
@@ -169,7 +140,6 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 
 	std::unordered_map<uint32_t, uint32_t> divisorsByBinding;
 
-	// Create bindings for each buffer
 	for (const auto& [bufferNum, components] : componentsByBuffer) {
 		if (components.empty()) {
 			continue;
@@ -183,11 +153,9 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 		binding.stride = static_cast<uint32_t>(stride);
 		binding.inputRate = vk::VertexInputRate::eVertex;
 
-		// Check if any component has divisor (instanced)
 		for (const auto* comp : components) {
 			if (comp->divisor != 0) {
 				binding.inputRate = vk::VertexInputRate::eInstance;
-				// Only divisors >1 need VK_EXT_vertex_attribute_divisor; divisor==1 is core.
 				if (comp->divisor > 1) {
 					divisorsByBinding[binding.binding] = static_cast<uint32_t>(comp->divisor);
 				}
@@ -197,7 +165,6 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 
 		result.bindings.push_back(binding);
 
-		// Create attributes for each component
 		for (const auto* component : components) {
 			auto it = VERTEX_FORMAT_MAP.find(component->format_type);
 			Assertion(it != VERTEX_FORMAT_MAP.end(),
@@ -206,9 +173,8 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 
 			const auto& mapping = it->second;
 
-			// Handle MATRIX4 specially (spans 4 locations)
 			if (component->format_type == vertex_format_data::MATRIX4) {
-				// Matrix4 is stored as 4 vec4s, each at 16-byte offset
+				// MATRIX4 spans 4 locations (4 vec4s at 16-byte intervals)
 				for (uint32_t row = 0; row < 4; ++row) {
 					vk::VertexInputAttributeDescription attr{};
 					attr.binding = static_cast<uint32_t>(component->buffer_number);
@@ -264,8 +230,6 @@ VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
 	}
 }
 
-// Targeting Vulkan 1.4: Extended Dynamic State 1 was promoted in 1.3, so the base dynamic states below are
-// guaranteed; Extended Dynamic State 2 is only partly core, so we only conditionally add EXT3 bits when supported.
 std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool supportsExtendedDynamicState3,
 	const ExtendedDynamicState3Caps& caps)
 {
@@ -342,16 +306,12 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 	shaderStages[1].module = modules.frag;
 	shaderStages[1].pName = "main";
 
-	// Vertex input state: VertexPulling types use no vertex attributes,
-	// all other shader types use traditional vertex attributes from the layout.
 	vk::PipelineVertexInputStateCreateInfo vertexInput{};
 	vk::PipelineVertexInputDivisorStateCreateInfo divisorInfo{};
 	const auto& layoutSpec = getShaderLayoutSpec(key.type);
 	const bool useVertexPulling = layoutSpec.vertexInput == VertexInputMode::VertexPulling;
 
 	if (useVertexPulling) {
-		// Vertex pulling: no vertex input attributes. Data is fetched from a storage
-		// buffer in the vertex shader using gl_VertexIndex.
 		vertexInput.vertexBindingDescriptionCount = 0;
 		vertexInput.pVertexBindingDescriptions = nullptr;
 		vertexInput.vertexAttributeDescriptionCount = 0;
@@ -361,7 +321,6 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		         static_cast<int>(key.type), key.variant_flags);
 		vkprintf("  Vertex inputs: none (vertex pulling from storage buffer)\n");
 	} else {
-		// Traditional vertex attributes from layout
 		const VertexInputState& vertexInputState = getVertexInputState(layout);
 
 		vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputState.bindings.size());
@@ -447,31 +406,14 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 	vk::Format depthFormat = static_cast<vk::Format>(key.depth_format);
 	std::vector<vk::Format> colorFormats(key.color_attachment_count, colorFormat);
 
-	// Fail-fast: pipeline color attachment count/formats must match the creation request
 	Assertion(!colorFormats.empty(), "colorFormats must not be empty");
 	if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
-		// When using vertex attributes, require Location 0; log if Location 1 is missing.
 		const VertexInputState& vertexInputState = getVertexInputState(layout);
 		bool hasLoc0 = false;
-		bool hasLoc1 = false;
 		for (const auto& a : vertexInputState.attributes) {
 			if (a.location == 0) hasLoc0 = true;
-			if (a.location == 1) hasLoc1 = true;
 		}
 		Assertion(hasLoc0, "Vertex input pipeline created without Location 0 attribute");
-		if (!hasLoc1) {
-			std::ofstream logFile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
-			const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::system_clock::now().time_since_epoch()).count();
-			logFile << "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A_LOC1\","
-			        << "\"location\":\"VulkanPipelineManager.cpp:createPipeline\","
-			        << "\"message\":\"missing Location 1 attribute for vertex-input pipeline\","
-			        << "\"data\":{\"shaderType\":" << static_cast<int>(key.type)
-			        << ",\"variantFlags\":" << key.variant_flags
-			        << ",\"layoutHash\":" << key.layout_hash
-			        << ",\"colorAttachments\":" << key.color_attachment_count
-			        << "},\"timestamp\":" << now << "}\n";
-		}
 	}
 
 	vk::PipelineDepthStencilStateCreateInfo depthStencil{};

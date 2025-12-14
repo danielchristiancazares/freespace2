@@ -24,8 +24,6 @@ void VulkanRenderingSession::resetFrameState() {
 void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex, vk::DescriptorSet globalDescriptorSet) {
 	m_currentImageIndex = imageIndex;
 	resetFrameState();
-
-	// Transition swapchain and depth to attachment layouts
 	transitionSwapchainToAttachment(cmd, imageIndex);
 	transitionDepthToAttachment(cmd);
 }
@@ -35,8 +33,6 @@ void VulkanRenderingSession::endFrame(vk::CommandBuffer cmd, uint32_t imageIndex
 		cmd.endRendering();
 		m_renderPassActive = false;
 	}
-
-	// Transition swapchain to present layout
 	transitionSwapchainToPresent(cmd, imageIndex);
 }
 
@@ -187,11 +183,8 @@ void VulkanRenderingSession::beginSwapchainRendering(vk::CommandBuffer cmd, uint
 
 void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 	const auto extent = m_device.swapchainExtent();
-
-	// Transition G-buffer images to color attachment optimal
 	transitionGBufferToAttachment(cmd);
 
-	// Setup color attachments for G-buffer
 	std::array<vk::RenderingAttachmentInfo, VulkanRenderTargets::kGBufferCount> colorAttachments{};
 	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
 		colorAttachments[i].imageView = m_targets.gbufferView(i);
@@ -225,7 +218,7 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 
 	void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet) {
 		const auto extent = m_device.swapchainExtent();
-		// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
+		// Y-flip viewport to match OpenGL coordinate system
 		vk::Viewport viewport;
 		viewport.x = 0.f;
 		viewport.y = static_cast<float>(extent.height);
@@ -236,7 +229,7 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 		cmd.setViewport(0, viewport);
 
 		cmd.setCullMode(m_cullMode);
-		cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
+		cmd.setFrontFace(vk::FrontFace::eClockwise);
 		cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
 		cmd.setDepthTestEnable(m_depthTest ? VK_TRUE : VK_FALSE);
 	cmd.setDepthWriteEnable(m_depthWrite ? VK_TRUE : VK_FALSE);
@@ -244,14 +237,20 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 	cmd.setStencilTestEnable(VK_FALSE);
 	if (m_device.supportsExtendedDynamicState3()) {
 		const auto& caps = m_device.extDyn3Caps();
+		// Must set dynamic state for ALL active color attachments, not just attachment 0.
+		// Otherwise MRT G-buffer attachments 1..N remain undefined and get write-masked off.
+		const uint32_t attachmentCount = currentColorAttachmentCount();
 		if (caps.colorBlendEnable) {
-			vk::Bool32 blendEnable = VK_FALSE;
-			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+			std::array<vk::Bool32, VulkanRenderTargets::kGBufferCount> blendEnables{};
+			blendEnables.fill(VK_FALSE);
+			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(attachmentCount, blendEnables.data()));
 		}
 		if (caps.colorWriteMask) {
 			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
 				vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+			std::array<vk::ColorComponentFlags, VulkanRenderTargets::kGBufferCount> masks{};
+			masks.fill(mask);
+			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(attachmentCount, masks.data()));
 		}
 		if (caps.polygonMode) {
 			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
@@ -267,18 +266,15 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 }
 
 void VulkanRenderingSession::ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex) {
-	// Check if we need to switch render target modes
 	if (m_renderPassActive && m_activeMode == m_pendingMode) {
 		return;
 	}
 
-	// End current rendering if switching modes
 	if (m_renderPassActive) {
 		cmd.endRendering();
 		m_renderPassActive = false;
 	}
 
-	// Begin rendering to the appropriate target
 	switch (m_pendingMode) {
 	case RenderMode::Swapchain:
 		beginSwapchainRendering(cmd, imageIndex);
@@ -325,15 +321,12 @@ void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
 		return;
 	}
 
-	// End G-buffer rendering
 	if (m_renderPassActive) {
 		cmd.endRendering();
 		m_renderPassActive = false;
 	}
 
-	// Transition G-buffer + depth to shader-read layout
 	transitionGBufferToShaderRead(cmd);
-
 	m_deferredGeometryDone = true;
 }
 

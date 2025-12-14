@@ -5,6 +5,7 @@
 
 #include <vulkan/vulkan.hpp>
 #include <cstdint>
+#include <vector>
 
 namespace graphics {
 namespace vulkan {
@@ -12,6 +13,16 @@ namespace vulkan {
 struct ModelUniformState {
 	gr_buffer_handle bufferHandle{};          // Engine-level buffer handle currently bound to descriptor
 	uint32_t dynamicOffset = UINT32_MAX;      // Dynamic offset for next draw; UINT32_MAX means "unset"
+};
+
+// Per-frame dedicated staging buffer for oversized texture uploads.
+// Created when a texture is too large for the ring buffer.
+// Cleared in VulkanFrame::reset() after the fence wait completes.
+struct DedicatedStagingBuffer {
+	vk::UniqueBuffer buffer;
+	vk::UniqueDeviceMemory memory;
+	void* mapped = nullptr;
+	vk::DeviceSize size = 0;
 };
 
 class VulkanFrame {
@@ -47,6 +58,10 @@ class VulkanFrame {
 	ModelUniformState modelUniformState;
 	ModelUniformState sceneUniformState;
 
+	// Dedicated staging buffers for oversized texture uploads
+	std::vector<DedicatedStagingBuffer>& dedicatedStagingBuffers() { return m_dedicatedStaging; }
+	const vk::PhysicalDeviceMemoryProperties& memoryProperties() const { return m_memoryProperties; }
+
 	void record_submit_info(uint32_t frameIndex, uint32_t imageIndex, uint64_t timelineValue, uint64_t submitSerial);
 	uint64_t lastSubmitSerial() const { return m_lastSubmitSerial; }
 	uint32_t lastSubmitFrameIndex() const { return m_lastSubmitFrameIndex; }
@@ -69,6 +84,9 @@ class VulkanFrame {
 	VulkanRingBuffer m_uniformRing;
 	VulkanRingBuffer m_vertexRing;
 	VulkanRingBuffer m_stagingRing;
+
+	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
+	std::vector<DedicatedStagingBuffer> m_dedicatedStaging;
 
 	uint64_t m_lastSubmitTimeline = 0;
 	uint32_t m_lastSubmitImageIndex = UINT32_MAX;

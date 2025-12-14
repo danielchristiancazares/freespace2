@@ -17,7 +17,6 @@ void VulkanRenderTargets::create(vk::Extent2D extent) {
 }
 
 void VulkanRenderTargets::resize(vk::Extent2D newExtent) {
-	// Reset initialization flag since we're recreating resources
 	m_depthInitialized = false;
 	create(newExtent);
 }
@@ -56,7 +55,6 @@ void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
 
 	m_depthImageView = m_device.device().createImageViewUnique(viewInfo);
 
-	// Create sampled depth view for deferred lighting
 	vk::ImageViewCreateInfo sampleViewInfo{};
 	sampleViewInfo.image = m_depthImage.get();
 	sampleViewInfo.viewType = vk::ImageViewType::e2D;
@@ -69,16 +67,13 @@ void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
 
 vk::Format VulkanRenderTargets::findDepthFormat() const
 {
-	// Candidate depth formats in preference order (stencil variants first for
-	// future stencil buffer support, pure depth last for maximum compatibility)
 	const std::vector<vk::Format> candidates = {
 		vk::Format::eD32SfloatS8Uint,
 		vk::Format::eD24UnormS8Uint,
 		vk::Format::eD32Sfloat,
 	};
 
-	// Required features: depth buffer is used both as attachment and sampled
-	// for deferred lighting (see createDepthResources usage flags and m_depthSampleView)
+	// Depth buffer used as both attachment and sampled for deferred lighting
 	constexpr auto requiredFeatures = vk::FormatFeatureFlagBits::eDepthStencilAttachment |
 	                                  vk::FormatFeatureFlagBits::eSampledImage;
 
@@ -89,9 +84,6 @@ vk::Format VulkanRenderTargets::findDepthFormat() const
 		}
 	}
 
-	// No suitable format found - this is a fundamental capability failure.
-	// Do NOT silently return a fallback format that may not actually work;
-	// that would cause undefined behavior during deferred lighting.
 	throw std::runtime_error("No suitable depth format found with both attachment and sampling support");
 }
 
@@ -129,7 +121,6 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
 		m_gbufferViews[i] = m_device.device().createImageViewUnique(viewInfo);
 	}
 
-	// Sampler for G-buffer textures in lighting pass
 	vk::SamplerCreateInfo samplerInfo{};
 	samplerInfo.magFilter = vk::Filter::eLinear;
 	samplerInfo.minFilter = vk::Filter::eLinear;

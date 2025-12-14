@@ -115,19 +115,11 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
 
 	if (result.needsRecreate) {
 		const auto extent = m_vulkanDevice->swapchainExtent();
-		if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-			// Swapchain recreation failed - cannot recover
-			return std::numeric_limits<uint32_t>::max();
+		if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+			// Recreate render targets that depend on swapchain size
+			m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
 		}
-		// Recreate render targets that depend on swapchain size
-		m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
-
-		// Retry acquire after successful recreation (fixes C5: crash on resize)
-		result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-		if (!result.success) {
-			return std::numeric_limits<uint32_t>::max();
-		}
-		return result.imageIndex;
+		return std::numeric_limits<uint32_t>::max();
 	}
 
 	if (!result.success) {
@@ -158,8 +150,6 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	cmd.begin(beginInfo);
 
 	// Upload any pending textures before rendering begins (no render pass active yet)
-	// This is the explicit upload flush point - textures requested before rendering starts
-	// will be queued and flushed here
 	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
 	m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
 
@@ -301,19 +291,11 @@ void VulkanRenderer::flip() {
 	// #endregion
 	frame.wait_for_gpu();
 
-	// Get completed serial from the frame that just finished
-	// The fence wait ensures GPU has completed this frame's work
-	uint64_t completedSerial = 0;
-	if (frame.hasSubmitInfo()) {
-		completedSerial = frame.lastSubmitSerial();
-	}
-
 	// Process deferred buffer deletions
 	Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized");
 	m_bufferManager->onFrameEnd();
 	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized");
 	m_textureManager->markUploadsCompleted(m_currentFrame);
-	m_textureManager->processPendingDestructions(completedSerial);
 	frame.reset();
 
 	uint32_t imageIndex = acquireImage(frame);
@@ -448,14 +430,41 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
 	vk::CommandBuffer cmd,
 	const VulkanTextureManager::SamplerKey& samplerKey) {
 	if (!m_textureManager) {
-		// Return empty descriptor if texture manager not initialized
-		vk::DescriptorImageInfo empty{};
-		return empty;
+		throw std::runtime_error("Vulkan texture manager not initialized; cannot supply texture descriptor");
 	}
 
-	// Query descriptor - this never throws and always returns a valid descriptor (possibly fallback)
-	auto query = m_textureManager->queryDescriptor(bitmapHandle, samplerKey);
-	return query.info;
+	const bool renderPassActive = m_renderingSession->isRenderPassActive();
+
+	try {
+		return m_textureManager->getDescriptor(
+			bitmapHandle,
+			frame,
+			cmd,
+			getCurrentFrameIndex(),
+			renderPassActive,
+			samplerKey);
+	} catch (const std::runtime_error&) {
+		// If a texture is requested mid-render-pass and not resident, end the pass, upload, and restart.
+		if (!renderPassActive) {
+			throw;
+		}
+
+		m_renderingSession->endRendering(cmd);
+
+		m_textureManager->flushPendingUploads(frame, cmd, getCurrentFrameIndex());
+
+		auto descriptor = m_textureManager->getDescriptor(
+			bitmapHandle,
+			frame,
+			cmd,
+			getCurrentFrameIndex(),
+			/*renderPassActive=*/false,
+			samplerKey);
+
+		// Resume rendering for the caller; dynamic state will be reset by ensureRenderingStarted.
+		ensureRenderingStarted(cmd);
+		return descriptor;
+	}
 }
 
 void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
@@ -587,16 +596,17 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
 	// Binding 0: Write vertex heap descriptor (once per frame)
 	writeVertexHeapDescriptor(frame, vertexHeapBuffer);
 
-	// Binding 1: Write all texture descriptors for RESIDENT textures
-	// Note: We write all resident textures every frame. In the future, this could be optimized
-	// to track dirty slots, but for now we keep it simple and write everything.
+	// Binding 1: Write all dirty texture descriptors for RESIDENT textures
 	for (auto& [handle, record] : m_textureManager->allTextures()) {
 		if (record.state != VulkanTextureManager::TextureState::Resident) {
 			continue;
 		}
 
 		auto& state = record.bindingState;
-		writeTextureDescriptor(frame.modelDescriptorSet, state.arrayIndex, handle);
+		if (!state.descriptorWritten[frameIndex]) {
+			writeTextureDescriptor(frame.modelDescriptorSet, state.arrayIndex, handle);
+			state.descriptorWritten[frameIndex] = true;
+		}
 	}
 
 	// Write fallback descriptor into retired slots

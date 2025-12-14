@@ -49,9 +49,6 @@ vk::MemoryPropertyFlags VulkanBufferManager::getMemoryProperties(BufferUsageHint
 {
 	switch (usage) {
 	case BufferUsageHint::Static:
-		// For now, use host-visible for Static to allow updates
-		// TODO: Use device-local + staging buffer for better performance
-		return vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
 	case BufferUsageHint::Dynamic:
 	case BufferUsageHint::Streaming:
 	case BufferUsageHint::PersistentMapping:
@@ -68,10 +65,6 @@ gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageH
 	buffer.type = type;
 	buffer.usage = usage;
 	buffer.size = 0;
-
-	// Buffer will be created/resized on first update
-	// Don't create buffer yet - wait for first updateBufferData call
-
 	m_buffers.push_back(std::move(buffer));
 	return gr_buffer_handle(static_cast<int>(m_buffers.size() - 1));
 }
@@ -83,13 +76,11 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 
 	auto& buffer = m_buffers[handle.value()];
 
-	// Unmap if mapped
 	if (buffer.mapped) {
 		m_device.unmapMemory(buffer.memory.get());
 		buffer.mapped = nullptr;
 	}
 
-	// Retire buffer for deferred deletion (GPU may still be using it)
 	if (buffer.buffer) {
 		RetiredBuffer retired;
 		retired.buffer = std::move(buffer.buffer);
@@ -98,7 +89,6 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 		m_retiredBuffers.push_back(std::move(retired));
 	}
 
-	// Mark slot as invalid
 	buffer.size = 0;
 }
 
@@ -110,15 +100,12 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 
 	auto& buffer = m_buffers[handle.value()];
 
-	// If size changed or buffer not created yet, recreate buffer
 	if (size != buffer.size || buffer.size == 0) {
-		// Unmap old buffer if mapped
 		if (buffer.mapped) {
 			m_device.unmapMemory(buffer.memory.get());
 			buffer.mapped = nullptr;
 		}
 
-		// Retire old buffer for deferred deletion (GPU may still be using it)
 		if (buffer.buffer) {
 			RetiredBuffer retired;
 			retired.buffer = std::move(buffer.buffer);
@@ -127,7 +114,6 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 			m_retiredBuffers.push_back(std::move(retired));
 		}
 
-		// Create new buffer with correct size
 		vk::BufferCreateInfo bufferInfo;
 		bufferInfo.size = size;
 		bufferInfo.usage = getVkUsageFlags(buffer.type);
@@ -142,22 +128,13 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 
 		buffer.memory = m_device.allocateMemoryUnique(allocInfo);
 		m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
-
-		// Remap if host-visible (all our usage hints use host-visible memory)
 		buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
-
 		buffer.size = size;
 	}
 
-	// Upload data
 	if (buffer.mapped) {
-		// Host-visible: direct copy
 		memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
-		// Host-coherent memory doesn't need explicit flush
 	} else {
-		// Device-local: need staging buffer (TODO: implement staging buffer upload)
-		// For now, this is an error - device-local buffers need staging
-		// In practice, Static buffers should use staging, Dynamic/Streaming should be host-visible
 		UNREACHABLE("Cannot update device-local buffer without staging buffer!");
 	}
 }
@@ -180,14 +157,11 @@ void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t
 	}
 
 	if (data == nullptr) {
-		// Null data pointer - skip copy (caller may initialize buffer separately)
 		return;
 	}
 
-	// Copy to mapped memory
 	void* dest = static_cast<char*>(buffer.mapped) + offset;
 	memcpy(static_cast<char*>(dest), static_cast<const char*>(data), size);
-	// Host-coherent memory doesn't need explicit flush
 }
 
 void* VulkanBufferManager::mapBuffer(gr_buffer_handle handle)
@@ -203,21 +177,10 @@ void* VulkanBufferManager::mapBuffer(gr_buffer_handle handle)
 	return buffer.mapped;
 }
 
-void VulkanBufferManager::flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size)
+void VulkanBufferManager::flushMappedBuffer(gr_buffer_handle handle, size_t /*offset*/, size_t /*size*/)
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return;
-	}
-
-	auto& buffer = m_buffers[handle.value()];
-
-	if (!buffer.mapped) {
-		return;
-	}
-
-	// For host-coherent memory, flush is a no-op
-	// For non-coherent, we'd need vkFlushMappedMemoryRanges
-	// Since we use HOST_COHERENT for host-visible buffers, this is a no-op
+	// No-op for HOST_COHERENT memory
+	(void)handle;
 }
 
 vk::Buffer VulkanBufferManager::getBuffer(gr_buffer_handle handle) const
@@ -244,20 +207,16 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 
 	auto& buffer = m_buffers[handle.value()];
 
-	// If size is the same, nothing to do
 	if (size == buffer.size) {
 		return;
 	}
 
-	// Retire the old buffer if it exists
 	if (buffer.buffer) {
-		// Unmap if mapped
 		if (buffer.mapped) {
 			m_device.unmapMemory(buffer.memory.get());
 			buffer.mapped = nullptr;
 		}
 
-		// Move to retired buffers for deferred deletion
 		RetiredBuffer retired;
 		retired.buffer = std::move(buffer.buffer);
 		retired.memory = std::move(buffer.memory);
@@ -265,7 +224,6 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 		m_retiredBuffers.push_back(std::move(retired));
 	}
 
-	// Create new buffer with the new size
 	vk::BufferCreateInfo bufferInfo;
 	bufferInfo.size = size;
 	bufferInfo.usage = getVkUsageFlags(buffer.type);
@@ -280,23 +238,17 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 
 	buffer.memory = m_device.allocateMemoryUnique(allocInfo);
 	m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
-
-	// Map if host-visible (all our usage hints use host-visible memory)
 	buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
-
 	buffer.size = size;
 }
 
 void VulkanBufferManager::onFrameEnd()
 {
-	// Increment frame counter
 	++m_currentFrame;
 
-	// Clean up retired buffers that are old enough
 	auto it = m_retiredBuffers.begin();
 	while (it != m_retiredBuffers.end()) {
 		if (m_currentFrame - it->retiredAtFrame >= FRAMES_BEFORE_DELETE) {
-			// Buffer will be automatically destroyed via UniqueBuffer/UniqueDeviceMemory
 			it = m_retiredBuffers.erase(it);
 		} else {
 			++it;
@@ -306,14 +258,12 @@ void VulkanBufferManager::onFrameEnd()
 
 void VulkanBufferManager::cleanup()
 {
-	// Unmap all mapped buffers
 	for (auto& buffer : m_buffers) {
 		if (buffer.mapped) {
 			m_device.unmapMemory(buffer.memory.get());
 			buffer.mapped = nullptr;
 		}
 	}
-
 	m_buffers.clear();
 	m_retiredBuffers.clear();
 }

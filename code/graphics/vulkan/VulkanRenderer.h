@@ -139,7 +139,7 @@ class VulkanRenderer {
   private:
 	static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
 	static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
-	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
+	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024;
 
 	void createUploadCommandPool();
 	void createDescriptorResources();
