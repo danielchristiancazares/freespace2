@@ -241,6 +241,7 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
 VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
 	vk::PipelineLayout pipelineLayout,
 	vk::PipelineLayout modelPipelineLayout,
+	vk::PipelineLayout deferredPipelineLayout,
 	vk::PipelineCache pipelineCache,
 	bool supportsExtendedDynamicState,
 	bool supportsExtendedDynamicState2,
@@ -251,6 +252,7 @@ VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
 	: m_device(device),
 	  m_pipelineLayout(pipelineLayout),
 	  m_modelPipelineLayout(modelPipelineLayout),
+	  m_deferredPipelineLayout(deferredPipelineLayout),
 	  m_pipelineCache(pipelineCache),
 	  m_supportsExtendedDynamicState(supportsExtendedDynamicState),
 	  m_supportsExtendedDynamicState2(supportsExtendedDynamicState2),
@@ -272,6 +274,7 @@ std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool 
 	std::vector<vk::DynamicState> dynamicStates = {
 		vk::DynamicState::eViewport,
 		vk::DynamicState::eScissor,
+		vk::DynamicState::eLineWidth,
 		vk::DynamicState::eCullMode,
 		vk::DynamicState::eFrontFace,
 		vk::DynamicState::ePrimitiveTopology,
@@ -509,6 +512,9 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		break;
 	case PipelineLayoutKind::Standard:
 		pipelineInfo.layout = m_pipelineLayout;
+		break;
+	case PipelineLayoutKind::Deferred:
+		pipelineInfo.layout = m_deferredPipelineLayout;
 		break;
 	}
 
