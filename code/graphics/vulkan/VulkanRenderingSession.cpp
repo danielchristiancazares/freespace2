@@ -185,6 +185,38 @@ void VulkanRenderingSession::beginSwapchainRendering(vk::CommandBuffer cmd, uint
 	m_shouldClearDepth = false;
 }
 
+void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	const auto extent = m_device.swapchainExtent();
+
+	vk::RenderingAttachmentInfo colorAttachment{};
+	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
+	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	// Don't clear - ambient light will overwrite with blend-off, then subsequent lights add
+	colorAttachment.loadOp = vk::AttachmentLoadOp::eDontCare;
+	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+
+	vk::RenderingInfo renderingInfo{};
+	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+	renderingInfo.layerCount = 1;
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = nullptr;  // No depth for deferred lighting
+
+	cmd.beginRendering(renderingInfo);
+}
+
+void VulkanRenderingSession::beginSwapchainRenderingNoDepth(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	// End any active render pass
+	if (m_renderPassActive) {
+		cmd.endRendering();
+		m_renderPassActive = false;
+	}
+
+	beginSwapchainRenderingNoDepthInternal(cmd, imageIndex);
+	m_renderPassActive = true;
+	m_activeMode = RenderMode::Swapchain;
+}
+
 void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 	const auto extent = m_device.swapchainExtent();
 

@@ -18,6 +18,7 @@
 #include "VulkanDebug.h"
 
 #include "graphics/2d.h"
+#include "VulkanDeferredLights.h"
 
 #include <array>
 #include <functional>
@@ -26,6 +27,13 @@
 
 namespace graphics {
 namespace vulkan {
+
+// Light volume mesh for deferred rendering
+struct VolumeMesh {
+	gr_buffer_handle vbo;
+	gr_buffer_handle ibo{};
+	uint32_t indexCount = 0;
+};
 
 class VulkanRenderer {
   public:
@@ -102,6 +110,7 @@ class VulkanRenderer {
 	void endDeferredGeometry(vk::CommandBuffer cmd) { m_renderingSession->endDeferredGeometry(cmd); }
 	void bindDeferredGlobalDescriptors();
 	void setPendingRenderTargetSwapchain() { m_renderingSession->setPendingModeSwapchain(); }
+	void recordDeferredLighting(VulkanFrame& frame);
 	uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
 	uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
 	ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
@@ -147,6 +156,7 @@ class VulkanRenderer {
 	void createVertexBuffer();
 	void createRenderTargets();
 	void createRenderingSession();
+	void createDeferredLightingResources();
 
 	uint32_t acquireImage(VulkanFrame& frame);
 	void beginFrame(VulkanFrame& frame, uint32_t imageIndex);
@@ -203,6 +213,11 @@ class VulkanRenderer {
 
 	// Z-buffer mode tracking (for getZbufferMode)
 	gr_zbuffer_type m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;
+
+	// Deferred lighting meshes
+	VolumeMesh m_fullscreenMesh;
+	VolumeMesh m_sphereMesh;
+	VolumeMesh m_cylinderMesh;
 };
 
 } // namespace vulkan
