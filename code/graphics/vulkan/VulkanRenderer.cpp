@@ -6,6 +6,7 @@
 
 #include "def_files/def_files.h"
 #include "graphics/2d.h"
+#include "graphics/matrix.h"
 #include "VulkanModelValidation.h"
 #include "VulkanDebug.h"
 
@@ -47,6 +48,7 @@ bool VulkanRenderer::initialize() {
 	m_pipelineManager = std::make_unique<VulkanPipelineManager>(m_vulkanDevice->device(),
 		m_descriptorLayouts->pipelineLayout(),
 		m_descriptorLayouts->modelPipelineLayout(),
+		m_descriptorLayouts->deferredPipelineLayout(),
 		m_vulkanDevice->pipelineCache(),
 		m_vulkanDevice->supportsExtendedDynamicState(),
 		m_vulkanDevice->supportsExtendedDynamicState2(),
@@ -64,6 +66,8 @@ bool VulkanRenderer::initialize() {
 		m_vulkanDevice->memoryProperties(),
 		m_vulkanDevice->graphicsQueue(),
 		m_vulkanDevice->graphicsQueueIndex());
+
+	createDeferredLightingResources();
 
 	return true;
 }
@@ -242,41 +246,11 @@ void VulkanRenderer::logFrameCounters() {
 }
 
 void VulkanRenderer::flip() {
-	// #region agent log
-	auto agent_log = [](const char* hypothesisId, const char* location, const char* message, auto&& dataWriter) {
-		std::ofstream logFile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
-		const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::system_clock::now().time_since_epoch()).count();
-		logFile << "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\""
-		        << hypothesisId << "\",\"location\":\"" << location << "\",\"message\":\""
-		        << message << "\",\"data\":";
-		dataWriter(logFile);
-		logFile << ",\"timestamp\":" << now << "}\n";
-	};
-	// #endregion
-
 	// Finish previously recorded frame
 	if (m_isRecording) {
 		auto& recordingFrame = *m_frames[m_recordingFrame];
-		// #region agent log
-		agent_log("H5", "VulkanRenderer.cpp:flip", "before submitFrame",
-			[this, &recordingFrame](std::ofstream& out) {
-				out << "{\"recordingFrame\":" << m_recordingFrame
-				    << ",\"recordingImage\":" << m_recordingImage
-				    << ",\"hasSubmitInfo\":" << (recordingFrame.hasSubmitInfo() ? 1 : 0)
-				    << "}";
-			});
-		// #endregion
 		endFrame(recordingFrame, m_recordingImage);
 		submitFrame(recordingFrame, m_recordingImage);
-		// #region agent log
-		agent_log("H5", "VulkanRenderer.cpp:flip", "after submitFrame",
-			[&recordingFrame](std::ofstream& out) {
-				out << "{\"hasSubmitInfo\":" << (recordingFrame.hasSubmitInfo() ? 1 : 0)
-				    << ",\"lastSubmitSerial\":" << recordingFrame.lastSubmitSerial()
-				    << "}";
-			});
-		// #endregion
 
 		// Log per-frame draw counters now that the frame is finalized
 		logFrameCounters();
@@ -285,20 +259,8 @@ void VulkanRenderer::flip() {
 	}
 
 	// Advance frame index and prepare next frame
-	uint32_t prevFrame = m_currentFrame;
 	m_currentFrame = (m_currentFrame + 1) % kFramesInFlight;
 	auto& frame = *m_frames[m_currentFrame];
-	// #region agent log
-	agent_log("H5", "VulkanRenderer.cpp:flip", "before wait_for_gpu",
-		[this, prevFrame, &frame](std::ofstream& out) {
-			out << "{\"prevFrame\":" << prevFrame
-			    << ",\"currentFrame\":" << m_currentFrame
-			    << ",\"hasSubmitInfo\":" << (frame.hasSubmitInfo() ? 1 : 0)
-			    << ",\"lastSubmitSerial\":" << frame.lastSubmitSerial()
-			    << ",\"lastSubmitFrameIndex\":" << frame.lastSubmitFrameIndex()
-			    << "}";
-		});
-	// #endregion
 	frame.wait_for_gpu();
 
 	// Get completed serial from the frame that just finished
@@ -786,6 +748,199 @@ int VulkanRenderer::getZbufferMode() const
 
 void VulkanRenderer::requestClear() {
 	m_renderingSession->requestClear();
+}
+
+void VulkanRenderer::createDeferredLightingResources() {
+	// Fullscreen triangle (covers entire screen with 3 vertices, no clipping)
+	// Positions are in clip space: vertex shader passes through directly
+	struct FullscreenVertex {
+		float x, y;
+	};
+	static const FullscreenVertex fullscreenVerts[] = {
+		{-1.0f, -1.0f},
+		{ 3.0f, -1.0f},
+		{-1.0f,  3.0f}
+	};
+
+	m_fullscreenMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
+	m_bufferManager->updateBufferData(m_fullscreenMesh.vbo, sizeof(fullscreenVerts), fullscreenVerts);
+	m_fullscreenMesh.indexCount = 3;
+
+	// Sphere mesh (icosphere-like approximation)
+	// Using octahedron subdivided once for reasonable approximation
+	std::vector<float> sphereVerts;
+	std::vector<uint32_t> sphereIndices;
+
+	// Octahedron base vertices
+	const float oct[] = {
+		 0.0f,  1.0f,  0.0f,  // top
+		 0.0f, -1.0f,  0.0f,  // bottom
+		 1.0f,  0.0f,  0.0f,  // +X
+		-1.0f,  0.0f,  0.0f,  // -X
+		 0.0f,  0.0f,  1.0f,  // +Z
+		 0.0f,  0.0f, -1.0f   // -Z
+	};
+
+	// Octahedron faces (8 triangles)
+	const uint32_t octFaces[] = {
+		0, 4, 2,  0, 2, 5,  0, 5, 3,  0, 3, 4,  // top half
+		1, 2, 4,  1, 5, 2,  1, 3, 5,  1, 4, 3   // bottom half
+	};
+
+	for (int i = 0; i < 18; i++) {
+		sphereVerts.push_back(oct[i]);
+	}
+	for (int i = 0; i < 24; i++) {
+		sphereIndices.push_back(octFaces[i]);
+	}
+
+	m_sphereMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
+	m_bufferManager->updateBufferData(m_sphereMesh.vbo, sphereVerts.size() * sizeof(float), sphereVerts.data());
+	m_sphereMesh.ibo = m_bufferManager->createBuffer(BufferType::Index, BufferUsageHint::Static);
+	m_bufferManager->updateBufferData(m_sphereMesh.ibo, sphereIndices.size() * sizeof(uint32_t), sphereIndices.data());
+	m_sphereMesh.indexCount = static_cast<uint32_t>(sphereIndices.size());
+
+	// Cylinder mesh (capped cylinder along -Z axis)
+	// The model matrix will position and scale it
+	std::vector<float> cylVerts;
+	std::vector<uint32_t> cylIndices;
+
+	const int segments = 12;
+	const float twoPi = 6.283185307f;
+
+	// Generate ring vertices at z=0 and z=-1
+	for (int ring = 0; ring < 2; ++ring) {
+		float z = (ring == 0) ? 0.0f : -1.0f;
+		for (int i = 0; i < segments; ++i) {
+			float angle = twoPi * i / segments;
+			cylVerts.push_back(cosf(angle));  // x
+			cylVerts.push_back(sinf(angle));  // y
+			cylVerts.push_back(z);            // z
+		}
+	}
+
+	// Center vertices for caps
+	uint32_t capTop = static_cast<uint32_t>(cylVerts.size() / 3);
+	cylVerts.push_back(0.0f);
+	cylVerts.push_back(0.0f);
+	cylVerts.push_back(0.0f);
+
+	uint32_t capBot = static_cast<uint32_t>(cylVerts.size() / 3);
+	cylVerts.push_back(0.0f);
+	cylVerts.push_back(0.0f);
+	cylVerts.push_back(-1.0f);
+
+	// Side faces (quads as two triangles)
+	for (int i = 0; i < segments; ++i) {
+		uint32_t i0 = i;
+		uint32_t i1 = (i + 1) % segments;
+		uint32_t i2 = i + segments;
+		uint32_t i3 = ((i + 1) % segments) + segments;
+
+		// Two triangles per quad
+		cylIndices.push_back(i0);
+		cylIndices.push_back(i2);
+		cylIndices.push_back(i1);
+
+		cylIndices.push_back(i1);
+		cylIndices.push_back(i2);
+		cylIndices.push_back(i3);
+	}
+
+	// Top cap (z=0)
+	for (int i = 0; i < segments; ++i) {
+		cylIndices.push_back(capTop);
+		cylIndices.push_back((i + 1) % segments);
+		cylIndices.push_back(i);
+	}
+
+	// Bottom cap (z=-1)
+	for (int i = 0; i < segments; ++i) {
+		cylIndices.push_back(capBot);
+		cylIndices.push_back(i + segments);
+		cylIndices.push_back(((i + 1) % segments) + segments);
+	}
+
+	m_cylinderMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
+	m_bufferManager->updateBufferData(m_cylinderMesh.vbo, cylVerts.size() * sizeof(float), cylVerts.data());
+	m_cylinderMesh.ibo = m_bufferManager->createBuffer(BufferType::Index, BufferUsageHint::Static);
+	m_bufferManager->updateBufferData(m_cylinderMesh.ibo, cylIndices.size() * sizeof(uint32_t), cylIndices.data());
+	m_cylinderMesh.indexCount = static_cast<uint32_t>(cylIndices.size());
+}
+
+void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
+	vk::CommandBuffer cmd = frame.commandBuffer();
+	vk::Buffer uniformBuffer = frame.uniformBuffer().buffer();
+
+	// Build lights from engine state
+	std::vector<DeferredLight> lights = buildDeferredLights(
+		frame,
+		uniformBuffer,
+		gr_view_matrix,
+		gr_projection_matrix,
+		getMinUniformBufferAlignment());
+
+	if (lights.empty()) {
+		return;
+	}
+
+	// Begin swapchain rendering without depth (deferred lighting doesn't need depth test)
+	m_renderingSession->beginSwapchainRenderingNoDepth(cmd, m_recordingImage);
+
+	// Get pipeline and layout for deferred shader
+	// TODO: These should be cached, for now we create them on demand
+	ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_DEFERRED_LIGHTING);
+
+	// Create pipeline key for deferred lighting
+	PipelineKey key{};
+	key.type = shader_type::SDR_TYPE_DEFERRED_LIGHTING;
+	key.variant_flags = 0;
+	key.color_format = static_cast<VkFormat>(m_vulkanDevice->swapchainFormat());
+	key.depth_format = VK_FORMAT_UNDEFINED;  // No depth attachment
+	key.color_attachment_count = 1;
+	key.blend_mode = ALPHA_BLEND_ADDITIVE;
+
+	// Ambient pipeline (no blend, overwrites undefined swapchain)
+	PipelineKey ambientKey = key;
+	ambientKey.blend_mode = ALPHA_BLEND_NONE;
+
+	vertex_layout deferredLayout{};
+	deferredLayout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);  // Position only for volume meshes
+
+	vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, deferredLayout);
+	vk::Pipeline ambientPipeline = m_pipelineManager->getPipeline(ambientKey, modules, deferredLayout);
+
+	// Prepare draw context
+	DeferredDrawContext ctx{};
+	ctx.cmd = cmd;
+	ctx.layout = m_descriptorLayouts->deferredPipelineLayout();
+	ctx.uniformBuffer = uniformBuffer;
+	ctx.pipeline = pipeline;
+	ctx.ambientPipeline = ambientPipeline;
+
+	// Get mesh buffers
+	vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
+	vk::Buffer sphereVB = m_bufferManager->getBuffer(m_sphereMesh.vbo);
+	vk::Buffer sphereIB = m_bufferManager->getBuffer(m_sphereMesh.ibo);
+	vk::Buffer cylinderVB = m_bufferManager->getBuffer(m_cylinderMesh.vbo);
+	vk::Buffer cylinderIB = m_bufferManager->getBuffer(m_cylinderMesh.ibo);
+
+	// Record each light
+	for (const auto& light : lights) {
+		std::visit([&](const auto& l) {
+			using T = std::decay_t<decltype(l)>;
+			if constexpr (std::is_same_v<T, FullscreenLight>) {
+				l.record(ctx, fullscreenVB);
+			} else if constexpr (std::is_same_v<T, SphereLight>) {
+				l.record(ctx, sphereVB, sphereIB, m_sphereMesh.indexCount);
+			} else if constexpr (std::is_same_v<T, CylinderLight>) {
+				l.record(ctx, cylinderVB, cylinderIB, m_cylinderMesh.indexCount);
+			}
+		}, light);
+	}
+
+	// End the render pass
+	cmd.endRendering();
 }
 
 } // namespace vulkan

@@ -8,6 +8,8 @@ set(VULKAN_SHADERS
 	${SHADER_DIR}/vulkan.vert
 	${SHADER_DIR}/model.frag
 	${SHADER_DIR}/model.vert
+	${SHADER_DIR}/deferred.frag
+	${SHADER_DIR}/deferred.vert
 )
 
 set(SHADERS
