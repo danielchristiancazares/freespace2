@@ -5,6 +5,7 @@
 #include "lighting/lighting.h"
 #include "lighting/lighting_profiles.h"
 #include "model/modelrender.h"
+#include "osapi/outwnd.h"
 
 #include <cstring>
 #include <algorithm>
@@ -121,7 +122,7 @@ std::vector<DeferredLight> buildDeferredLights(
 
         ambient.light.lightType = LT_AMBIENT_SHADER;
 
-        vec3d ambientColor;
+        vec3d ambientColor{};
         gr_get_ambient_light(&ambientColor);
         ambient.light.diffuseLightColor[0] = ambientColor.xyz.x;
         ambient.light.diffuseLightColor[1] = ambientColor.xyz.y;
@@ -160,13 +161,13 @@ std::vector<DeferredLight> buildDeferredLights(
             lightData.lightType = LT_DIRECTIONAL;
 
             // Transform direction to view space
-            vec4 lightDir4;
+            vec4 lightDir4{};
             lightDir4.xyzw.x = -src.vec.xyz.x;
             lightDir4.xyzw.y = -src.vec.xyz.y;
             lightDir4.xyzw.z = -src.vec.xyz.z;
             lightDir4.xyzw.w = 0.0f;
 
-            vec4 viewDir;
+            vec4 viewDir{};
             vm_vec_transform(&viewDir, &lightDir4, &viewMatrix);
 
             lightData.lightDir[0] = viewDir.xyzw.x;
@@ -190,7 +191,7 @@ std::vector<DeferredLight> buildDeferredLights(
                 : MAX(src.rada, src.radb);
 
             // Build model-view matrix: translation to light position
-            matrix4 model;
+            matrix4 model{};
             vm_matrix4_set_identity(&model);
             // Set translation manually (no vm_matrix4_set_translation exists)
             model.a1d[12] = src.vec.xyz.x;
@@ -220,7 +221,7 @@ std::vector<DeferredLight> buildDeferredLights(
                 ? lp->cockpit_light_radius_modifier.handle(MAX(src.rada, src.radb))
                 : MAX(src.rada, src.radb);
 
-            matrix4 model;
+            matrix4 model{};
             vm_matrix4_set_identity(&model);
             model.a1d[12] = src.vec.xyz.x;
             model.a1d[13] = src.vec.xyz.y;
@@ -236,13 +237,13 @@ std::vector<DeferredLight> buildDeferredLights(
             lightData.dualCone = (src.flags & LF_DUAL_CONE) ? 1 : 0;
 
             // Transform cone direction to view space
-            vec4 coneDir4;
+            vec4 coneDir4{};
             coneDir4.xyzw.x = src.vec2.xyz.x;
             coneDir4.xyzw.y = src.vec2.xyz.y;
             coneDir4.xyzw.z = src.vec2.xyz.z;
             coneDir4.xyzw.w = 0.0f;
 
-            vec4 viewConeDir;
+            vec4 viewConeDir{};
             vm_vec_transform(&viewConeDir, &coneDir4, &viewMatrix);
 
             // Normalize
@@ -273,7 +274,7 @@ std::vector<DeferredLight> buildDeferredLights(
                 : src.radb;
 
             // Tube goes from vec2 to vec
-            vec3d tubeDir;
+            vec3d tubeDir{};
             vm_vec_sub(&tubeDir, &src.vec, &src.vec2);
             float length = vm_vec_mag(&tubeDir);
             if (length > 0.0001f) {
@@ -281,14 +282,15 @@ std::vector<DeferredLight> buildDeferredLights(
             }
 
             // Build orientation matrix that aligns local -Z with tube direction
-            matrix orient;
-            vec3d negDir;
+            matrix orient{};
+            vec3d negDir{};
             vm_vec_negate(&negDir, &tubeDir);
             vm_vector_2_matrix(&orient, &negDir, nullptr, nullptr);
 
             // Build model matrix with translation at tube start (vec2) and rotation
-            matrix4 model;
-            vm_matrix4_set_transform(&model, &orient, const_cast<vec3d*>(&src.vec2));
+            matrix4 model{};
+            vec3d start = src.vec2;
+            vm_matrix4_set_transform(&model, &orient, &start);
 
             vm_matrix4_x_matrix4(&l.matrices.modelViewMatrix, &viewMatrix, &model);
             l.matrices.projMatrix = projMatrix;
