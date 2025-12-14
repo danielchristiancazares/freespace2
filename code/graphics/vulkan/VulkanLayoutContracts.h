@@ -11,7 +11,8 @@ namespace vulkan {
 
 enum class PipelineLayoutKind {
 	Standard, // per-draw push descriptors + global set
-	Model     // model bindless set + push constants
+	Model,    // model bindless set + push constants
+	Deferred  // deferred lighting push descriptors + global (G-buffer) set
 };
 
 enum class VertexInputMode {
@@ -38,6 +39,9 @@ PipelineLayoutKind pipelineLayoutForShader(shader_type type);
 
 } // namespace vulkan
 } // namespace graphics
+
+
+
 
 
 

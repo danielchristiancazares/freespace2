@@ -90,6 +90,7 @@ VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(d
 	m_descriptorPool = m_device.createDescriptorPoolUnique(poolInfo);
 
 	createModelLayouts();
+	createDeferredLayouts();
 }
 
 void VulkanDescriptorLayouts::createModelLayouts()
@@ -193,6 +194,40 @@ vk::DescriptorSet VulkanDescriptorLayouts::allocateModelDescriptorSet()
 	allocInfo.pSetLayouts = &layout;
 
 	return m_device.allocateDescriptorSets(allocInfo).front();
+}
+
+void VulkanDescriptorLayouts::createDeferredLayouts()
+{
+	// Push descriptor layout for deferred lighting:
+	// Binding 0: Matrix UBO (model-view, projection)
+	// Binding 1: Light UBO (light params)
+	std::array<vk::DescriptorSetLayoutBinding, 2> deferredBindings{};
+	deferredBindings[0].binding = 0;
+	deferredBindings[0].descriptorCount = 1;
+	deferredBindings[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+	deferredBindings[0].stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
+
+	deferredBindings[1].binding = 1;
+	deferredBindings[1].descriptorCount = 1;
+	deferredBindings[1].descriptorType = vk::DescriptorType::eUniformBuffer;
+	deferredBindings[1].stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
+
+	vk::DescriptorSetLayoutCreateInfo deferredLayoutInfo;
+	deferredLayoutInfo.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor;
+	deferredLayoutInfo.bindingCount = static_cast<uint32_t>(deferredBindings.size());
+	deferredLayoutInfo.pBindings = deferredBindings.data();
+	m_deferredPushLayout = m_device.createDescriptorSetLayoutUnique(deferredLayoutInfo);
+
+	// Pipeline layout: set 0 = deferred push descriptors, set 1 = global (G-buffer textures)
+	std::array<vk::DescriptorSetLayout, 2> deferredSetLayouts = {
+		m_deferredPushLayout.get(),
+		m_globalLayout.get(),
+	};
+
+	vk::PipelineLayoutCreateInfo deferredPipelineInfo;
+	deferredPipelineInfo.setLayoutCount = static_cast<uint32_t>(deferredSetLayouts.size());
+	deferredPipelineInfo.pSetLayouts = deferredSetLayouts.data();
+	m_deferredPipelineLayout = m_device.createPipelineLayoutUnique(deferredPipelineInfo);
 }
 
 } // namespace vulkan
