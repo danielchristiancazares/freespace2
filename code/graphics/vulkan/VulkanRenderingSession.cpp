@@ -244,14 +244,18 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 	cmd.setStencilTestEnable(VK_FALSE);
 	if (m_device.supportsExtendedDynamicState3()) {
 		const auto& caps = m_device.extDyn3Caps();
+		const uint32_t attachmentCount = currentColorAttachmentCount();
 		if (caps.colorBlendEnable) {
-			vk::Bool32 blendEnable = VK_FALSE;
-			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+			std::array<vk::Bool32, VulkanRenderTargets::kGBufferCount> blendEnables{};
+			blendEnables.fill(VK_FALSE);
+			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(attachmentCount, blendEnables.data()));
 		}
 		if (caps.colorWriteMask) {
 			vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
 				vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+			std::array<vk::ColorComponentFlags, VulkanRenderTargets::kGBufferCount> masks{};
+			masks.fill(mask);
+			cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(attachmentCount, masks.data()));
 		}
 		if (caps.polygonMode) {
 			cmd.setPolygonModeEXT(vk::PolygonMode::eFill);

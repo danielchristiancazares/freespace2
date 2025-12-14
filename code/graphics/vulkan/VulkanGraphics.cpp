@@ -326,7 +326,66 @@ void gr_vulkan_deferred_lighting_finish()
 	renderer_instance->setPendingRenderTargetSwapchain();
 }
 
-void stub_set_line_width(float /*width*/) {}
+void stub_set_line_width(float width)
+{
+	static float s_requestedWidth = 1.0f;
+
+	// Sanitize input
+	if (!(width > 0.0f)) {
+		width = 1.0f;
+	}
+	s_requestedWidth = width;
+
+	if (!renderer_instance) {
+		return;
+	}
+
+	// Clamp to device limits (prevents validation errors on devices without wideLines)
+	const auto& limits = renderer_instance->vulkanDevice()->properties().limits;
+	float minWidth = limits.lineWidthRange[0];
+	float maxWidth = limits.lineWidthRange[1];
+
+	if (minWidth > maxWidth) {
+		const float tmp = minWidth;
+		minWidth = maxWidth;
+		maxWidth = tmp;
+	}
+
+	float clamped = s_requestedWidth;
+	if (clamped < minWidth) {
+		clamped = minWidth;
+	} else if (clamped > maxWidth) {
+		clamped = maxWidth;
+	}
+
+	// Snap to reported granularity (if any)
+	const float granularity = limits.lineWidthGranularity;
+	if (granularity > 0.0f) {
+		const float steps = clamped / granularity;
+		const int roundedSteps = static_cast<int>(steps + 0.5f);
+		clamped = static_cast<float>(roundedSteps) * granularity;
+
+		if (clamped < minWidth) {
+			clamped = minWidth;
+		} else if (clamped > maxWidth) {
+			clamped = maxWidth;
+		}
+	}
+
+	// Apply to current command buffer if recording
+	VulkanFrame* frame = g_currentFrame;
+	if (!frame) {
+		frame = renderer_instance->getCurrentRecordingFrame();
+	}
+	if (!frame) {
+		return;
+	}
+
+	vk::CommandBuffer cmd = frame->commandBuffer();
+	if (cmd) {
+		cmd.setLineWidth(clamped);
+	}
+}
 
 void stub_draw_sphere(material* /*material_def*/, float /*rad*/) {}
 
@@ -431,8 +490,6 @@ static void issueModelDraw(const ModelDrawContext& ctx)
 	ctx.cmd.bindIndexBuffer(indexBuffer, indexOffsetBytes, indexType);
 
 	const uint32_t indexCount = static_cast<uint32_t>(batch.n_verts);
-
-
 
 	ctx.cmd.drawIndexed(
 		indexCount,
@@ -1308,6 +1365,9 @@ void init_function_pointers()
 	gr_screen.gf_deferred_lighting_msaa = gr_vulkan_deferred_lighting_msaa;
 	gr_screen.gf_deferred_lighting_end = gr_vulkan_deferred_lighting_end;
 	gr_screen.gf_deferred_lighting_finish = gr_vulkan_deferred_lighting_finish;
+
+	// Line width
+	gr_screen.gf_set_line_width = stub_set_line_width;
 
 	// Capabilities
 	gr_screen.gf_is_capable = gr_vulkan_is_capable;

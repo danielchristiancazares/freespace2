@@ -8,6 +8,9 @@ set(VULKAN_SHADERS
 	${SHADER_DIR}/vulkan.vert
 	${SHADER_DIR}/model.frag
 	${SHADER_DIR}/model.vert
+	# TODO: Re-enable when deferred lighting pass is complete
+	# ${SHADER_DIR}/deferred.frag
+	# ${SHADER_DIR}/deferred.vert
 )
 
 set(SHADERS

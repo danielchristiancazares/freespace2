@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Vulkan `gr_set_line_width` implementation with device limit clamping and granularity snapping
+- `vk::DynamicState::eLineWidth` in Vulkan pipeline dynamic state list
 - Interface and batched-bitmap shader variants for OpenGL/Vulkan plus shader build entries.
 - `VulkanDevice`, `VulkanRenderTargets`, and `VulkanRenderingSession` components owning swapchain, render-target lifetimes, and dynamic rendering flow.
 - Manual Vulkan visibility integration test (`test/src/graphics/it_vulkan_model_present.cpp`) gated by `FS2_VULKAN_IT`, and OpenGL SMAA fallback unit test without ARB_texture_storage.
@@ -49,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `VulkanRingBuffer::remaining()` introspection method for available space queries
 
 ### Changed
+- G-buffer dynamic state now sets blend enable and color write mask for all color attachments
 - Eliminate exception-based coordination in Vulkan renderer
   - `VulkanRingBuffer::try_allocate()` returns optional instead of throwing; intra-frame wrapping removed
   - `VulkanTextureManager::queryDescriptor()` replaces `getDescriptor()`; always returns valid descriptor (possibly fallback)

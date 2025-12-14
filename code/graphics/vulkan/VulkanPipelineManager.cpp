@@ -272,6 +272,7 @@ std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool 
 	std::vector<vk::DynamicState> dynamicStates = {
 		vk::DynamicState::eViewport,
 		vk::DynamicState::eScissor,
+		vk::DynamicState::eLineWidth,
 		vk::DynamicState::eCullMode,
 		vk::DynamicState::eFrontFace,
 		vk::DynamicState::ePrimitiveTopology,
