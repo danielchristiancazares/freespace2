@@ -1,6 +1,7 @@
 #include "VulkanDebug.h"
 
 #include "cmdline/cmdline.h"
+#include "osapi/outwnd.h"
 #include <cstdarg>
 #include <cstdio>
 
@@ -19,7 +20,7 @@ void vkprintf(const char* format, ...)
 	vsnprintf(buffer, sizeof(buffer), format, args);
 	va_end(args);
 
-	mprintf(("Vulkan: %s", buffer));
+	nprintf(("Vulkan", "%s", buffer));
 	// Flush all streams to ensure the log entry is persisted even if we crash immediately after.
 	fflush(nullptr);
 }
