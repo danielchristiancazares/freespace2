@@ -1,7 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-#include "lighting.sdr"
+#include "lighting.glsl"
 
 layout(location = 0) out vec4 fragOut0;
 
@@ -10,6 +10,8 @@ layout(set = 1, binding = 0) uniform sampler2D ColorBuffer;
 layout(set = 1, binding = 1) uniform sampler2D NormalBuffer;
 layout(set = 1, binding = 2) uniform sampler2D PositionBuffer;
 layout(set = 1, binding = 3) uniform sampler2D DepthBuffer; // currently unused
+layout(set = 1, binding = 4) uniform sampler2D SpecularBuffer;
+layout(set = 1, binding = 5) uniform sampler2D EmissiveBuffer;
 
 // Per-draw UBOs (set=0): bound via push descriptors
 layout(binding = 0, std140) uniform matrixData {
@@ -178,24 +180,26 @@ void main()
 	vec4 normalData = texture(NormalBuffer, screenPos);
 	vec3 normal = normalize(normalData.xyz);
 
-	// Normal alpha is gloss in the legacy shader path; fall back to 1.0 if unset
-	float gloss = normalData.a;
-	float roughness = clamp(1.0 - gloss, 0.0, 1.0);
-	float alpha = roughness * roughness;
-
-	vec3 eyeDir = normalize(-position);
-	vec3 reflectDir = reflect(-eyeDir, normal);
-
-	// Vulkan G-buffer currently has 3 attachments; spec is not yet provided.
-	// Use a conservative dielectric default.
-	vec4 specColor = vec4(0.04, 0.04, 0.04, 0.0);
-
 	vec3 outRgb = vec3(0.0);
 
 	if (lightType == LT_AMBIENT) {
 		float ao = position_buffer.w;
-		outRgb = diffuseLightColor * diffColor * ao;
+		// Emissive applied exactly once. Ambient is first fullscreen pass
+		// with blend disabled - correct place for one-time contributions.
+		vec3 emissive = texture(EmissiveBuffer, screenPos).rgb;
+		outRgb = diffuseLightColor * diffColor * ao + emissive;
 	} else {
+		// Specular always valid: model.frag writes dielectric defaults.
+		vec4 specColor = texture(SpecularBuffer, screenPos);
+
+		// Normal alpha is gloss in legacy path (placeholder: model.frag writes 1.0).
+		float gloss = normalData.a;
+		float roughness = clamp(1.0 - gloss, 0.0, 1.0);
+		float alpha = roughness * roughness;
+
+		vec3 eyeDir = normalize(-position);
+		vec3 reflectDir = reflect(-eyeDir, normal);
+
 		vec3 L;
 		float attenuation;
 		float area_norm;
@@ -214,4 +218,3 @@ void main()
 
 	fragOut0 = max(vec4(outRgb, 1.0), vec4(0.0));
 }
-

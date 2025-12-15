@@ -64,6 +64,11 @@ void FullscreenLight::record(const DeferredDrawContext& ctx, vk::Buffer fullscre
     vk::Pipeline pipe = isAmbient ? ctx.ambientPipeline : ctx.pipeline;
     ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipe);
 
+    if (ctx.dynamicBlendEnable) {
+        vk::Bool32 blendEnable = isAmbient ? VK_FALSE : VK_TRUE;
+        ctx.cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+    }
+
     pushLightDescriptors(ctx.cmd, ctx.layout, ctx.uniformBuffer, matrixOffset, lightOffset);
 
     vk::DeviceSize offset = 0;
@@ -74,6 +79,11 @@ void FullscreenLight::record(const DeferredDrawContext& ctx, vk::Buffer fullscre
 void SphereLight::record(const DeferredDrawContext& ctx,
                          vk::Buffer sphereVB, vk::Buffer sphereIB, uint32_t indexCount) const {
     ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
+
+    if (ctx.dynamicBlendEnable) {
+        vk::Bool32 blendEnable = VK_TRUE;
+        ctx.cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+    }
 
     pushLightDescriptors(ctx.cmd, ctx.layout, ctx.uniformBuffer, matrixOffset, lightOffset);
 
@@ -86,6 +96,11 @@ void SphereLight::record(const DeferredDrawContext& ctx,
 void CylinderLight::record(const DeferredDrawContext& ctx,
                            vk::Buffer cylinderVB, vk::Buffer cylinderIB, uint32_t indexCount) const {
     ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
+
+    if (ctx.dynamicBlendEnable) {
+        vk::Bool32 blendEnable = VK_TRUE;
+        ctx.cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+    }
 
     pushLightDescriptors(ctx.cmd, ctx.layout, ctx.uniformBuffer, matrixOffset, lightOffset);
 
