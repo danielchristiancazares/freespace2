@@ -4,19 +4,22 @@
 #include "VulkanRenderTargets.h"
 #include "VulkanDescriptorLayouts.h"
 
-#include <array>
 #include <vulkan/vulkan.hpp>
+#include <array>
+#include <memory>
+#include <optional>
 
 namespace graphics {
 namespace vulkan {
 
-enum class RenderMode {
-	Swapchain,        // Forward rendering to swapchain
-	DeferredGBuffer   // Deferred geometry pass to G-buffer
-};
-
 class VulkanRenderingSession {
-  public:
+public:
+	struct RenderTargetInfo {
+		vk::Format colorFormat = vk::Format::eUndefined;
+		uint32_t colorAttachmentCount = 1;
+		vk::Format depthFormat = vk::Format::eUndefined; // eUndefined => no depth attachment
+	};
+
 	VulkanRenderingSession(VulkanDevice& device,
 		VulkanRenderTargets& targets,
 		VulkanDescriptorLayouts& descriptorLayouts);
@@ -25,22 +28,13 @@ class VulkanRenderingSession {
 	void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex, vk::DescriptorSet globalDescriptorSet);
 	void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
 
-	// Render pass management
-	void ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex);
-	void endRendering(vk::CommandBuffer cmd);
-	bool isRenderPassActive() const { return m_renderPassActive; }
+	// Starts dynamic rendering for the *current target* if needed; returns the *actual* target contract.
+	const RenderTargetInfo& ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex);
 
-	// Mode switching
-	void setMode(RenderMode mode) { m_pendingMode = mode; }
-	RenderMode activeMode() const { return m_activeMode; }
-	RenderMode pendingMode() const { return m_pendingMode; }
-
-	// Deferred rendering
-	void beginDeferredPass(bool clearNonColorBufs);
-	void endDeferredGeometry(vk::CommandBuffer cmd);
-	bool isDeferredActive() const { return m_deferredActive; }
-	bool isDeferredGeometryDone() const { return m_deferredGeometryDone; }
-	void setPendingModeSwapchain() { m_pendingMode = RenderMode::Swapchain; }
+	// Boundary-facing state transitions (no "pending", no dual state)
+	void requestSwapchainTarget();                  // swapchain + depth
+	void beginDeferredPass(bool clearNonColorBufs); // selects gbuffer target
+	void endDeferredGeometry(vk::CommandBuffer cmd);// transitions gbuffer -> shader read, selects swapchain-no-depth
 
 	// Clear control
 	void requestClear();
@@ -56,27 +50,61 @@ class VulkanRenderingSession {
 	bool depthTestEnabled() const { return m_depthTest; }
 	bool depthWriteEnabled() const { return m_depthWrite; }
 
-	// Queries for pipeline creation
-	VkFormat currentColorFormat() const;
-	uint32_t currentColorAttachmentCount() const;
-
-	// Reset for new frame
-	void resetFrameState();
-
 	// Dynamic state application (public - called by VulkanRenderer)
 	void applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet);
 
-  private:
-	// Render pass variants
-	void beginSwapchainRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
+private:
+	// Base class for render target states - polymorphic by design
+	class RenderTargetState {
+	public:
+		virtual ~RenderTargetState() = default;
+		virtual RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const = 0;
+		virtual void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) = 0;
+	};
+
+	class SwapchainWithDepthTarget final : public RenderTargetState {
+	public:
+		RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+		void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+	};
+
+	class DeferredGBufferTarget final : public RenderTargetState {
+	public:
+		RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+		void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+	};
+
+	class SwapchainNoDepthTarget final : public RenderTargetState {
+	public:
+		RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+		void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+	};
+
+	// RAII guard for active render pass - destruction calls endRendering()
+	struct ActivePass {
+		vk::CommandBuffer cmd{};
+		explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
+		~ActivePass() { if (cmd) cmd.endRendering(); }
+
+		ActivePass(const ActivePass&) = delete;
+		ActivePass& operator=(const ActivePass&) = delete;
+		ActivePass(ActivePass&& other) noexcept : cmd(other.cmd) { other.cmd = nullptr; }
+		ActivePass& operator=(ActivePass&& other) noexcept {
+			if (this != &other) {
+				if (cmd) cmd.endRendering();
+				cmd = other.cmd;
+				other.cmd = nullptr;
+			}
+			return *this;
+		}
+	};
+
+	void endActivePass();
+
+	// Render pass variants - called by target state classes
+	void beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
+	void beginGBufferRenderingInternal(vk::CommandBuffer cmd);
 	void beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
-	void beginGBufferRendering(vk::CommandBuffer cmd);
-
-  public:
-	// Begin swapchain rendering without depth attachment (for deferred lighting pass)
-	void beginSwapchainRenderingNoDepth(vk::CommandBuffer cmd, uint32_t imageIndex);
-
-  private:
 
 	// Layout transitions (barriers encapsulated here)
 	void transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex);
@@ -89,15 +117,12 @@ class VulkanRenderingSession {
 	VulkanRenderTargets& m_targets;
 	VulkanDescriptorLayouts& m_descriptorLayouts;
 
-	// Render pass state
-	RenderMode m_activeMode = RenderMode::Swapchain;
-	RenderMode m_pendingMode = RenderMode::Swapchain;
-	bool m_renderPassActive = false;
+	vk::DescriptorSet m_globalDescriptorSet{};
 
-	// Deferred state
-	bool m_deferredActive = false;
-	bool m_deferredGeometryDone = false;
-	bool m_deferredClearNonColorBufs = false;
+	// Target state - single truth, no pending/active duality
+	std::unique_ptr<RenderTargetState> m_target;
+	std::optional<ActivePass> m_activePass;
+	RenderTargetInfo m_activeInfo{};
 
 	// Clear state
 	std::array<float, 4> m_clearColor{0.f, 0.f, 0.f, 1.f};
@@ -109,9 +134,6 @@ class VulkanRenderingSession {
 	vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;
 	bool m_depthTest = true;
 	bool m_depthWrite = true;
-
-	// Current frame's image index for barrier targets
-	uint32_t m_currentImageIndex = 0;
 };
 
 } // namespace vulkan
