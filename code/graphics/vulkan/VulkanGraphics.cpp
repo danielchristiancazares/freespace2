@@ -108,8 +108,8 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 	g_currentFrame = renderer_instance->getCurrentRecordingFrame();
 	Assertion(g_currentFrame != nullptr, "setup_frame called outside frame recording");
 
-	// Reset per-draw dynamic offset; descriptor only rewritten when buffer handle changes
-	g_currentFrame->modelUniformState.dynamicOffset = UINT32_MAX;
+	// Reset per-frame uniform bindings (optional will be empty at frame start)
+	g_currentFrame->resetPerFrameBindings();
 
 	vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
 	Assertion(cmd, "Frame has no valid command buffer");
@@ -150,12 +150,6 @@ static void gr_vulkan_bind_uniform_buffer(uniform_block_type type,
 		renderer_instance->setSceneUniformBinding(*g_currentFrame, handle, offset, size);
 	} else {
 		// Keep running but make it noisy so the offending path gets fixed.
-		vkprintf("VULKAN ERROR: gr_bind_uniform_buffer called with unsupported block type %d (offset=%zu, size=%zu, handle=%d). "
-		         "Only ModelData(1), NanoVGData(2), and Matrices(6) are handled; this call must be fixed.\n",
-		         static_cast<int>(type),
-		         offset,
-		         size,
-		         handle.value());
 		return;
 	}
 }
@@ -533,19 +527,22 @@ void gr_vulkan_render_model(model_material* material_info,
 	vk::CommandBuffer cmd = frame.commandBuffer();
 	Assertion(cmd, "render_model called with null command buffer");
 
+	// Start rendering FIRST and get the actual target contract
+	const auto& rt = renderer_instance->ensureRenderingStarted(cmd);
+
 	// Get shader modules for model shader
 	ShaderModules modules = renderer_instance->getShaderModules(SDR_TYPE_MODEL);
 	Assertion(modules.vert != nullptr, "Model vertex shader not loaded");
 	Assertion(modules.frag != nullptr, "Model fragment shader not loaded");
 
-	// Build pipeline key
+	// Build pipeline key from active render target contract
 	PipelineKey key{};
 	key.type                   = SDR_TYPE_MODEL;
 	key.variant_flags          = material_info->get_shader_flags();
-	key.color_format           = renderer_instance->getCurrentColorFormat();
-	key.depth_format           = renderer_instance->getDepthFormat();
+	key.color_format           = static_cast<VkFormat>(rt.colorFormat);
+	key.depth_format           = static_cast<VkFormat>(rt.depthFormat);
 	key.sample_count           = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	key.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
+	key.color_attachment_count = rt.colorAttachmentCount;
 	key.blend_mode             = material_info->get_blend_mode();
 	// Model shaders ignore layout_hash (vertex pulling)
 
@@ -626,21 +623,6 @@ void gr_vulkan_render_model(model_material* material_info,
 	Assertion(frame.modelDescriptorSet, "Model descriptor set must be allocated at frame start");
 	vk::DescriptorSet modelSet = frame.modelDescriptorSet;
 
-	// Ensure rendering has started
-	renderer_instance->ensureRenderingStarted(cmd);
-
-	// Validate pipeline/render-target compatibility before binding
-	{
-		const uint32_t expectedAttachments = renderer_instance->getCurrentColorAttachmentCount();
-		const auto expectedFormat = renderer_instance->getCurrentColorFormat();
-		Assertion(key.color_attachment_count == expectedAttachments,
-			"Pipeline color attachment count mismatch (key=%u, active=%u)",
-			key.color_attachment_count, expectedAttachments);
-		Assertion(static_cast<VkFormat>(key.color_format) == expectedFormat,
-			"Pipeline color format mismatch (key=%d, active=%d)",
-			key.color_format, static_cast<int>(expectedFormat));
-	}
-
 	// Dynamic state: compensate for viewport Y-flip (CCW becomes CW)
 	cmd.setFrontFace(vk::FrontFace::eClockwise);
 
@@ -656,10 +638,8 @@ void gr_vulkan_render_model(model_material* material_info,
 	cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
 
 	// Enforce contract: ModelData must be bound via gr_bind_uniform_buffer
-	uint32_t dynOffset = frame.modelUniformState.dynamicOffset;
-	Assertion(dynOffset != UINT32_MAX, "ModelData UBO dynamic offset not set; call gr_bind_uniform_buffer first");
-	Assertion(frame.modelUniformState.bufferHandle.isValid(),
-		"ModelData UBO buffer handle not set; call gr_bind_uniform_buffer first");
+	Assertion(frame.modelUniformBinding.has_value(), "ModelData UBO binding not set; call gr_bind_uniform_buffer first");
+	uint32_t dynOffset = frame.modelUniformBinding->dynamicOffset;
 
 	ModelDrawContext ctx{
 		frame,
@@ -675,11 +655,6 @@ void gr_vulkan_render_model(model_material* material_info,
 	};
 
 	issueModelDraw(ctx);
-
-#if defined(_DEBUG) || defined(DEBUG)
-	// Catch missing gr_bind_uniform_buffer on subsequent draws
-	frame.modelUniformState.dynamicOffset = UINT32_MAX;
-#endif
 }
 
 void gr_vulkan_render_primitives(material* material_info,
@@ -704,6 +679,9 @@ void gr_vulkan_render_primitives(material* material_info,
 	VulkanFrame& frame = *g_currentFrame;
 	vk::CommandBuffer cmd = frame.commandBuffer();
 	Assertion(cmd, "render_primitives called with null command buffer");
+
+	// Start rendering FIRST and get the actual target contract
+	const auto& rt = renderer_instance->ensureRenderingStarted(cmd);
 
 	// Use the shader type requested by the material
 	shader_type shaderType = material_info->get_shader_type();
@@ -745,14 +723,14 @@ void gr_vulkan_render_primitives(material* material_info,
 	Assertion(shaderModules.vert != nullptr, "render_primitives missing vertex shader for shaderType=%d", static_cast<int>(shaderType));
 	Assertion(shaderModules.frag != nullptr, "render_primitives missing fragment shader for shaderType=%d", static_cast<int>(shaderType));
 
-	// Build pipeline key using vertex_layout hash
+	// Build pipeline key from active render target contract
 	PipelineKey pipelineKey{};
 	pipelineKey.type = shaderType;
 	pipelineKey.variant_flags = material_info->get_shader_flags();
-	pipelineKey.color_format = renderer_instance->getCurrentColorFormat();
-	pipelineKey.depth_format = renderer_instance->getDepthFormat();
+	pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
+	pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
 	pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	pipelineKey.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
+	pipelineKey.color_attachment_count = rt.colorAttachmentCount;
 	pipelineKey.blend_mode = material_info->get_blend_mode();
 	pipelineKey.layout_hash = layout->hash();
 
@@ -897,21 +875,6 @@ void gr_vulkan_render_primitives(material* material_info,
 		writeCount = 3;
 	}
 
-	// Ensure rendering has started before binding pipeline/descriptors
-	renderer_instance->ensureRenderingStarted(cmd);
-
-	// Validate pipeline/render-target compatibility before binding
-	{
-		const uint32_t expectedAttachments = renderer_instance->getCurrentColorAttachmentCount();
-		const auto expectedFormat = renderer_instance->getCurrentColorFormat();
-		Assertion(pipelineKey.color_attachment_count == expectedAttachments,
-			"Pipeline color attachment count mismatch (key=%u, active=%u)",
-			pipelineKey.color_attachment_count, expectedAttachments);
-		Assertion(static_cast<VkFormat>(pipelineKey.color_format) == expectedFormat,
-			"Pipeline color format mismatch (key=%d, active=%d)",
-			pipelineKey.color_format, static_cast<int>(expectedFormat));
-	}
-
 	// Bind pipeline
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
@@ -1043,6 +1006,9 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	vk::CommandBuffer cmd = frame.commandBuffer();
 	Assertion(cmd, "render_primitives_batched called with null command buffer");
 
+	// Start rendering FIRST and get the actual target contract
+	const auto& rt = renderer_instance->ensureRenderingStarted(cmd);
+
 	// Force batched bitmap shader
 	shader_type shaderType = SDR_TYPE_BATCHED_BITMAP;
 
@@ -1051,14 +1017,14 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	Assertion(shaderModules.vert != nullptr, "Batched bitmap vertex shader not loaded");
 	Assertion(shaderModules.frag != nullptr, "Batched bitmap fragment shader not loaded");
 
-	// Build pipeline key
+	// Build pipeline key from active render target contract
 	PipelineKey pipelineKey{};
 	pipelineKey.type = shaderType;
 	pipelineKey.variant_flags = material_info->get_shader_flags();
-	pipelineKey.color_format = renderer_instance->getCurrentColorFormat();
-	pipelineKey.depth_format = renderer_instance->getDepthFormat();
+	pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
+	pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
 	pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
-	pipelineKey.color_attachment_count = renderer_instance->getCurrentColorAttachmentCount();
+	pipelineKey.color_attachment_count = rt.colorAttachmentCount;
 	pipelineKey.blend_mode = material_info->get_blend_mode();
 	pipelineKey.layout_hash = layout->hash();
 
@@ -1081,15 +1047,6 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	vec4 clr = material_info->get_color();
 	generic.color = {clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w};
 	generic.intensity = material_info->get_color_scale();
-
-	// DEBUG: Log first few batched bitmap draws to check values
-	static int debug_count = 0;
-	if (debug_count < 5) {
-		mprintf(("Batched bitmap #%d: color=(%.2f,%.2f,%.2f,%.2f) intensity=%.2f\n",
-		         debug_count, clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w,
-		         generic.intensity));
-		++debug_count;
-	}
 
 	// Allocate from uniform ring buffer (256-byte alignment required)
 	const size_t matrixSize = sizeof(matrices);  // 128 bytes
@@ -1115,7 +1072,6 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	// Get texture descriptor (batched rendering requires texture)
 	int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
 	if (textureHandle < 0) {
-		Warning(LOCATION, "Batched bitmap rendering called without texture");
 		return;  // Early exit - batched rendering requires texture array
 	}
 
@@ -1142,21 +1098,6 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
 	writes[2].descriptorCount = 1;
 	writes[2].pImageInfo = &baseMapInfo;
-
-	// Ensure rendering has started
-	renderer_instance->ensureRenderingStarted(cmd);
-
-	// Validate pipeline/render-target compatibility
-	{
-		const uint32_t expectedAttachments = renderer_instance->getCurrentColorAttachmentCount();
-		const auto expectedFormat = renderer_instance->getCurrentColorFormat();
-		Assertion(pipelineKey.color_attachment_count == expectedAttachments,
-			"Pipeline color attachment count mismatch (key=%u, active=%u)",
-			pipelineKey.color_attachment_count, expectedAttachments);
-		Assertion(static_cast<VkFormat>(pipelineKey.color_format) == expectedFormat,
-			"Pipeline color format mismatch (key=%d, active=%d)",
-			pipelineKey.color_format, static_cast<int>(expectedFormat));
-	}
 
 	// Bind pipeline
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
