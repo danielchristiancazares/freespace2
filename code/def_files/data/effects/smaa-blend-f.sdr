@@ -1,4 +1,3 @@
-//? #version 330
 
 layout (std140) uniform genericData {
 	vec2 smaa_rt_metrics;
@@ -11,11 +10,11 @@ layout (std140) uniform genericData {
 
 #include "SMAA.sdr"
 
-layout(location = 0) in vec2 fragTexCoord;
-layout(location = 1) in vec2 fragPixcoord;
-layout(location = 2) in vec4 fragOffset[3];
+in vec2 fragTexCoord;
+in vec2 fragPixcoord;
+in vec4 fragOffset[3];
 
-layout(location = 0) out vec4 fragOut0;
+out vec4 fragOut0;
 
 uniform sampler2D edgesTex;
 uniform sampler2D areaTex;

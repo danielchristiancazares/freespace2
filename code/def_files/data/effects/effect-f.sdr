@@ -1,14 +1,12 @@
 
-//? #version 330
-
 #include "gamma.sdr"
 
-layout(location = 0) in float fragRadius;
-layout(location = 1) in vec4 fragPosition;
-layout(location = 2) in vec4 fragTexCoord;
-layout(location = 3) in vec4 fragColor;
+in float fragRadius;
+in vec4 fragPosition;
+in vec4 fragTexCoord;
+in vec4 fragColor;
 
-layout(location = 0) out vec4 fragOut0;
+out vec4 fragOut0;
 
 uniform sampler2DArray baseMap;
 uniform sampler2D depthMap;

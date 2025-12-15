@@ -101,7 +101,7 @@ layout (std140) uniform modelData {
 	int flags;
 };
 
-layout(location = 0) in VertexOutput {
+in VertexOutput {
 	mat3 tangentMatrix;
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_FOG
@@ -125,7 +125,7 @@ layout(location = 0) in VertexOutput {
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_SHADOWS
 } vertIn[];
 
-layout(location = 0) out VertexOutput {
+out VertexOutput {
 	mat3 tangentMatrix;
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_FOG

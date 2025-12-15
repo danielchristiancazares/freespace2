@@ -1,17 +1,15 @@
-//? #version 330
-
 layout (points) in;
 layout (triangle_strip, max_vertices = 4) out;
 
-layout(location = 0) in vec3 geoUvec[];
-layout(location = 1) in float geoRadius[];
-layout(location = 2) in vec4 geoColor[];
-layout(location = 3) in float geoArrayIndex[];
+in vec3 geoUvec[];
+in float geoRadius[];
+in vec4 geoColor[];
+in float geoArrayIndex[];
 
-layout(location = 0) out float fragRadius;
-layout(location = 1) out vec4 fragPosition;
-layout(location = 2) out vec4 fragTexCoord;
-layout(location = 3) out vec4 fragColor;
+out float fragRadius;
+out vec4 fragPosition;
+out vec4 fragTexCoord;
+out vec4 fragColor;
 
 layout (std140) uniform matrixData {
 	mat4 modelViewMatrix;

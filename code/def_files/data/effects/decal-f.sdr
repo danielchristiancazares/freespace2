@@ -1,21 +1,20 @@
 
 // NOTE: The technique and some of this code is based on this tutorial:
 // http://martindevans.me/game-development/2015/02/27/Drawing-Stuff-On-Other-Stuff-With-Deferred-Screenspace-Decals/
-//? #version 330
 
 #include "lighting.sdr"
 #include "normals.sdr"
 #include "gamma.sdr"
 
-layout(location = 0) out vec4 fragOut0; // Diffuse buffer
-layout(location = 1) out vec4 fragOut1; // Normal buffer
-layout(location = 2) out vec4 fragOut2; // Emissive buffer
+out vec4 fragOut0; // Diffuse buffer
+out vec4 fragOut1; // Normal buffer
+out vec4 fragOut2; // Emissive buffer
 
-layout(location = 0) flat in mat4 invModelMatrix;
-layout(location = 4) flat in vec3 decalDirection;
-layout(location = 5) flat in float normal_angle_cutoff;
-layout(location = 6) flat in float angle_fade_start;
-layout(location = 7) flat in float alpha_scale;
+flat in mat4 invModelMatrix;
+flat in vec3 decalDirection;
+flat in float normal_angle_cutoff;
+flat in float angle_fade_start;
+flat in float alpha_scale;
 
 uniform sampler2D gDepthBuffer;
 uniform sampler2D gNormalBuffer;

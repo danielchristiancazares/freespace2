@@ -1,8 +1,6 @@
-//? #version 330
-
-layout(location = 0) in vec4 vertPosition;
-layout(location = 2) in vec4 vertTexCoord;
-layout(location = 0) out vec4 fragTexCoord;
+in vec4 vertPosition;
+in vec4 vertTexCoord;
+out vec4 fragTexCoord;
 void main()
 {
 	fragTexCoord = vertTexCoord;

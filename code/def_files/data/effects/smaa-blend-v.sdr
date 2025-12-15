@@ -1,4 +1,3 @@
-//? #version 330
 
 layout (std140) uniform genericData {
 	vec2 smaa_rt_metrics;
@@ -11,12 +10,12 @@ layout (std140) uniform genericData {
 
 #include "SMAA.sdr"
 
-layout(location = 0) in vec4 vertPosition;
-layout(location = 2) in vec2 vertTexCoord;
+in vec4 vertPosition;
+in vec2 vertTexCoord;
 
-layout(location = 0) out vec2 fragTexCoord;
-layout(location = 1) out vec2 fragPixcoord;
-layout(location = 2) out vec4 fragOffset[3];
+out vec2 fragTexCoord;
+out vec2 fragPixcoord;
+out vec4 fragOffset[3];
 
 void main() {
 	gl_Position = vertPosition;
