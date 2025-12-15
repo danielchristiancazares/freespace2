@@ -9,9 +9,9 @@ using graphics::vulkan::VulkanFrame;
 
 TEST(VulkanTextureContract, DescriptorHasNoDummyFallbackParameters)
 {
-	using ExpectedSignature = vk::DescriptorImageInfo (VulkanTextureManager::*)(
-		int, VulkanFrame&, vk::CommandBuffer, uint32_t, bool, const VulkanTextureManager::SamplerKey&);
+	using ExpectedSignature = VulkanTextureManager::TextureDescriptorQuery (VulkanTextureManager::*)(
+		int, const VulkanTextureManager::SamplerKey&);
 
-	const bool matches = std::is_same<ExpectedSignature, decltype(&VulkanTextureManager::getDescriptor)>::value;
-	EXPECT_TRUE(matches) << "VulkanTextureManager::getDescriptor must not expose dummy image/sampler fallbacks";
+	const bool matches = std::is_same<ExpectedSignature, decltype(&VulkanTextureManager::queryDescriptor)>::value;
+	EXPECT_TRUE(matches) << "VulkanTextureManager::queryDescriptor must not expose dummy image/sampler fallbacks";
 }
