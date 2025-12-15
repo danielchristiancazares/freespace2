@@ -169,7 +169,7 @@ void gr_stub_zbias_stub(int  /*bias*/)
 {
 }
 
-void gr_stub_zbuffer_clear(int  /*mode*/)
+void gr_stub_zbuffer_clear(int /*mode*/)
 {
 }
 
