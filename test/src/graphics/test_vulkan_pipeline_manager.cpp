@@ -169,15 +169,16 @@ TEST(VulkanPipelineManager, Scenario_DynamicRenderingRequired)
 
 	// When constructing the pipeline manager
 	// Then it should refuse to initialize because renderPass is always VK_NULL_HANDLE
-	EXPECT_THROW(
-		graphics::vulkan::VulkanPipelineManager(fakeDevice,
-			fakeLayout,
-			fakeLayout,
-			fakeCache,
-			/*supportsExtendedDynamicState=*/true,
-			/*supportsExtendedDynamicState2=*/true,
-			/*supportsExtendedDynamicState3=*/false,
-			caps,
+		EXPECT_THROW(
+			graphics::vulkan::VulkanPipelineManager(fakeDevice,
+				fakeLayout,
+				fakeLayout,
+				fakeLayout,
+				fakeCache,
+				/*supportsExtendedDynamicState=*/true,
+				/*supportsExtendedDynamicState2=*/true,
+				/*supportsExtendedDynamicState3=*/false,
+				caps,
 			/*supportsVertexAttributeDivisor=*/false,
 			/*dynamicRenderingEnabled=*/false),
 		std::runtime_error);

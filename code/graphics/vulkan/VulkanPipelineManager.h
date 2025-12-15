@@ -54,7 +54,6 @@ struct PipelineKeyHasher {
 	}
 };
 
-// Converts vertex_layout to Vulkan vertex input descriptions
 struct VertexInputState {
 	std::vector<vk::VertexInputBindingDescription> bindings;
 	std::vector<vk::VertexInputAttributeDescription> attributes;
@@ -95,7 +94,6 @@ class VulkanPipelineManager {
 	bool m_dynamicRenderingEnabled = false;
 
 	std::unordered_map<PipelineKey, vk::UniquePipeline, PipelineKeyHasher> m_pipelines;
-	// Cache vertex input state conversions
 	std::unordered_map<size_t, VertexInputState> m_vertexInputCache;
 
 	vk::UniquePipeline createPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout);

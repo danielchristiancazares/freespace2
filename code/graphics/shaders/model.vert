@@ -90,8 +90,10 @@ void main()
 	vec4 viewPos = uModel.modelViewMatrix * vec4(position, 1.0);
 	gl_Position = uModel.projMatrix * viewPos;
 
+	// Transform normal to view-space for deferred lighting
+	mat3 normalMatrix = transpose(inverse(mat3(uModel.modelViewMatrix)));
 	vPosition = viewPos.xyz;
-	vNormal = normal;
+	vNormal = normalize(normalMatrix * normal);
 	vTexCoord = texCoord;
 	vTangent = tangent;
 }

@@ -17,13 +17,15 @@ void VulkanRenderTargets::create(vk::Extent2D extent) {
 }
 
 void VulkanRenderTargets::resize(vk::Extent2D newExtent) {
-	// Reset initialization flag since we're recreating resources
-	m_depthInitialized = false;
-	create(newExtent);
+		// Reset tracked layouts since we're recreating resources
+		m_depthLayout = vk::ImageLayout::eUndefined;
+		m_gbufferLayouts.fill(vk::ImageLayout::eUndefined);
+		create(newExtent);
 }
 
 void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
-	m_depthFormat = findDepthFormat();
+		m_depthFormat = findDepthFormat();
+		m_depthLayout = vk::ImageLayout::eUndefined;
 
 	vk::ImageCreateInfo imageInfo;
 	imageInfo.imageType = vk::ImageType::e2D;
@@ -65,6 +67,18 @@ void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
 	sampleViewInfo.subresourceRange.levelCount = 1;
 	sampleViewInfo.subresourceRange.layerCount = 1;
 	m_depthSampleView = m_device.device().createImageViewUnique(sampleViewInfo);
+
+	// Create depth sampler with nearest filtering (linear filtering often unsupported for depth)
+	if (!m_depthSampler) {
+		vk::SamplerCreateInfo depthSamplerInfo{};
+		depthSamplerInfo.magFilter = vk::Filter::eNearest;
+		depthSamplerInfo.minFilter = vk::Filter::eNearest;
+		depthSamplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+		depthSamplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+		depthSamplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+		depthSamplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+		m_depthSampler = m_device.device().createSamplerUnique(depthSamplerInfo);
+	}
 }
 
 vk::Format VulkanRenderTargets::findDepthFormat() const
@@ -96,7 +110,8 @@ vk::Format VulkanRenderTargets::findDepthFormat() const
 }
 
 void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
-	for (uint32_t i = 0; i < kGBufferCount; ++i) {
+		m_gbufferLayouts.fill(vk::ImageLayout::eUndefined);
+		for (uint32_t i = 0; i < kGBufferCount; ++i) {
 		vk::ImageCreateInfo imageInfo{};
 		imageInfo.imageType = vk::ImageType::e2D;
 		imageInfo.format = m_gbufferFormat;
@@ -126,8 +141,8 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
 		viewInfo.subresourceRange.levelCount = 1;
 		viewInfo.subresourceRange.layerCount = 1;
 
-		m_gbufferViews[i] = m_device.device().createImageViewUnique(viewInfo);
-	}
+				m_gbufferViews[i] = m_device.device().createImageViewUnique(viewInfo);
+		}
 
 	// Sampler for G-buffer textures in lighting pass
 	vk::SamplerCreateInfo samplerInfo{};

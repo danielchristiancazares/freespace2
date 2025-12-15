@@ -60,8 +60,9 @@ void main()
 		shadingNormal = normalize(nmap);
 	}
 
-	// Specular/roughness map placeholder
-	vec4 specSample = sampleTexture(pcs.specMapIndex, vTexCoord, vec4(0.0));
+	// Specular: ensure G-buffer always contains valid dielectric default (F0).
+	// Deferred lighting samples directly; no fallback logic needed there.
+	vec4 specSample = sampleTexture(pcs.specMapIndex, vTexCoord, vec4(0.04, 0.04, 0.04, 0.0));
 
 	// Emissive/glow
 	vec4 emissive = sampleTexture(pcs.glowMapIndex, vTexCoord, vec4(0.0));

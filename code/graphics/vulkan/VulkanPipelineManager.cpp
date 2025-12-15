@@ -13,20 +13,16 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <chrono>
-#include <fstream>
 
 namespace graphics {
 namespace vulkan {
 
-// Maps vertex_format_data::vertex_format to Vulkan format and shader location
 struct VertexFormatMapping {
 	vk::Format format;
 	uint32_t location;
-	uint32_t componentCount; // Number of components (1-4)
+	uint32_t componentCount;
 };
 
-// Maps FSO vertex format types to Vulkan formats and locations
 // Location mapping follows OpenGL convention:
 // 0 = POSITION, 1 = COLOR, 2 = TEXCOORD, 3 = NORMAL, 4 = TANGENT, etc.
 static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatMapping> VERTEX_FORMAT_MAP = {
@@ -69,33 +65,10 @@ static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatM
 // unused locations. Validation layer warnings about mismatched locations indicate
 // shader/layout incompatibility, not an invalid layout.
 
-static const char* vertexFormatToString(vertex_format_data::vertex_format fmt)
-{
-	using vf = vertex_format_data::vertex_format;
-	switch (fmt) {
-	case vf::POSITION4: return "POSITION4";
-	case vf::POSITION3: return "POSITION3";
-	case vf::POSITION2: return "POSITION2";
-	case vf::SCREEN_POS: return "SCREEN_POS";
-	case vf::COLOR3: return "COLOR3";
-	case vf::COLOR4: return "COLOR4";
-	case vf::COLOR4F: return "COLOR4F";
-	case vf::TEX_COORD2: return "TEX_COORD2";
-	case vf::TEX_COORD4: return "TEX_COORD4";
-	case vf::NORMAL: return "NORMAL";
-	case vf::TANGENT: return "TANGENT";
-	case vf::MODEL_ID: return "MODEL_ID";
-	case vf::RADIUS: return "RADIUS";
-	case vf::UVEC: return "UVEC";
-	case vf::MATRIX4: return "MATRIX4";
-	default: return "UNKNOWN";
-	}
-}
-
-static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend mode)
-{
-	vk::PipelineColorBlendAttachmentState state{};
-	state.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+	static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend mode)
+	{
+		vk::PipelineColorBlendAttachmentState state{};
+		state.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
 	                       vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 
 	switch (mode) {
@@ -116,7 +89,7 @@ static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend
 		state.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
 		state.dstColorBlendFactor = vk::BlendFactor::eOne;
 		state.colorBlendOp = vk::BlendOp::eAdd;
-		state.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+		state.srcAlphaBlendFactor = vk::BlendFactor::eSrcAlpha;
 		state.dstAlphaBlendFactor = vk::BlendFactor::eOne;
 		state.alphaBlendOp = vk::BlendOp::eAdd;
 		break;
@@ -125,7 +98,7 @@ static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend
 		state.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
 		state.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
 		state.colorBlendOp = vk::BlendOp::eAdd;
-		state.srcAlphaBlendFactor = vk::BlendFactor::eOne;
+		state.srcAlphaBlendFactor = vk::BlendFactor::eSrcAlpha;
 		state.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
 		state.alphaBlendOp = vk::BlendOp::eAdd;
 		break;
@@ -134,8 +107,8 @@ static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend
 		state.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
 		state.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcColor;
 		state.colorBlendOp = vk::BlendOp::eAdd;
-		state.srcAlphaBlendFactor = vk::BlendFactor::eOne;
-		state.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
+		state.srcAlphaBlendFactor = vk::BlendFactor::eSrcAlpha;
+		state.dstAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcColor;
 		state.alphaBlendOp = vk::BlendOp::eAdd;
 		break;
 	case ALPHA_BLEND_PREMULTIPLIED:
@@ -309,7 +282,6 @@ vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const Sh
 		return it->second.get();
 	}
 
-	// Pipeline not found, need to create it
 	auto pipeline = createPipeline(key, modules, layout);
 	auto handle = pipeline.get();
 	m_pipelines.emplace(key, std::move(pipeline));
@@ -355,7 +327,6 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		vertexInput.vertexAttributeDescriptionCount = 0;
 		vertexInput.pVertexAttributeDescriptions = nullptr;
 	} else {
-		// Traditional vertex attributes from layout
 		const VertexInputState& vertexInputState = getVertexInputState(layout);
 
 		vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputState.bindings.size());
@@ -428,17 +399,12 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		}
 		Assertion(hasLoc0, "Vertex input pipeline created without Location 0 attribute");
 		if (!hasLoc1) {
-			std::ofstream logFile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
-			const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::system_clock::now().time_since_epoch()).count();
-			logFile << "{\"sessionId\":\"debug-session\",\"runId\":\"run1\",\"hypothesisId\":\"A_LOC1\","
-			        << "\"location\":\"VulkanPipelineManager.cpp:createPipeline\","
-			        << "\"message\":\"missing Location 1 attribute for vertex-input pipeline\","
-			        << "\"data\":{\"shaderType\":" << static_cast<int>(key.type)
-			        << ",\"variantFlags\":" << key.variant_flags
-			        << ",\"layoutHash\":" << key.layout_hash
-			        << ",\"colorAttachments\":" << key.color_attachment_count
-			        << "},\"timestamp\":" << now << "}\n";
+			vkprintf("VulkanPipelineManager: missing Location 1 attribute for vertex-input pipeline "
+			         "(shaderType=%d variantFlags=%u layoutHash=%zu colorAttachments=%u)\n",
+			         static_cast<int>(key.type),
+			         key.variant_flags,
+			         key.layout_hash,
+			         key.color_attachment_count);
 		}
 	}
 

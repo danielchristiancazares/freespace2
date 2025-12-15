@@ -1,7 +1,7 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-#include "lighting.sdr"
+#include "lighting.glsl"
 
 // Light volume / fullscreen quad vertex
 // Location 0 matches VulkanPipelineManager vertex mapping (POSITION)
@@ -42,4 +42,3 @@ void main()
 		gl_Position = projMatrix * modelViewMatrix * vec4(vertPosition.xyz * scale, 1.0);
 	}
 }
-

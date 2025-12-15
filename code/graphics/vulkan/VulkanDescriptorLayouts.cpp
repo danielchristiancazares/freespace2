@@ -24,18 +24,20 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 	          limits.maxDescriptorSetStorageBuffers);
 }
 
-VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(device)
-{
-	// Global layout bindings for deferred lighting:
-	// Binding 0: G-buffer 0 (albedo+spec)
-	// Binding 1: G-buffer 1 (normal)
-	// Binding 2: G-buffer 2 (material params)
-	// Binding 3: Depth (sampled)
-	std::array<vk::DescriptorSetLayoutBinding, 4> globalBindings{};
-	for (uint32_t i = 0; i < globalBindings.size(); ++i) {
-		globalBindings[i].binding = i;
-		globalBindings[i].descriptorCount = 1;
-		globalBindings[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(device)
+	{
+		// Global layout bindings for deferred lighting:
+		// Binding 0: G-buffer 0 (Color)
+		// Binding 1: G-buffer 1 (Normal)
+		// Binding 2: G-buffer 2 (Position)
+		// Binding 3: Depth (sampled) -- kept at binding 3 for SPIR-V compatibility
+		// Binding 4: G-buffer 3 (Specular)
+		// Binding 5: G-buffer 4 (Emissive)
+		std::array<vk::DescriptorSetLayoutBinding, 6> globalBindings{};
+		for (uint32_t i = 0; i < globalBindings.size(); ++i) {
+			globalBindings[i].binding = i;
+			globalBindings[i].descriptorCount = 1;
+			globalBindings[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
 		globalBindings[i].stageFlags = vk::ShaderStageFlagBits::eFragment;
 	}
 
@@ -77,9 +79,9 @@ VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(d
 	pipelineLayoutInfo.pSetLayouts = setLayouts.data();
 	m_pipelineLayout = m_device.createPipelineLayoutUnique(pipelineLayoutInfo);
 
-	std::array<vk::DescriptorPoolSize, 1> poolSizes{};
-	poolSizes[0].type = vk::DescriptorType::eCombinedImageSampler;
-	poolSizes[0].descriptorCount = 4; // G-buffer (3) + depth (1)
+		std::array<vk::DescriptorPoolSize, 1> poolSizes{};
+		poolSizes[0].type = vk::DescriptorType::eCombinedImageSampler;
+		poolSizes[0].descriptorCount = 6; // G-buffer (5) + depth (1)
 
 	vk::DescriptorPoolCreateInfo poolInfo;
 	poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;

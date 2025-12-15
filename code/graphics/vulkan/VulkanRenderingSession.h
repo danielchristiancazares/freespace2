@@ -2,31 +2,30 @@
 
 #include "VulkanDevice.h"
 #include "VulkanRenderTargets.h"
-#include "VulkanDescriptorLayouts.h"
 
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace graphics {
 namespace vulkan {
 
 class VulkanRenderingSession {
 public:
-	struct RenderTargetInfo {
+		struct RenderTargetInfo {
 		vk::Format colorFormat = vk::Format::eUndefined;
 		uint32_t colorAttachmentCount = 1;
 		vk::Format depthFormat = vk::Format::eUndefined; // eUndefined => no depth attachment
 	};
 
-	VulkanRenderingSession(VulkanDevice& device,
-		VulkanRenderTargets& targets,
-		VulkanDescriptorLayouts& descriptorLayouts);
+		VulkanRenderingSession(VulkanDevice& device,
+			VulkanRenderTargets& targets);
 
-	// Frame boundaries - called by VulkanRenderer
-	void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex, vk::DescriptorSet globalDescriptorSet);
-	void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
+		// Frame boundaries - called by VulkanRenderer
+		void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
+		void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
 
 	// Starts dynamic rendering for the *current target* if needed; returns the *actual* target contract.
 	const RenderTargetInfo& ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex);
@@ -38,6 +37,7 @@ public:
 
 	// Clear control
 	void requestClear();
+	void requestDepthClear();
 	void setClearColor(float r, float g, float b, float a);
 
 	// State setters
@@ -50,8 +50,8 @@ public:
 	bool depthTestEnabled() const { return m_depthTest; }
 	bool depthWriteEnabled() const { return m_depthWrite; }
 
-	// Dynamic state application (public - called by VulkanRenderer)
-	void applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet);
+		// Dynamic state application (public - called by VulkanRenderer)
+		void applyDynamicState(vk::CommandBuffer cmd);
 
 private:
 	// Base class for render target states - polymorphic by design
@@ -113,11 +113,8 @@ private:
 	void transitionGBufferToAttachment(vk::CommandBuffer cmd);
 	void transitionGBufferToShaderRead(vk::CommandBuffer cmd);
 
-	VulkanDevice& m_device;
-	VulkanRenderTargets& m_targets;
-	VulkanDescriptorLayouts& m_descriptorLayouts;
-
-	vk::DescriptorSet m_globalDescriptorSet{};
+		VulkanDevice& m_device;
+		VulkanRenderTargets& m_targets;
 
 	// Target state - single truth, no pending/active duality
 	std::unique_ptr<RenderTargetState> m_target;
@@ -130,11 +127,14 @@ private:
 	bool m_shouldClearColor = true;
 	bool m_shouldClearDepth = true;
 
-	// Dynamic state cache
-	vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;
-	bool m_depthTest = true;
-	bool m_depthWrite = true;
-};
+		// Dynamic state cache
+		vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;
+		bool m_depthTest = true;
+		bool m_depthWrite = true;
+
+		// Swapchain image layout tracking (per swapchain image index)
+		std::vector<vk::ImageLayout> m_swapchainLayouts;
+	};
 
 } // namespace vulkan
 } // namespace graphics

@@ -109,7 +109,7 @@ Packages everything for one frame in the ring:
 
 Owns:
 - Depth image, depth attachment view, depth sample view (for shader reads)
-- G-buffer images (`kGBufferCount = 3`)
+- G-buffer images (`kGBufferCount = 5`)
 - Resize logic tied to swapchain recreation
 
 ### Resource Managers
