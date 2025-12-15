@@ -596,13 +596,13 @@ if (FSO_BUILD_WITH_VULKAN)
 		graphics/vulkan/VulkanBufferManager.cpp
 		graphics/vulkan/VulkanBufferManager.h
 		graphics/vulkan/VulkanModelValidation.cpp
-		graphics/vulkan/VulkanModelValidation.h
-		graphics/vulkan/VulkanRenderer.cpp
-		graphics/vulkan/VulkanRenderer.h
-		graphics/vulkan/VulkanRenderTargets.cpp
-		graphics/vulkan/VulkanRenderTargets.h
-		graphics/vulkan/VulkanRenderingSession.cpp
-		graphics/vulkan/VulkanRenderingSession.h
+			graphics/vulkan/VulkanModelValidation.h
+				graphics/vulkan/VulkanRenderer.cpp
+				graphics/vulkan/VulkanRenderer.h
+				graphics/vulkan/VulkanRenderTargets.cpp
+				graphics/vulkan/VulkanRenderTargets.h
+				graphics/vulkan/VulkanRenderingSession.cpp
+				graphics/vulkan/VulkanRenderingSession.h
 		graphics/vulkan/VulkanTextureManager.cpp
 		graphics/vulkan/VulkanTextureManager.h
 		graphics/vulkan/VulkanShaderReflection.cpp

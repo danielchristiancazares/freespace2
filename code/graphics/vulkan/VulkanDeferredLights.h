@@ -44,6 +44,7 @@ struct DeferredDrawContext {
     vk::Buffer uniformBuffer;
     vk::Pipeline pipeline;
     vk::Pipeline ambientPipeline;  // blend disabled for first pass
+    bool dynamicBlendEnable = false; // VK_EXT_extended_dynamic_state3 (colorBlendEnable)
 };
 
 struct FullscreenLight {
