@@ -9,6 +9,7 @@
 #include "graphics/matrix.h"
 #include "VulkanModelValidation.h"
 #include "VulkanDebug.h"
+#include "osapi/outwnd.h"
 
 #include <chrono>
 #include <cstdint>
@@ -30,7 +31,6 @@ VulkanRenderer::VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsO
 bool VulkanRenderer::initialize() {
 	// Initialize the device layer (instance, surface, physical device, logical device, swapchain)
 	if (!m_vulkanDevice->initialize()) {
-		vkprintf("VulkanDevice initialization failed\n");
 		return false;
 	}
 
@@ -61,6 +61,8 @@ bool VulkanRenderer::initialize() {
 		m_vulkanDevice->memoryProperties(),
 		m_vulkanDevice->graphicsQueue(),
 		m_vulkanDevice->graphicsQueueIndex());
+
+	createFallbackResources();
 
 	m_textureManager = std::make_unique<VulkanTextureManager>(m_vulkanDevice->device(),
 		m_vulkanDevice->memoryProperties(),
@@ -94,7 +96,26 @@ void VulkanRenderer::createFrames() {
 			m_vulkanDevice->vertexBufferAlignment(),
 			STAGING_RING_SIZE,
 			props.limits.optimalBufferCopyOffsetAlignment);
+
+		// Allocate model descriptor set at frame creation (not lazily)
+		m_frames[i]->modelDescriptorSet = m_descriptorLayouts->allocateModelDescriptorSet();
+		Assertion(m_frames[i]->modelDescriptorSet, "Failed to allocate model descriptor set for frame %zu", i);
 	}
+}
+
+void VulkanRenderer::createFallbackResources()
+{
+	Assertion(m_bufferManager != nullptr, "Fallback resources require buffer manager");
+
+	m_fallbackModelUniformHandle = m_bufferManager->createBuffer(BufferType::Uniform, BufferUsageHint::Dynamic);
+	model_uniform_data zeroModel{};
+	m_bufferManager->updateBufferData(m_fallbackModelUniformHandle, sizeof(zeroModel), &zeroModel);
+
+	m_fallbackModelVertexHeapHandle = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Dynamic);
+	uint32_t dummy = 0;
+	m_bufferManager->updateBufferData(m_fallbackModelVertexHeapHandle, sizeof(dummy), &dummy);
+
+	m_modelVertexHeapHandle = m_fallbackModelVertexHeapHandle;
 }
 
 void VulkanRenderer::createRenderTargets() {
@@ -145,15 +166,17 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	m_frameLifecycle.begin(m_currentFrame);
 	m_isRecording = true;
 
-	// Sync model descriptors BEFORE command buffer recording
-	// This is the ONLY place descriptors are updated for this frame
-	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
+	// Reset per-frame uniform bindings (optional will be empty at frame start)
+	frame.resetPerFrameBindings();
 
-	// Only sync model descriptors if the model vertex heap exists
-	vk::Buffer vertexHeapBuffer = queryModelVertexHeapBuffer();
-	if (vertexHeapBuffer) {
-		beginModelDescriptorSync(frame, m_currentFrame, vertexHeapBuffer);
-	}
+	// Sync model descriptors BEFORE command buffer recording (unconditional)
+	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
+	Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
+	Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
+
+	// Ensure vertex heap buffer exists and sync descriptors
+	vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
+	beginModelDescriptorSync(frame, m_currentFrame, vertexHeapBuffer);
 
 	vk::CommandBuffer cmd = frame.commandBuffer();
 
@@ -173,7 +196,6 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 
 void VulkanRenderer::endFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	if (!m_isRecording) {
-		vkprintf("endFrame() - NOT RECORDING, skipping\n");
 		return;
 	}
 	vk::CommandBuffer cmd = frame.commandBuffer();
@@ -223,7 +245,6 @@ void VulkanRenderer::submitFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	auto presentResult = m_vulkanDevice->present(frame.renderFinished(), imageIndex);
 
 	if (presentResult.needsRecreate) {
-		vkprintf("Swapchain out of date/suboptimal, recreating...\n");
 		const auto extent = m_vulkanDevice->swapchainExtent();
 		if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
 			m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
@@ -293,9 +314,8 @@ VulkanFrame* VulkanRenderer::getCurrentRecordingFrame() {
 	return m_frames[m_recordingFrame].get();
 }
 
-void VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd) {
-	m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
-	m_renderingSession->applyDynamicState(cmd, m_globalDescriptorSet);
+const VulkanRenderingSession::RenderTargetInfo& VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd) {
+	return m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
 }
 
 void VulkanRenderer::bindDeferredGlobalDescriptors() {
@@ -439,7 +459,8 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
 	Assertion(frame.modelDescriptorSet, "Model descriptor set must be allocated before binding uniform buffer");
 	Assertion(handle.isValid(), "Invalid model uniform buffer handle");
 
-	if (frame.modelUniformState.bufferHandle != handle) {
+	// Check if buffer handle changed
+	if (!frame.modelUniformBinding || frame.modelUniformBinding->bufferHandle != handle) {
 		vk::Buffer vkBuffer = getBuffer(handle);
 		Assertion(vkBuffer, "Failed to resolve Vulkan buffer for handle %d", handle.value());
 
@@ -457,11 +478,9 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
 		write.pBufferInfo = &info;
 
 		m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
-
-		frame.modelUniformState.bufferHandle = handle;
 	}
 
-	frame.modelUniformState.dynamicOffset = dynOffset;
+	frame.modelUniformBinding = DynamicUniformBinding{ handle, dynOffset };
 }
 
 void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
@@ -482,8 +501,7 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
 	Assertion((dynOffset % alignment) == 0,
 		"Scene uniform offset %u is not aligned to %zu", dynOffset, alignment);
 
-	frame.sceneUniformState.bufferHandle = handle;
-	frame.sceneUniformState.dynamicOffset = dynOffset;
+	frame.sceneUniformBinding = DynamicUniformBinding{ handle, dynOffset };
 }
 
 void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
@@ -540,14 +558,27 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
 	Assertion(frameIndex < kFramesInFlight,
 		"Invalid frame index %u (must be 0..%u)", frameIndex, kFramesInFlight - 1);
 
-	// Allocate descriptor set if needed
-	if (!frame.modelDescriptorSet) {
-		frame.modelDescriptorSet = m_descriptorLayouts->allocateModelDescriptorSet();
-		Assertion(frame.modelDescriptorSet, "Failed to allocate model descriptor set");
-	}
+	// Descriptor set must be allocated at frame construction (not lazily)
+	Assertion(frame.modelDescriptorSet, "Model descriptor set must be allocated at frame construction");
 
 	// Binding 0: Write vertex heap descriptor (once per frame)
 	writeVertexHeapDescriptor(frame, vertexHeapBuffer);
+
+	// Binding 2: Write fallback model UBO (ensures valid binding when no explicit uniform set)
+	vk::Buffer fallbackUbo = m_bufferManager->ensureBuffer(m_fallbackModelUniformHandle, sizeof(model_uniform_data));
+	vk::DescriptorBufferInfo modelUboInfo{};
+	modelUboInfo.buffer = fallbackUbo;
+	modelUboInfo.offset = 0;
+	modelUboInfo.range = sizeof(model_uniform_data);
+
+	vk::WriteDescriptorSet writeUbo{};
+	writeUbo.dstSet = frame.modelDescriptorSet;
+	writeUbo.dstBinding = 2;
+	writeUbo.dstArrayElement = 0;
+	writeUbo.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
+	writeUbo.descriptorCount = 1;
+	writeUbo.pBufferInfo = &modelUboInfo;
+	m_vulkanDevice->device().updateDescriptorSets(1, &writeUbo, 0, nullptr);
 
 	// Binding 1: Write all texture descriptors for RESIDENT textures
 	// Note: We write all resident textures every frame. In the future, this could be optimized
@@ -884,8 +915,9 @@ void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
 		return;
 	}
 
-	// Begin swapchain rendering without depth (deferred lighting doesn't need depth test)
-	m_renderingSession->beginSwapchainRenderingNoDepth(cmd, m_recordingImage);
+	// Activate swapchain rendering without depth (target set by endDeferredGeometry)
+	// ensureRenderingActive starts the render pass if not already active
+	m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
 
 	// Get pipeline and layout for deferred shader
 	// TODO: These should be cached, for now we create them on demand
@@ -938,9 +970,7 @@ void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
 			}
 		}, light);
 	}
-
-	// End the render pass
-	cmd.endRendering();
+	// Note: render pass ends via RAII when target changes or frame ends
 }
 
 } // namespace vulkan

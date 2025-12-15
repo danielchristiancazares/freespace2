@@ -310,11 +310,6 @@ vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const Sh
 	}
 
 	// Pipeline not found, need to create it
-	vkprintf("Creating new pipeline - type=%d, blend=%d, layout_hash=0x%x, vert=%p, frag=%p\n",
-		static_cast<int>(key.type), static_cast<int>(key.blend_mode), 
-		static_cast<unsigned int>(key.layout_hash),
-		static_cast<const void*>(modules.vert), static_cast<const void*>(modules.frag));
-
 	auto pipeline = createPipeline(key, modules, layout);
 	auto handle = pipeline.get();
 	m_pipelines.emplace(key, std::move(pipeline));
@@ -359,10 +354,6 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		vertexInput.pVertexBindingDescriptions = nullptr;
 		vertexInput.vertexAttributeDescriptionCount = 0;
 		vertexInput.pVertexAttributeDescriptions = nullptr;
-
-		vkprintf("Vulkan: creating pipeline type %d (vertex pulling) variant 0x%x\n",
-		         static_cast<int>(key.type), key.variant_flags);
-		vkprintf("  Vertex inputs: none (vertex pulling from storage buffer)\n");
 	} else {
 		// Traditional vertex attributes from layout
 		const VertexInputState& vertexInputState = getVertexInputState(layout);
@@ -371,32 +362,6 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		vertexInput.pVertexBindingDescriptions = vertexInputState.bindings.data();
 		vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputState.attributes.size());
 		vertexInput.pVertexAttributeDescriptions = vertexInputState.attributes.data();
-
-		vkprintf("Vulkan: creating pipeline type %d variant 0x%x layout_hash %zu\n",
-		         static_cast<int>(key.type), key.variant_flags, key.layout_hash);
-		vkprintf("  Vertex bindings (%zu):\n", vertexInputState.bindings.size());
-		for (const auto& b : vertexInputState.bindings) {
-			vkprintf("    binding %u stride %u rate %s\n",
-			         b.binding,
-			         b.stride,
-			         b.inputRate == vk::VertexInputRate::eInstance ? "instance" : "vertex");
-		}
-		vkprintf("  Vertex attributes (%zu):\n", vertexInputState.attributes.size());
-		for (const auto& a : vertexInputState.attributes) {
-			vkprintf("    loc %u bind %u fmt %d offset %u\n",
-			         a.location, a.binding, static_cast<int>(a.format), a.offset);
-		}
-		// Also log the original layout components for cross-checking
-		vkprintf("  Vertex layout components (%zu):\n", layout.get_num_vertex_components());
-		for (size_t i = 0; i < layout.get_num_vertex_components(); ++i) {
-			const auto* comp = layout.get_vertex_component(i);
-			vkprintf("    %s buffer %zu offset %zu stride %zu divisor %zu\n",
-			         vertexFormatToString(comp->format_type),
-			         comp->buffer_number,
-			         comp->offset,
-			         layout.get_vertex_stride(comp->buffer_number),
-			         comp->divisor);
-		}
 
 		if (m_supportsVertexAttributeDivisor && !vertexInputState.divisors.empty()) {
 			divisorInfo.vertexBindingDivisorCount = static_cast<uint32_t>(vertexInputState.divisors.size());
@@ -523,14 +488,8 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 
 	auto pipelineResult = m_device.createGraphicsPipelineUnique(m_pipelineCache, pipelineInfo);
 	if (pipelineResult.result != vk::Result::eSuccess) {
-		vkprintf("Vulkan: ERROR - Failed to create graphics pipeline! result=%s, type=%d\n",
-			vk::to_string(pipelineResult.result).c_str(), static_cast<int>(key.type));
 		throw std::runtime_error("Failed to create Vulkan graphics pipeline.");
 	}
-
-	vkprintf("Pipeline created successfully - type=%d, blend=%d, pipeline=%p\n",
-		static_cast<int>(key.type), static_cast<int>(key.blend_mode),
-		static_cast<const void*>(pipelineResult.value.get()));
 
 	return std::move(pipelineResult.value);
 }

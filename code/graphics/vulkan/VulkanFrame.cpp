@@ -88,7 +88,6 @@ void VulkanFrame::wait_for_gpu()
 		});
 	// #endregion
 	if (!fence) {
-		vkprintf("VulkanFrame::wait_for_gpu called with null fence\n");
 		// #region agent log
 		agent_log("H1", "VulkanFrame.cpp:wait_for_gpu", "null fence branch",
 			[](std::ofstream& out) { out << "{}"; });
@@ -110,7 +109,6 @@ void VulkanFrame::wait_for_gpu()
 		});
 	// #endregion
 	if (result != vk::Result::eSuccess) {
-		vkprintf("VulkanFrame::wait_for_gpu: waitForFences returned %d (%s)\n", static_cast<int>(result), vk::to_string(result).c_str());
 		// #region agent log
 		agent_log("H2", "VulkanFrame.cpp:wait_for_gpu", "waitForFences failed",
 			[this, result](std::ofstream& out) {
@@ -130,7 +128,6 @@ void VulkanFrame::wait_for_gpu()
 		[resetResult](std::ofstream& out) { out << "{\"resetResult\":" << static_cast<int>(resetResult) << "}"; });
 	// #endregion
 	if (resetResult != vk::Result::eSuccess) {
-		vkprintf("VulkanFrame::wait_for_gpu: resetFences returned %d\n", static_cast<int>(resetResult));
 		Assertion(false, "Failed to reset fence for Vulkan frame");
 		throw std::runtime_error("Failed to reset fence for Vulkan frame");
 	}
