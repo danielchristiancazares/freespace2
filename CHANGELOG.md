@@ -51,6 +51,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `VulkanRingBuffer::remaining()` introspection method for available space queries
 
 ### Changed
+- `VulkanBufferManager` now provides `ensureBuffer()` method for transparent buffer resizing
+  - Automatically grows buffers when needed without duplicating resize logic
+  - Simplifies `updateBufferData()` and `updateBufferDataOffset()` implementations
+- Restructured `VulkanRenderingSession` command recording and frame lifecycle for clarity
+- Model uniform binding now structurally required via `setModelUniformBinding()`
+  - Fallback auto-populated UBO removed; missing binding prevents draw (matches texture semantics)
+- Renamed `ModelUniformState` to `DynamicUniformBinding` for semantic clarity
+- Removed verbose debug logging from Vulkan device selection path
 - G-buffer dynamic state now sets blend enable and color write mask for all color attachments
 - Eliminate exception-based coordination in Vulkan renderer
   - `VulkanRingBuffer::try_allocate()` returns optional instead of throwing; intra-frame wrapping removed
