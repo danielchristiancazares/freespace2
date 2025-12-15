@@ -1,4 +1,4 @@
-//? #version 330
+//? #version 150
 #include "shadows.sdr" //! #include "shadows.sdr"
 #include "lighting.sdr" //! #include "lighting.sdr"
 #include "gamma.sdr" //! #include "gamma.sdr"
@@ -94,7 +94,7 @@ layout (std140) uniform modelData {
 	int flags;
 };
 
-layout(location = 0) in VertexOutput {
+in VertexOutput {
 	mat3 tangentMatrix;
 
 #prereplace IF_FLAG_COMPILED MODEL_SDR_FLAG_FOG
@@ -134,13 +134,13 @@ uniform sampler2DArray sMiscmap;
 uniform sampler2DArray shadow_map;
 #prereplace ENDIF_FLAG_COMPILED MODEL_SDR_FLAG_SHADOWS
 
-layout(location = 0) out vec4 fragOut0;
+out vec4 fragOut0;
 
 #ifndef MODEL_SDR_FLAG_SHADOW_MAP
-layout(location = 1) out vec4 fragOut1;
-layout(location = 2) out vec4 fragOut2;
-layout(location = 3) out vec4 fragOut3;
-layout(location = 4) out vec4 fragOut4;
+out vec4 fragOut1;
+out vec4 fragOut2;
+out vec4 fragOut3;
+out vec4 fragOut4;
 #endif
 
 vec3 FresnelLazarovEnv(vec3 specColor, vec3 view, vec3 normal, float gloss)

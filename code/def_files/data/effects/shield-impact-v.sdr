@@ -1,10 +1,9 @@
-//? #version 330
 
-layout(location = 0) in vec4 vertPosition;
-layout(location = 3) in vec3 vertNormal;
+in vec4 vertPosition;
+in vec3 vertNormal;
 
-layout(location = 0) out vec4 fragImpactUV;
-layout(location = 1) out float fragNormOffset;
+out vec4 fragImpactUV;
+out float fragNormOffset;
 
 
 layout (std140) uniform matrixData {

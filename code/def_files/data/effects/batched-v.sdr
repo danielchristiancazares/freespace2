@@ -1,11 +1,9 @@
-//? #version 330
+in vec4 vertPosition;
+in vec4 vertTexCoord;
+in vec4 vertColor;
 
-layout(location = 0) in vec4 vertPosition;
-layout(location = 2) in vec4 vertTexCoord;
-layout(location = 1) in vec4 vertColor;
-
-layout(location = 0) out vec4 fragTexCoord;
-layout(location = 1) out vec4 fragColor;
+out vec4 fragTexCoord;
+out vec4 fragColor;
 
 layout (std140) uniform matrixData {
 	mat4 modelViewMatrix;

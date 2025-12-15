@@ -1,12 +1,10 @@
-//? #version 330
-
-layout(location = 0) in vec4 fragTexCoord;
-layout(location = 0) out vec4 fragOut0;
-layout(location = 1) out vec4 fragOut1;
-layout(location = 2) out vec4 fragOut2;
-layout(location = 3) out vec4 fragOut3;
-layout(location = 4) out vec4 fragOut4;
-layout(location = 5) out vec4 fragOut5;
+in vec4 fragTexCoord;
+out vec4 fragOut0;
+out vec4 fragOut1;
+out vec4 fragOut2;
+out vec4 fragOut3;
+out vec4 fragOut4;
+out vec4 fragOut5;
 
 uniform sampler2DMS texColor;
 uniform sampler2DMS texPos;

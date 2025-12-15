@@ -1,4 +1,3 @@
-//? #version 330
 
 // Enabled at all times but the define is kept here in case this should be configurable in the future
 #define EDGE_AA
@@ -30,9 +29,9 @@ layout(std140) uniform NanoVGUniformData {
 
 uniform sampler2DArray nvg_tex;
 
-layout(location = 0) in vec2 ftcoord;
-layout(location = 1) in vec2 fpos;
-layout(location = 0) out vec4 outColor;
+in vec2 ftcoord;
+in vec2 fpos;
+out vec4 outColor;
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
 	vec2 ext2 = ext - vec2(rad,rad);

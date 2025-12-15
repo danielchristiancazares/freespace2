@@ -1,9 +1,8 @@
-//? #version 330
 
-layout(location = 0) in vec4 vertPosition;
+in vec4 vertPosition;
 
-layout(location = 0) out vec2 v_rcpFrame;
-layout(location = 1) noperspective out vec2 v_pos;
+out vec2 v_rcpFrame;
+noperspective out vec2 v_pos;
 
 layout (std140) uniform genericData {
 	float rt_w;

@@ -1,10 +1,8 @@
-//? #version 330
+in vec4 fragTexCoord;
+in vec4 fragColor;
+in float fragOffset;
 
-layout(location = 0) in vec4 fragTexCoord;
-layout(location = 1) in vec4 fragColor;
-layout(location = 2) in float fragOffset;
-
-layout(location = 0) out vec4 fragOut0;
+out vec4 fragOut0;
 
 uniform sampler2DArray baseMap;
 uniform sampler2D depthMap;
