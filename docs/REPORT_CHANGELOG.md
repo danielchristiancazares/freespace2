@@ -1,0 +1,35 @@
+# Vulkan Renderer Bug Investigation - Changelog
+
+**Parent Document:** [REPORT.md](REPORT.md)
+
+---
+
+## Changelog
+
+- **2025-12-12 (Initial):** Report created from GPT-5.2 Pro analysis. Frame count mismatch (H1) verified.
+- **2025-12-12 (Update 1):** Added Gemini 3 Deep Think findings (4 batches). Verified 13 additional bugs.
+- **2025-12-12 (Update 2):** Added Claude Desktop findings. Verified 3 additional bugs including critical C9.
+- **2025-12-12 (Update 3):** Consolidated all findings. Total: 26 verified bugs (9 critical, 11 high, 6 medium).
+- **2025-12-12 (Update 4):** Folded in fresh-analysis items (H12, H13, M7). Total: 29 verified bugs (9 critical, 13 high, 7 medium).
+- **2025-12-12 (Update 5):** Resolved H1 (frame count constant mismatch). Consolidated to single `kFramesInFlight = 2` constant.
+- **2025-12-12 (Update 6):** Resolved C9 (fallback texture handle never initialized). Added `createFallbackTexture()` to create 1x1 black texture during `VulkanTextureManager` initialization.
+- **2025-12-12 (Update 7):** Resolved C4 (immediate buffer deletion use-after-free). Modified `deleteBuffer()` to use deferred deletion via `m_retiredBuffers`, matching pattern used by `updateBufferData()` and `resizeBuffer()`. Added unit test `test_vulkan_buffer_manager_retirement.cpp`.
+- **2025-12-12 (Update 8):** Resolved C6 (misaligned shader pointer on ARM). Changed filesystem shader loading from `std::vector<char>` to `std::vector<uint32_t>` to guarantee 4-byte alignment required by Vulkan spec for `pCode`. Added unit test `test_vulkan_shader_alignment.cpp`.
+- **2025-12-12 (Update 9):** Verified H9 (buffer offset alignment for R8 textures). Corrected line numbers from 242 to 391/464. Confirmed bug exists only in `uploadImmediate()` path; ring buffer path (`flushPendingUploads()`) is safe due to `optimalBufferCopyOffsetAlignment`.
+- **2025-12-12 (Update 10):** Verified H4 (texture pending destructions never processed). Confirmed all three methods (`setCurrentFrame`, `processPendingDestructions`, `retireTexture`) have zero callers in the codebase. The entire texture retirement system is dead code - currently a latent bug waiting to become active when texture eviction is implemented.
+- **2025-12-13 (Update 11):** Re-verified H7 (blending unconditionally disabled with EDS3). Bug confirmed to exist. Corrected line numbers: `VulkanGraphics.cpp:946-948` to `899-901`, `VulkanGraphics.cpp:1193-1195` to `1146-1148`, `VulkanRenderingSession.cpp:250-252` to `247-249`. The functions are `gr_vulkan_render_primitives()`, `gr_vulkan_render_primitives_batched()`, and `applyDynamicState()`. Pipeline key correctly captures blend_mode at lines 481, 707, 1012 but EDS3 code overrides with `VK_FALSE`.
+- **2025-12-13 (Update 12):** Verified H13 (push descriptor properties in wrong query chain). Confirmed `PhysicalDevicePushDescriptorPropertiesKHR` is chained into `getFeatures2()` at line 533 instead of `getProperties2()` at line 516. The `maxPushDescriptors` field is never read, making this a latent bug that will cause incorrect values if the property is ever used.
+- **2025-12-13 (Update 13):** Verified C7 (large texture infinite loop). Corrected line numbers from 495-498 to 644-646. Confirmed `STAGING_RING_SIZE` is 12 MiB, textures are queued without size checking, and no fallback to `uploadImmediate()` exists. Any texture exceeding 12 MiB will be deferred forever.
+- **2025-12-13 (Update 14):** Verified M7 (shader reflection stub/duplication). Confirmed `VulkanShaderReflection.cpp` duplicates the header and there are no implementations or call sites for the declared APIs.
+- **2025-12-13 (Update 15):** Verified C5 (swapchain acquire crashes on resize). Confirmed `acquireImage()` returns sentinel after successful swapchain recreation without retrying acquisition. The assertion in `flip()` correctly fires on sentinel, but the bug is in `acquireImage()` not retrying.
+- **2025-12-13 (Update 16):** Verified C8 (immediate texture deletion use-after-free). Corrected line numbers from 754-758 to 908-912. Confirmed `deleteTexture()` does immediate RAII destruction while `retireTexture()` properly defers. Neither function has any callers - latent bug.
+- **2025-12-13 (Update 17):** Verified and expanded H10 (depth format selection flaws). Confirmed two issues: (1) loop only checks `eDepthStencilAttachment` but depth is also sampled for deferred lighting, (2) silent fallback at line 83 returns unchecked `eD32Sfloat` if loop finds nothing - masks capability failure. Fix should assert/throw instead of fallback.
+- **2025-12-13 (Update 18):** Resolved H10 (depth format selection flaws). Modified `findDepthFormat()` to check for BOTH `eDepthStencilAttachment` AND `eSampledImage` features. Replaced silent fallback with `throw std::runtime_error()`. Added unit test `test_vulkan_depth_format_selection.cpp` with 9 test cases validating correct behavior and demonstrating both original flaws.
+- **2025-12-13 (Update 19):** Resolved H9 (buffer offset alignment for R8 textures). Aligned `uploadImmediate()` staging layout to meet `vkCmdCopyBufferToImage` buffer offset requirements. Added unit test `test_vulkan_texture_upload_alignment.cpp`.
+- **2025-12-13 (Update 20):** Resolved H7 (blending unconditionally disabled with EDS3). Modified `gr_vulkan_render_primitives()` and `gr_vulkan_render_primitives_batched()` to set EDS3 blend enable based on `material_info->get_blend_mode() != ALPHA_BLEND_NONE`. The `applyDynamicState()` default of `VK_FALSE` is correct as per-draw calls override it. Added unit test `test_vulkan_blend_enable.cpp` with 7 test cases covering all blend modes.
+- **2025-12-13 (Update 21):** Split report into three files: `REPORT.md` (open issues), `REPORT_FIXED.md` (resolved issues), `REPORT_CHANGELOG.md` (this file).
+- **2025-12-12 (Update 22):** Addressed C5 (swapchain acquire crashes on resize) - NOT FIXED. Added retry logic to `acquireImage()` after successful swapchain recreation. This reduces crash frequency but does not fix the bug: sentinel can still reach `flip()` if recreation or retry fails, and the assertion still fires. The root cause is that `flip()` cannot handle acquisition failure - it asserts instead of gracefully skipping the frame. Added unit test `test_vulkan_swapchain_acquire.cpp` documenting the retry behavior. Status remains Open.
+- **2025-12-14 (Update 23):** Fixed three deferred rendering issues:
+  1. **Depth sampler filtering**: Added dedicated `m_depthSampler` with nearest filtering in `VulkanRenderTargets`. Linear filtering on depth formats is not guaranteed by the Vulkan spec. Updated `VulkanRenderer::bindDeferredGlobalDescriptors()` to use the new sampler.
+  2. **Swapchain clear on deferred pass**: Changed `beginSwapchainRenderingNoDepthInternal()` load op from `eDontCare` to `eClear`. Deferred lighting may discard background pixels, leaving undefined content if not cleared.
+  3. **View-space normal transformation**: Modified `model.vert` to compute proper normal matrix (`transpose(inverse(mat3(modelViewMatrix)))`) and transform normals to view-space for correct deferred lighting calculations.
