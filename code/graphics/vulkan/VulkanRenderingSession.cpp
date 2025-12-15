@@ -1,5 +1,6 @@
 #include "VulkanRenderingSession.h"
 #include "VulkanDebug.h"
+#include "osapi/outwnd.h"
 
 namespace graphics {
 namespace vulkan {
@@ -11,19 +12,17 @@ VulkanRenderingSession::VulkanRenderingSession(VulkanDevice& device,
 	, m_targets(targets)
 	, m_descriptorLayouts(descriptorLayouts)
 {
-}
-
-void VulkanRenderingSession::resetFrameState() {
-	m_deferredActive = false;
-	m_deferredGeometryDone = false;
-	m_activeMode = RenderMode::Swapchain;
-	m_pendingMode = RenderMode::Swapchain;
-	m_renderPassActive = false;
+	m_target = std::make_unique<SwapchainWithDepthTarget>();
 }
 
 void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex, vk::DescriptorSet globalDescriptorSet) {
-	m_currentImageIndex = imageIndex;
-	resetFrameState();
+	m_globalDescriptorSet = globalDescriptorSet;
+
+	endActivePass();
+	m_target = std::make_unique<SwapchainWithDepthTarget>();
+
+	m_shouldClearColor = true;
+	m_shouldClearDepth = true;
 
 	// Transition swapchain and depth to attachment layouts
 	transitionSwapchainToAttachment(cmd, imageIndex);
@@ -31,14 +30,196 @@ void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageInd
 }
 
 void VulkanRenderingSession::endFrame(vk::CommandBuffer cmd, uint32_t imageIndex) {
-	if (m_renderPassActive) {
-		cmd.endRendering();
-		m_renderPassActive = false;
-	}
+	endActivePass();
 
 	// Transition swapchain to present layout
 	transitionSwapchainToPresent(cmd, imageIndex);
 }
+
+const VulkanRenderingSession::RenderTargetInfo&
+VulkanRenderingSession::ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	if (!m_activePass) {
+		m_activeInfo = m_target->info(m_device, m_targets);
+		m_target->begin(*this, cmd, imageIndex);
+		m_activePass.emplace(cmd);
+		applyDynamicState(cmd, m_globalDescriptorSet);
+	}
+	return m_activeInfo;
+}
+
+void VulkanRenderingSession::requestSwapchainTarget() {
+	endActivePass();
+	m_target = std::make_unique<SwapchainWithDepthTarget>();
+}
+
+void VulkanRenderingSession::beginDeferredPass(bool /*clearNonColorBufs*/) {
+	endActivePass();
+	m_shouldClearColor = true;
+	m_shouldClearDepth = true;
+	m_target = std::make_unique<DeferredGBufferTarget>();
+}
+
+void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
+	Assertion(dynamic_cast<DeferredGBufferTarget*>(m_target.get()) != nullptr,
+		"endDeferredGeometry called when not in deferred gbuffer target");
+
+	endActivePass();
+	transitionGBufferToShaderRead(cmd);
+	m_target = std::make_unique<SwapchainNoDepthTarget>();
+}
+
+void VulkanRenderingSession::endActivePass() {
+	if (m_activePass) {
+		m_activePass.reset(); // calls cmd.endRendering() via ~ActivePass()
+	}
+}
+
+void VulkanRenderingSession::requestClear() {
+	m_shouldClearColor = true;
+	m_shouldClearDepth = true;
+}
+
+void VulkanRenderingSession::setClearColor(float r, float g, float b, float a) {
+	m_clearColor[0] = r;
+	m_clearColor[1] = g;
+	m_clearColor[2] = b;
+	m_clearColor[3] = a;
+}
+
+// ---- Target state implementations ----
+
+VulkanRenderingSession::RenderTargetInfo
+VulkanRenderingSession::SwapchainWithDepthTarget::info(const VulkanDevice& device, const VulkanRenderTargets& targets) const {
+	RenderTargetInfo out{};
+	out.colorFormat = device.swapchainFormat();
+	out.colorAttachmentCount = 1;
+	out.depthFormat = targets.depthFormat();
+	return out;
+}
+
+void VulkanRenderingSession::SwapchainWithDepthTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t imageIndex) {
+	s.beginSwapchainRenderingInternal(cmd, imageIndex);
+}
+
+VulkanRenderingSession::RenderTargetInfo
+VulkanRenderingSession::DeferredGBufferTarget::info(const VulkanDevice& device, const VulkanRenderTargets& targets) const {
+	RenderTargetInfo out{};
+	out.colorFormat = targets.gbufferFormat();
+	out.colorAttachmentCount = VulkanRenderTargets::kGBufferCount;
+	out.depthFormat = targets.depthFormat();
+	return out;
+}
+
+void VulkanRenderingSession::DeferredGBufferTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) {
+	s.beginGBufferRenderingInternal(cmd);
+}
+
+VulkanRenderingSession::RenderTargetInfo
+VulkanRenderingSession::SwapchainNoDepthTarget::info(const VulkanDevice& device, const VulkanRenderTargets&) const {
+	RenderTargetInfo out{};
+	out.colorFormat = device.swapchainFormat();
+	out.colorAttachmentCount = 1;
+	out.depthFormat = vk::Format::eUndefined; // No depth
+	return out;
+}
+
+void VulkanRenderingSession::SwapchainNoDepthTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t imageIndex) {
+	s.beginSwapchainRenderingNoDepthInternal(cmd, imageIndex);
+}
+
+// ---- Internal rendering methods ----
+
+void VulkanRenderingSession::beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	const auto extent = m_device.swapchainExtent();
+
+	vk::RenderingAttachmentInfo colorAttachment{};
+	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
+	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	colorAttachment.loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	colorAttachment.clearValue = vk::ClearColorValue(m_clearColor);
+
+	vk::RenderingAttachmentInfo depthAttachment{};
+	depthAttachment.imageView = m_targets.depthAttachmentView();
+	depthAttachment.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	depthAttachment.loadOp = m_shouldClearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+	depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	depthAttachment.clearValue.depthStencil.depth = m_clearDepth;
+	depthAttachment.clearValue.depthStencil.stencil = 0;
+
+	vk::RenderingInfo renderingInfo{};
+	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+	renderingInfo.layerCount = 1;
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	cmd.beginRendering(renderingInfo);
+
+	// Clear flags are one-shot; reset after we consume them
+	m_shouldClearColor = false;
+	m_shouldClearDepth = false;
+}
+
+void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd) {
+	const auto extent = m_device.swapchainExtent();
+
+	// Transition G-buffer images to color attachment optimal
+	transitionGBufferToAttachment(cmd);
+
+	// Setup color attachments for G-buffer
+	std::array<vk::RenderingAttachmentInfo, VulkanRenderTargets::kGBufferCount> colorAttachments{};
+	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
+		colorAttachments[i].imageView = m_targets.gbufferView(i);
+		colorAttachments[i].imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		colorAttachments[i].loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+		colorAttachments[i].storeOp = vk::AttachmentStoreOp::eStore;
+		colorAttachments[i].clearValue = vk::ClearColorValue(std::array<float, 4>{0.f, 0.f, 0.f, 0.f});
+	}
+
+	vk::RenderingAttachmentInfo depthAttachment{};
+	depthAttachment.imageView = m_targets.depthAttachmentView();
+	depthAttachment.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	depthAttachment.loadOp = m_shouldClearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+	depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	depthAttachment.clearValue.depthStencil.depth = m_clearDepth;
+	depthAttachment.clearValue.depthStencil.stencil = 0;
+
+	vk::RenderingInfo renderingInfo{};
+	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+	renderingInfo.layerCount = 1;
+	renderingInfo.colorAttachmentCount = VulkanRenderTargets::kGBufferCount;
+	renderingInfo.pColorAttachments = colorAttachments.data();
+	renderingInfo.pDepthAttachment = &depthAttachment;
+
+	cmd.beginRendering(renderingInfo);
+
+	// Clear flags are one-shot; reset after we consume them
+	m_shouldClearColor = false;
+	m_shouldClearDepth = false;
+}
+
+void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	const auto extent = m_device.swapchainExtent();
+
+	vk::RenderingAttachmentInfo colorAttachment{};
+	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
+	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	// Don't clear - ambient light will overwrite with blend-off, then subsequent lights add
+	colorAttachment.loadOp = vk::AttachmentLoadOp::eDontCare;
+	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+
+	vk::RenderingInfo renderingInfo{};
+	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+	renderingInfo.layerCount = 1;
+	renderingInfo.colorAttachmentCount = 1;
+	renderingInfo.pColorAttachments = &colorAttachment;
+	renderingInfo.pDepthAttachment = nullptr;  // No depth for deferred lighting
+
+	cmd.beginRendering(renderingInfo);
+}
+
+// ---- Layout transitions ----
 
 void VulkanRenderingSession::transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex) {
 	vk::ImageMemoryBarrier2 toRender{};
@@ -153,131 +334,34 @@ void VulkanRenderingSession::transitionGBufferToShaderRead(vk::CommandBuffer cmd
 	cmd.pipelineBarrier2(dep);
 }
 
-void VulkanRenderingSession::beginSwapchainRendering(vk::CommandBuffer cmd, uint32_t imageIndex) {
+// ---- Dynamic state ----
+
+void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet) {
 	const auto extent = m_device.swapchainExtent();
+	const uint32_t attachmentCount = m_activeInfo.colorAttachmentCount;
 
-	vk::RenderingAttachmentInfo colorAttachment{};
-	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
-	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	colorAttachment.loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
-	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-	colorAttachment.clearValue = vk::ClearColorValue(m_clearColor);
+	// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
+	vk::Viewport viewport;
+	viewport.x = 0.f;
+	viewport.y = static_cast<float>(extent.height);
+	viewport.width = static_cast<float>(extent.width);
+	viewport.height = -static_cast<float>(extent.height);
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+	cmd.setViewport(0, viewport);
 
-	vk::RenderingAttachmentInfo depthAttachment{};
-	depthAttachment.imageView = m_targets.depthAttachmentView();
-	depthAttachment.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
-	depthAttachment.loadOp = m_shouldClearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
-	depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-	depthAttachment.clearValue.depthStencil.depth = m_clearDepth;
-	depthAttachment.clearValue.depthStencil.stencil = 0;
-
-	vk::RenderingInfo renderingInfo{};
-	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
-	renderingInfo.layerCount = 1;
-	renderingInfo.colorAttachmentCount = 1;
-	renderingInfo.pColorAttachments = &colorAttachment;
-	renderingInfo.pDepthAttachment = &depthAttachment;
-
-	cmd.beginRendering(renderingInfo);
-
-	// Clear flags are one-shot; reset after we consume them
-	m_shouldClearColor = false;
-	m_shouldClearDepth = false;
-}
-
-void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
-	const auto extent = m_device.swapchainExtent();
-
-	vk::RenderingAttachmentInfo colorAttachment{};
-	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
-	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	// Don't clear - ambient light will overwrite with blend-off, then subsequent lights add
-	colorAttachment.loadOp = vk::AttachmentLoadOp::eDontCare;
-	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-
-	vk::RenderingInfo renderingInfo{};
-	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
-	renderingInfo.layerCount = 1;
-	renderingInfo.colorAttachmentCount = 1;
-	renderingInfo.pColorAttachments = &colorAttachment;
-	renderingInfo.pDepthAttachment = nullptr;  // No depth for deferred lighting
-
-	cmd.beginRendering(renderingInfo);
-}
-
-void VulkanRenderingSession::beginSwapchainRenderingNoDepth(vk::CommandBuffer cmd, uint32_t imageIndex) {
-	// End any active render pass
-	if (m_renderPassActive) {
-		cmd.endRendering();
-		m_renderPassActive = false;
-	}
-
-	beginSwapchainRenderingNoDepthInternal(cmd, imageIndex);
-	m_renderPassActive = true;
-	m_activeMode = RenderMode::Swapchain;
-}
-
-void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
-	const auto extent = m_device.swapchainExtent();
-
-	// Transition G-buffer images to color attachment optimal
-	transitionGBufferToAttachment(cmd);
-
-	// Setup color attachments for G-buffer
-	std::array<vk::RenderingAttachmentInfo, VulkanRenderTargets::kGBufferCount> colorAttachments{};
-	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
-		colorAttachments[i].imageView = m_targets.gbufferView(i);
-		colorAttachments[i].imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		colorAttachments[i].loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
-		colorAttachments[i].storeOp = vk::AttachmentStoreOp::eStore;
-		colorAttachments[i].clearValue = vk::ClearColorValue(std::array<float, 4>{0.f, 0.f, 0.f, 0.f});
-	}
-
-	vk::RenderingAttachmentInfo depthAttachment{};
-	depthAttachment.imageView = m_targets.depthAttachmentView();
-	depthAttachment.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
-	depthAttachment.loadOp = m_shouldClearDepth ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
-	depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-	depthAttachment.clearValue.depthStencil.depth = m_clearDepth;
-	depthAttachment.clearValue.depthStencil.stencil = 0;
-
-	vk::RenderingInfo renderingInfo{};
-	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
-	renderingInfo.layerCount = 1;
-	renderingInfo.colorAttachmentCount = VulkanRenderTargets::kGBufferCount;
-	renderingInfo.pColorAttachments = colorAttachments.data();
-	renderingInfo.pDepthAttachment = &depthAttachment;
-
-	cmd.beginRendering(renderingInfo);
-
-	// Clear flags are one-shot; reset after we consume them
-	m_shouldClearColor = false;
-	m_shouldClearDepth = false;
-}
-
-	void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet) {
-		const auto extent = m_device.swapchainExtent();
-		// Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
-		vk::Viewport viewport;
-		viewport.x = 0.f;
-		viewport.y = static_cast<float>(extent.height);
-		viewport.width = static_cast<float>(extent.width);
-		viewport.height = -static_cast<float>(extent.height);
-		viewport.minDepth = 0.f;
-		viewport.maxDepth = 1.f;
-		cmd.setViewport(0, viewport);
-
-		cmd.setCullMode(m_cullMode);
-		cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
-		cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
-		cmd.setDepthTestEnable(m_depthTest ? VK_TRUE : VK_FALSE);
+	cmd.setCullMode(m_cullMode);
+	cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
+	cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+	cmd.setDepthTestEnable(m_depthTest ? VK_TRUE : VK_FALSE);
 	cmd.setDepthWriteEnable(m_depthWrite ? VK_TRUE : VK_FALSE);
 	cmd.setDepthCompareOp(m_depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
 	cmd.setStencilTestEnable(VK_FALSE);
+
 	if (m_device.supportsExtendedDynamicState3()) {
 		const auto& caps = m_device.extDyn3Caps();
-		const uint32_t attachmentCount = currentColorAttachmentCount();
 		if (caps.colorBlendEnable) {
+			// Baseline: blending OFF. Draw paths must enable per-material.
 			std::array<vk::Bool32, VulkanRenderTargets::kGBufferCount> blendEnables{};
 			blendEnables.fill(VK_FALSE);
 			cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(attachmentCount, blendEnables.data()));
@@ -300,89 +384,6 @@ void VulkanRenderingSession::beginGBufferRendering(vk::CommandBuffer cmd) {
 	// Bind global descriptor set
 	cmd.bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics, m_descriptorLayouts.pipelineLayout(), 1, 1, &globalDescriptorSet, 0, nullptr);
-}
-
-void VulkanRenderingSession::ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex) {
-	// Check if we need to switch render target modes
-	if (m_renderPassActive && m_activeMode == m_pendingMode) {
-		return;
-	}
-
-	// End current rendering if switching modes
-	if (m_renderPassActive) {
-		cmd.endRendering();
-		m_renderPassActive = false;
-	}
-
-	// Begin rendering to the appropriate target
-	switch (m_pendingMode) {
-	case RenderMode::Swapchain:
-		beginSwapchainRendering(cmd, imageIndex);
-		break;
-	case RenderMode::DeferredGBuffer:
-		beginGBufferRendering(cmd);
-		break;
-	}
-
-	m_activeMode = m_pendingMode;
-	m_renderPassActive = true;
-}
-
-void VulkanRenderingSession::endRendering(vk::CommandBuffer cmd) {
-	if (m_renderPassActive) {
-		cmd.endRendering();
-		m_renderPassActive = false;
-	}
-}
-
-VkFormat VulkanRenderingSession::currentColorFormat() const {
-	return (m_pendingMode == RenderMode::DeferredGBuffer)
-		? static_cast<VkFormat>(m_targets.gbufferFormat())
-		: static_cast<VkFormat>(m_device.swapchainFormat());
-}
-
-uint32_t VulkanRenderingSession::currentColorAttachmentCount() const {
-	return (m_pendingMode == RenderMode::DeferredGBuffer)
-		? VulkanRenderTargets::kGBufferCount
-		: 1;
-}
-
-void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs) {
-	m_deferredActive = true;
-	m_deferredGeometryDone = false;
-	m_deferredClearNonColorBufs = clearNonColorBufs;
-	m_pendingMode = RenderMode::DeferredGBuffer;
-	m_shouldClearColor = true;
-	m_shouldClearDepth = true;
-}
-
-void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
-	if (!m_deferredActive || m_deferredGeometryDone) {
-		return;
-	}
-
-	// End G-buffer rendering
-	if (m_renderPassActive) {
-		cmd.endRendering();
-		m_renderPassActive = false;
-	}
-
-	// Transition G-buffer + depth to shader-read layout
-	transitionGBufferToShaderRead(cmd);
-
-	m_deferredGeometryDone = true;
-}
-
-void VulkanRenderingSession::requestClear() {
-	m_shouldClearColor = true;
-	m_shouldClearDepth = true;
-}
-
-void VulkanRenderingSession::setClearColor(float r, float g, float b, float a) {
-	m_clearColor[0] = r;
-	m_clearColor[1] = g;
-	m_clearColor[2] = b;
-	m_clearColor[3] = a;
 }
 
 } // namespace vulkan
