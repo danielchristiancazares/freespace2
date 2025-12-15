@@ -12,17 +12,14 @@ bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceDescriptorIn
 {
 	// Required features for bindless model rendering
 	if (!features.shaderSampledImageArrayNonUniformIndexing) {
-		vkprintf("Vulkan: shaderSampledImageArrayNonUniformIndexing not supported\n");
 		return false;
 	}
 
 	if (!features.runtimeDescriptorArray) {
-		vkprintf("Vulkan: runtimeDescriptorArray not supported\n");
 		return false;
 	}
 
 	if (!features.descriptorBindingPartiallyBound) {
-		vkprintf("Vulkan: descriptorBindingPartiallyBound not supported\n");
 		return false;
 	}
 
@@ -46,7 +43,6 @@ bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceVulkan12Feat
 bool ValidatePushDescriptorSupport(const vk::PhysicalDeviceVulkan14Features& features14)
 {
 	if (!features14.pushDescriptor) {
-		vkprintf("Vulkan: pushDescriptor feature not supported\n");
 		return false;
 	}
 

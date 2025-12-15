@@ -36,7 +36,6 @@ VkBool32 VKAPI_PTR debugReportCallback(VkDebugUtilsMessageSeverityFlagBitsEXT me
 	VkDebugUtilsMessageTypeFlagsEXT messageTypes,
 	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 	void* /*pUserData*/) {
-	vkprintf("Vulkan message: [%d] %s\n", static_cast<int>(messageSeverity), pCallbackData->pMessage);
 	return VK_FALSE;
 }
 #endif
@@ -86,9 +85,6 @@ bool isDeviceUnsuitable(PhysicalDeviceValues& values, const vk::UniqueSurfaceKHR
 	if (values.properties.deviceType != vk::PhysicalDeviceType::eDiscreteGpu &&
 		values.properties.deviceType != vk::PhysicalDeviceType::eIntegratedGpu &&
 		values.properties.deviceType != vk::PhysicalDeviceType::eVirtualGpu) {
-		vkprintf("Rejecting %s (%d) because the device type is unsuitable.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
@@ -107,64 +103,36 @@ bool isDeviceUnsuitable(PhysicalDeviceValues& values, const vk::UniqueSurfaceKHR
 	}
 
 	if (!values.graphicsQueueIndex.initialized) {
-		vkprintf("Rejecting %s (%d) because the device does not have a graphics queue.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 	if (!values.presentQueueIndex.initialized) {
-		vkprintf("Rejecting %s (%d) because the device does not have a presentation queue.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
 	if (!checkDeviceExtensionSupport(values)) {
-		vkprintf("Rejecting %s (%d) because the device does not support our required extensions.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
 	if (!checkSwapChainSupport(values, surface)) {
-		vkprintf("Rejecting %s (%d) because the device swap chain was not compatible.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
 	if (values.properties.apiVersion < VK_API_VERSION_1_4) {
-		vkprintf("Rejecting %s (%d) because device Vulkan version %d.%d.%d is below required %s.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID,
-			VK_VERSION_MAJOR(values.properties.apiVersion),
-			VK_VERSION_MINOR(values.properties.apiVersion),
-			VK_VERSION_PATCH(values.properties.apiVersion),
-			gameversion::format_version(MinVulkanVersion).c_str());
 		return true;
 	}
 
 	// Push descriptors are required for the Vulkan model path.
 	if (!ValidatePushDescriptorSupport(values.features14)) {
-		vkprintf("Rejecting %s (%d) because pushDescriptor feature is missing.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
 	// Descriptor indexing features are required for the Vulkan model path (bindless textures).
 	if (!ValidateModelDescriptorIndexingSupport(values.features12)) {
-		vkprintf("Rejecting %s (%d) because required descriptor indexing features are missing.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
 	// Dynamic rendering is required for the engine's renderPass-less pipelines.
 	if (values.features13.dynamicRendering != VK_TRUE) {
-		vkprintf("Rejecting %s (%d) because dynamicRendering feature is not supported.\n",
-			values.properties.deviceName.data(),
-			values.properties.deviceID);
 		return true;
 	}
 
@@ -210,17 +178,6 @@ bool compareDevices(const PhysicalDeviceValues& left, const PhysicalDeviceValues
 }
 
 void printPhysicalDevice(const PhysicalDeviceValues& values) {
-	vkprintf("  Found %s (%d) of type %s. API version %d.%d.%d, Driver version %d.%d.%d. Scored as %d\n",
-		values.properties.deviceName.data(),
-		values.properties.deviceID,
-		to_string(values.properties.deviceType).c_str(),
-		VK_VERSION_MAJOR(values.properties.apiVersion),
-		VK_VERSION_MINOR(values.properties.apiVersion),
-		VK_VERSION_PATCH(values.properties.apiVersion),
-		VK_VERSION_MAJOR(values.properties.driverVersion),
-		VK_VERSION_MINOR(values.properties.driverVersion),
-		VK_VERSION_PATCH(values.properties.driverVersion),
-		scoreDevice(values));
 }
 
 } // namespace
@@ -235,50 +192,33 @@ VulkanDevice::~VulkanDevice() {
 }
 
 bool VulkanDevice::initialize() {
-	vkprintf("Initializing Vulkan graphics device at %ix%i with %i-bit color...\n",
-		gr_screen.max_w,
-		gr_screen.max_h,
-		gr_screen.bits_per_pixel);
-
 	// Load the RenderDoc API if available before doing anything with Vulkan
 	renderdoc::loadApi();
 
 	if (!initDisplayDevice()) {
-		vkprintf("initDisplayDevice() failed\n");
 		return false;
 	}
-	vkprintf("initDisplayDevice() OK\n");
 
 	if (!initializeInstance()) {
-		vkprintf("Failed to create Vulkan instance!\n");
 		return false;
 	}
-	vkprintf("initializeInstance() OK\n");
 
 	if (!initializeSurface()) {
-		vkprintf("Failed to create Vulkan surface!\n");
 		return false;
 	}
-	vkprintf("initializeSurface() OK\n");
 
 	PhysicalDeviceValues deviceValues;
 	if (!pickPhysicalDevice(deviceValues)) {
-		vkprintf("Could not find suitable physical Vulkan device.\n");
 		return false;
 	}
-	vkprintf("pickPhysicalDevice() OK\n");
 
 	if (!createLogicalDevice(deviceValues)) {
-		vkprintf("Failed to create logical device.\n");
 		return false;
 	}
-	vkprintf("createLogicalDevice() OK\n");
 
 	if (!createSwapchain(deviceValues)) {
-		vkprintf("Failed to create swap chain.\n");
 		return false;
 	}
-	vkprintf("createSwapchain() OK\n");
 
 	// Store queue indices
 	m_graphicsQueueIndex = deviceValues.graphicsQueueIndex.index;
@@ -370,7 +310,6 @@ bool VulkanDevice::initializeInstance() {
 		reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
 
 	if (!vkGetInstanceProcAddr) {
-		vkprintf("SDL_Vulkan_GetVkGetInstanceProcAddr returned null; Vulkan loader unavailable.\n");
 		return false;
 	}
 
@@ -380,7 +319,6 @@ bool VulkanDevice::initializeInstance() {
 
 	unsigned int count;
 	if (!SDL_Vulkan_GetInstanceExtensions(window, &count, nullptr)) {
-		vkprintf("Error in first SDL_Vulkan_GetInstanceExtensions: %s\n", SDL_GetError());
 		return false;
 	}
 
@@ -388,7 +326,6 @@ bool VulkanDevice::initializeInstance() {
 	extensions.resize(count);
 
 	if (!SDL_Vulkan_GetInstanceExtensions(window, &count, extensions.data())) {
-		vkprintf("Error in second SDL_Vulkan_GetInstanceExtensions: %s\n", SDL_GetError());
 		return false;
 	}
 
@@ -397,18 +334,13 @@ bool VulkanDevice::initializeInstance() {
 		VK_VERSION_MINOR(instanceVersion),
 		VK_VERSION_PATCH(instanceVersion),
 		0);
-	vkprintf("Vulkan instance version %s\n", gameversion::format_version(vulkanVersion).c_str());
 
 	if (vulkanVersion < MinVulkanVersion) {
-		vkprintf("Vulkan version is less than the minimum which is %s.\n",
-			gameversion::format_version(MinVulkanVersion).c_str());
 		return false;
 	}
 
 	const auto supportedExtensions = vk::enumerateInstanceExtensionProperties();
-	vkprintf("Instance extensions:\n");
 	for (const auto& ext : supportedExtensions) {
-		vkprintf("  Found support for %s version %" PRIu32 "\n", ext.extensionName.data(), ext.specVersion);
 		if (FSO_DEBUG || Cmdline_graphics_debug_output) {
 			if (!stricmp(ext.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
 				extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -423,15 +355,7 @@ bool VulkanDevice::initializeInstance() {
 
 	std::vector<const char*> layers;
 	const auto supportedLayers = vk::enumerateInstanceLayerProperties();
-	vkprintf("Instance layers:\n");
 	for (const auto& layer : supportedLayers) {
-		vkprintf("  Found layer %s(%s). Spec version %d.%d.%d and implementation %" PRIu32 "\n",
-			layer.layerName.data(),
-			layer.description.data(),
-			VK_VERSION_MAJOR(layer.specVersion),
-			VK_VERSION_MINOR(layer.specVersion),
-			VK_VERSION_PATCH(layer.specVersion),
-			layer.implementationVersion);
 		if (FSO_DEBUG || Cmdline_graphics_debug_output) {
 			if (!stricmp(layer.layerName, "VK_LAYER_KHRONOS_validation")) {
 				layers.push_back("VK_LAYER_KHRONOS_validation");
@@ -483,7 +407,6 @@ bool VulkanDevice::initializeInstance() {
 	m_instance = std::move(instance);
 	return true;
 #else
-	vkprintf("SDL does not support Vulkan in its current version.\n");
 	return false;
 #endif
 }
@@ -494,7 +417,6 @@ bool VulkanDevice::initializeSurface() {
 
 	VkSurfaceKHR surface;
 	if (!SDL_Vulkan_CreateSurface(window, static_cast<VkInstance>(*m_instance), &surface)) {
-		vkprintf("Failed to create vulkan surface: %s\n", SDL_GetError());
 		return false;
 	}
 
@@ -549,9 +471,6 @@ bool VulkanDevice::pickPhysicalDevice(PhysicalDeviceValues& deviceValues) {
 		return vals;
 	});
 
-	vkprintf("Physical Vulkan devices:\n");
-	std::for_each(values.cbegin(), values.cend(), printPhysicalDevice);
-
 	// Remove devices that do not have the features we need
 	values.erase(std::remove_if(values.begin(),
 		values.end(),
@@ -565,13 +484,6 @@ bool VulkanDevice::pickPhysicalDevice(PhysicalDeviceValues& deviceValues) {
 	std::sort(values.begin(), values.end(), compareDevices);
 
 	deviceValues = values.back();
-	vkprintf("Selected device %s (%d) as the primary Vulkan device.\n",
-		deviceValues.properties.deviceName.data(),
-		deviceValues.properties.deviceID);
-	vkprintf("Device extensions:\n");
-	for (const auto& extProp : deviceValues.extensions) {
-		vkprintf("  Found support for %s version %" PRIu32 "\n", extProp.extensionName.data(), extProp.specVersion);
-	}
 
 	return true;
 }
@@ -664,10 +576,6 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues& deviceValues) {
 	}
 
 	const auto surfaceFormat = chooseSurfaceFormat(deviceValues);
-
-	vkprintf("Swapchain format=%s, colorSpace=%s\n",
-		vk::to_string(surfaceFormat.format).c_str(),
-		vk::to_string(surfaceFormat.colorSpace).c_str());
 
 	vk::SwapchainCreateInfoKHR createInfo;
 	createInfo.surface = m_surface.get();
@@ -805,8 +713,6 @@ void VulkanDevice::createPipelineCache() {
 					cacheInfo.initialDataSize = cacheData.size() - sizeof(CacheHeader);
 					cacheInfo.pInitialData = cacheData.data() + sizeof(CacheHeader);
 					m_pipelineCache = m_device->createPipelineCacheUnique(cacheInfo);
-				} else {
-					vkprintf("Vulkan: Pipeline cache UUID/driver mismatch, ignoring cache.\n");
 				}
 			}
 		}
@@ -908,7 +814,6 @@ VulkanDevice::AcquireResult VulkanDevice::acquireNextImage(vk::Semaphore imageAv
 	}
 
 	if (res != vk::Result::eSuccess) {
-		vkprintf("Failed to acquire swap chain image: %s\n", vk::to_string(res).c_str());
 		result.success = false;
 		return result;
 	}
@@ -938,7 +843,6 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 	}
 
 	if (presentResult != vk::Result::eSuccess) {
-		vkprintf("ERROR - Failed to present swap chain image: %s\n", vk::to_string(presentResult).c_str());
 		result.success = false;
 		return result;
 	}
@@ -1012,7 +916,6 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
 	try {
 		m_swapchain = m_device->createSwapchainKHRUnique(createInfo);
 	} catch (const vk::SystemError& e) {
-		vkprintf("Failed to recreate swapchain: %s\n", e.what());
 		m_swapchain = std::move(oldSwapchain);
 		return false;
 	}
@@ -1048,7 +951,6 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
 		m_swapchainImageViews.push_back(m_device->createImageViewUnique(viewCreateInfo));
 	}
 
-	vkprintf("Swapchain recreated: %ux%u\n", m_swapchainExtent.width, m_swapchainExtent.height);
 	return true;
 }
 

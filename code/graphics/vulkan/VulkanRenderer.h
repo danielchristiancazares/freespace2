@@ -71,7 +71,6 @@ class VulkanRenderer {
 		const std::vector<std::pair<uint32_t, int>>& textures,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd);
-	bool isRenderPassActive() const { return m_renderingSession->isRenderPassActive(); }
 
 	// Frame sync for model descriptors - called at frame start after fence wait
 	// vertexHeapBuffer must be valid (caller is responsible for checking)
@@ -79,7 +78,7 @@ class VulkanRenderer {
 
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
-	void ensureRenderingStarted(vk::CommandBuffer cmd);
+	const VulkanRenderingSession::RenderTargetInfo& ensureRenderingStarted(vk::CommandBuffer cmd);
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }
@@ -101,15 +100,11 @@ class VulkanRenderer {
 	VulkanTextureManager* textureManager() { return m_textureManager.get(); }
 	const VulkanTextureManager* textureManager() const { return m_textureManager.get(); }
 
-	// Deferred rendering - current render target queries
-	VkFormat getCurrentColorFormat() const { return m_renderingSession->currentColorFormat(); }
-	uint32_t getCurrentColorAttachmentCount() const { return m_renderingSession->currentColorAttachmentCount(); }
-
 	// Deferred rendering hooks
 	void beginDeferredLighting(bool clearNonColorBufs) { m_renderingSession->beginDeferredPass(clearNonColorBufs); }
 	void endDeferredGeometry(vk::CommandBuffer cmd) { m_renderingSession->endDeferredGeometry(cmd); }
 	void bindDeferredGlobalDescriptors();
-	void setPendingRenderTargetSwapchain() { m_renderingSession->setPendingModeSwapchain(); }
+	void setPendingRenderTargetSwapchain() { m_renderingSession->requestSwapchainTarget(); }
 	void recordDeferredLighting(VulkanFrame& frame);
 	uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
 	uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
@@ -153,6 +148,7 @@ class VulkanRenderer {
 	void createUploadCommandPool();
 	void createDescriptorResources();
 	void createFrames();
+	void createFallbackResources();
 	void createVertexBuffer();
 	void createRenderTargets();
 	void createRenderingSession();
@@ -210,6 +206,10 @@ class VulkanRenderer {
 	// The actual VkBuffer is looked up lazily via queryModelVertexHeapBuffer() since the buffer
 	// may not exist at registration time (VulkanBufferManager defers buffer creation).
 	gr_buffer_handle m_modelVertexHeapHandle;
+
+	// Fallback resources bound at frame start when uniforms not explicitly set
+	gr_buffer_handle m_fallbackModelUniformHandle = gr_buffer_handle::invalid();
+	gr_buffer_handle m_fallbackModelVertexHeapHandle = gr_buffer_handle::invalid();
 
 	// Z-buffer mode tracking (for getZbufferMode)
 	gr_zbuffer_type m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;

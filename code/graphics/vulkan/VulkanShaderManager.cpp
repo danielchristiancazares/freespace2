@@ -31,12 +31,9 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
 			return it->second.get();
 		}
 
-		vkprintf("Loading shader module: %s (type=%d, flags=0x%x)\n", 
-			filename.c_str(), static_cast<int>(type), variantFlags);
 		auto module = loadModule(filename);
 		auto handle = module.get();
 		cache.emplace(key, std::move(module));
-		vkprintf("Shader module loaded successfully: %s -> %p\n", filename.c_str(), static_cast<const void*>(handle));
 		return handle;
 	};
 
@@ -96,7 +93,6 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path)
 			moduleInfo.pCode = code.data();
 
 			auto module = m_device.createShaderModuleUnique(moduleInfo);
-			vkprintf("Loaded shader module from embedded: %s (size=%zu)\n", filename.c_str(), df.size);
 			return module;
 		}
 	}
@@ -104,7 +100,6 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path)
 	// Fallback to filesystem
 	std::ifstream file(path, std::ios::binary | std::ios::ate);
 	if (!file) {
-		vkprintf("ERROR - Failed to open shader module: %s\n", path.c_str());
 		throw std::runtime_error("Failed to open shader module " + path);
 	}
 
@@ -119,7 +114,6 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path)
 	moduleInfo.pCode = buffer.data();
 
 	auto module = m_device.createShaderModuleUnique(moduleInfo);
-	vkprintf("Loaded shader module from filesystem: %s (size=%zu)\n", path.c_str(), fileSize);
 	return module;
 }
 

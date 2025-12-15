@@ -104,50 +104,10 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 
 void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size, const void* data)
 {
-	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
-	          "Invalid buffer handle %d in updateBufferData", handle.value());
 	Assertion(size > 0, "Buffer size must be > 0 in updateBufferData");
+	ensureBuffer(handle, static_cast<vk::DeviceSize>(size));
 
 	auto& buffer = m_buffers[handle.value()];
-
-	// If size changed or buffer not created yet, recreate buffer
-	if (size != buffer.size || buffer.size == 0) {
-		// Unmap old buffer if mapped
-		if (buffer.mapped) {
-			m_device.unmapMemory(buffer.memory.get());
-			buffer.mapped = nullptr;
-		}
-
-		// Retire old buffer for deferred deletion (GPU may still be using it)
-		if (buffer.buffer) {
-			RetiredBuffer retired;
-			retired.buffer = std::move(buffer.buffer);
-			retired.memory = std::move(buffer.memory);
-			retired.retiredAtFrame = m_currentFrame;
-			m_retiredBuffers.push_back(std::move(retired));
-		}
-
-		// Create new buffer with correct size
-		vk::BufferCreateInfo bufferInfo;
-		bufferInfo.size = size;
-		bufferInfo.usage = getVkUsageFlags(buffer.type);
-		bufferInfo.sharingMode = vk::SharingMode::eExclusive;
-
-		buffer.buffer = m_device.createBufferUnique(bufferInfo);
-
-		auto memRequirements = m_device.getBufferMemoryRequirements(buffer.buffer.get());
-		vk::MemoryAllocateInfo allocInfo;
-		allocInfo.allocationSize = memRequirements.size;
-		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, getMemoryProperties(buffer.usage));
-
-		buffer.memory = m_device.allocateMemoryUnique(allocInfo);
-		m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
-
-		// Remap if host-visible (all our usage hints use host-visible memory)
-		buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
-
-		buffer.size = size;
-	}
 
 	// Upload data
 	if (buffer.mapped) {
@@ -164,23 +124,19 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 
 void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t offset, size_t size, const void* data)
 {
-	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
-	          "Invalid buffer handle %d in updateBufferDataOffset", handle.value());
+	Assertion(size > 0, "Buffer size must be > 0 in updateBufferDataOffset");
+	const vk::DeviceSize required = static_cast<vk::DeviceSize>(offset + size);
+	ensureBuffer(handle, required);
 
 	auto& buffer = m_buffers[handle.value()];
 
-	if (!buffer.mapped) {
-		UNREACHABLE("Cannot update buffer offset without mapped memory!");
-		return;
-	}
-
-	if (offset + size > buffer.size) {
-		UNREACHABLE("Buffer update offset out of bounds!");
-		return;
-	}
-
 	if (data == nullptr) {
 		// Null data pointer - skip copy (caller may initialize buffer separately)
+		return;
+	}
+
+	if (!buffer.mapped) {
+		UNREACHABLE("Cannot update buffer offset without mapped memory!");
 		return;
 	}
 
@@ -285,6 +241,21 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 	buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
 
 	buffer.size = size;
+}
+
+vk::Buffer VulkanBufferManager::ensureBuffer(gr_buffer_handle handle, vk::DeviceSize minSize)
+{
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in ensureBuffer", handle.value());
+	Assertion(minSize > 0, "ensureBuffer requires minSize > 0");
+
+	auto& buffer = m_buffers[handle.value()];
+
+	if (!buffer.buffer || buffer.size < static_cast<size_t>(minSize)) {
+		resizeBuffer(handle, static_cast<size_t>(minSize));
+	}
+
+	return buffer.buffer.get();
 }
 
 void VulkanBufferManager::onFrameEnd()
