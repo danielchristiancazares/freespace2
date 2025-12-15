@@ -324,12 +324,21 @@ void gr_vulkan_deferred_lighting_finish()
 	// Bind G-buffer textures to global descriptor set
 	renderer_instance->bindDeferredGlobalDescriptors();
 
-	// Record deferred lighting draws
-	renderer_instance->recordDeferredLighting(*frame);
+		// Record deferred lighting draws
+		renderer_instance->recordDeferredLighting(*frame);
 
-	// Switch back to swapchain rendering mode for subsequent draws
-	renderer_instance->setPendingRenderTargetSwapchain();
-}
+		// Restore scissor to current clip state for subsequent draws
+		{
+			vk::CommandBuffer cmd = frame->commandBuffer();
+			if (cmd) {
+				vk::Rect2D scissor = createClipScissor();
+				cmd.setScissor(0, 1, &scissor);
+			}
+		}
+
+		// Switch back to swapchain rendering mode for subsequent draws
+		renderer_instance->setPendingRenderTargetSwapchain();
+	}
 
 void stub_set_line_width(float width)
 {

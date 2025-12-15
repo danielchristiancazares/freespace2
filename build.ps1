@@ -89,6 +89,7 @@ if ($EnableClean -and (Test-Path $BuildDir)) {
 $configureArgs = @(
     "-S", ".",
     "-B", $BuildDir,
+    "-G", "Ninja",
     "-DCMAKE_BUILD_TYPE=$Config"
 )
 if ($EnableVulkan) {

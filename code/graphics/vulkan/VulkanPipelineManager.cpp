@@ -19,14 +19,12 @@
 namespace graphics {
 namespace vulkan {
 
-// Maps vertex_format_data::vertex_format to Vulkan format and shader location
 struct VertexFormatMapping {
 	vk::Format format;
 	uint32_t location;
-	uint32_t componentCount; // Number of components (1-4)
+	uint32_t componentCount;
 };
 
-// Maps FSO vertex format types to Vulkan formats and locations
 // Location mapping follows OpenGL convention:
 // 0 = POSITION, 1 = COLOR, 2 = TEXCOORD, 3 = NORMAL, 4 = TANGENT, etc.
 static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatMapping> VERTEX_FORMAT_MAP = {
@@ -309,7 +307,6 @@ vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const Sh
 		return it->second.get();
 	}
 
-	// Pipeline not found, need to create it
 	auto pipeline = createPipeline(key, modules, layout);
 	auto handle = pipeline.get();
 	m_pipelines.emplace(key, std::move(pipeline));
@@ -355,7 +352,6 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 		vertexInput.vertexAttributeDescriptionCount = 0;
 		vertexInput.pVertexAttributeDescriptions = nullptr;
 	} else {
-		// Traditional vertex attributes from layout
 		const VertexInputState& vertexInputState = getVertexInputState(layout);
 
 		vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputState.bindings.size());
