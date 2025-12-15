@@ -38,7 +38,12 @@ See the [Building](https://github.com/scp-fs2open/fs2open.github.com/wiki/Buildi
 - [Website](http://www.hard-light.net/)
 - [Forums](http://www.hard-light.net/forums/)
 - [Discord](https://discord.gg/YNVP3WR)
+- [Youtube](https://www.youtube.com/channel/UCxKkd609hDtY6yNetR1iT4w)
 - [Reddit](https://www.reddit.com/r/freespace/)
+- [Facebook](https://www.facebook.com/groups/Hardlightproductions/)
+- [X](https://www.x.com/hardlightpro)
+- [IRC](irc://irc.esper.net/hard-light)
+
 
 ## License
 

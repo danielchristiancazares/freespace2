@@ -48,6 +48,7 @@ class VulkanRenderer {
 	int setZbufferMode(int mode);
 	int getZbufferMode() const;
 	void requestClear();
+	void zbufferClear(int mode);
 
 	// Get current recording frame for draw calls (called during frame recording)
 	VulkanFrame* getCurrentRecordingFrame();
@@ -78,7 +79,7 @@ class VulkanRenderer {
 
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
-	const VulkanRenderingSession::RenderTargetInfo& ensureRenderingStarted(vk::CommandBuffer cmd);
+		const VulkanRenderingSession::RenderTargetInfo& ensureRenderingStarted(vk::CommandBuffer cmd);
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }
@@ -100,15 +101,15 @@ class VulkanRenderer {
 	VulkanTextureManager* textureManager() { return m_textureManager.get(); }
 	const VulkanTextureManager* textureManager() const { return m_textureManager.get(); }
 
-	// Deferred rendering hooks
-	void beginDeferredLighting(bool clearNonColorBufs) { m_renderingSession->beginDeferredPass(clearNonColorBufs); }
-	void endDeferredGeometry(vk::CommandBuffer cmd) { m_renderingSession->endDeferredGeometry(cmd); }
-	void bindDeferredGlobalDescriptors();
-	void setPendingRenderTargetSwapchain() { m_renderingSession->requestSwapchainTarget(); }
-	void recordDeferredLighting(VulkanFrame& frame);
-	uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
-	uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
-	ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
+		// Deferred rendering hooks
+		void beginDeferredLighting(vk::CommandBuffer cmd, bool clearNonColorBufs);
+		void endDeferredGeometry(vk::CommandBuffer cmd);
+		void bindDeferredGlobalDescriptors();
+		void setPendingRenderTargetSwapchain();
+		void recordDeferredLighting(VulkanFrame& frame);
+		uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
+		uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
+		ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
 	vk::Pipeline getPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout) const { return m_pipelineManager->getPipeline(key, modules, layout); }
 	vk::Buffer getBuffer(gr_buffer_handle handle) const;
 	const ExtendedDynamicState3Caps& getExtendedDynamicState3Caps() const { return m_vulkanDevice->extDyn3Caps(); }
@@ -173,8 +174,8 @@ class VulkanRenderer {
 	// Render targets - owns depth buffer and G-buffer
 	std::unique_ptr<VulkanRenderTargets> m_renderTargets;
 
-	// Rendering session - manages render pass state machine
-	std::unique_ptr<VulkanRenderingSession> m_renderingSession;
+			// Rendering session - manages render pass state machine
+			std::unique_ptr<VulkanRenderingSession> m_renderingSession;
 
 	std::unique_ptr<VulkanDescriptorLayouts> m_descriptorLayouts;
 	vk::DescriptorSet m_globalDescriptorSet{};

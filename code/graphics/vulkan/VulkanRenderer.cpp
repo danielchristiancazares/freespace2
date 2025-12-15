@@ -125,7 +125,7 @@ void VulkanRenderer::createRenderTargets() {
 
 void VulkanRenderer::createRenderingSession() {
 	m_renderingSession = std::make_unique<VulkanRenderingSession>(
-		*m_vulkanDevice, *m_renderTargets, *m_descriptorLayouts);
+		*m_vulkanDevice, *m_renderTargets);
 }
 
 void VulkanRenderer::createUploadCommandPool() {
@@ -187,12 +187,12 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	// Upload any pending textures before rendering begins (no render pass active yet)
 	// This is the explicit upload flush point - textures requested before rendering starts
 	// will be queued and flushed here
-	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
-	m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
+		Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
+		m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
 
-	// Delegate barrier setup and render state reset to VulkanRenderingSession
-	m_renderingSession->beginFrame(cmd, imageIndex, m_globalDescriptorSet);
-}
+		// Setup swapchain/depth barriers and reset render state for the new frame
+		m_renderingSession->beginFrame(cmd, imageIndex);
+	}
 
 void VulkanRenderer::endFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	if (!m_isRecording) {
@@ -200,7 +200,7 @@ void VulkanRenderer::endFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	}
 	vk::CommandBuffer cmd = frame.commandBuffer();
 
-	// Delegate render pass termination and present barrier to VulkanRenderingSession
+	// Terminate any active rendering and transition swapchain for present
 	m_renderingSession->endFrame(cmd, imageIndex);
 
 	cmd.end();
@@ -318,13 +318,34 @@ const VulkanRenderingSession::RenderTargetInfo& VulkanRenderer::ensureRenderingS
 	return m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
 }
 
+void VulkanRenderer::beginDeferredLighting(vk::CommandBuffer cmd, bool clearNonColorBufs)
+{
+	if (!cmd) {
+		return;
+	}
+	m_renderingSession->beginDeferredPass(clearNonColorBufs);
+	// Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
+	m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
+}
+
+void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
+{
+	m_renderingSession->endDeferredGeometry(cmd);
+}
+
+void VulkanRenderer::setPendingRenderTargetSwapchain()
+{
+	m_renderingSession->requestSwapchainTarget();
+}
+
 void VulkanRenderer::bindDeferredGlobalDescriptors() {
 	std::vector<vk::WriteDescriptorSet> writes;
 	std::vector<vk::DescriptorImageInfo> infos;
-	writes.reserve(VulkanRenderTargets::kGBufferCount + 1);
-	infos.reserve(VulkanRenderTargets::kGBufferCount + 1);
+	writes.reserve(6);
+	infos.reserve(6);
 
-	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
+	// G-buffer 0..2
+	for (uint32_t i = 0; i < 3; ++i) {
 		vk::DescriptorImageInfo info{};
 		info.sampler = m_renderTargets->gbufferSampler();
 		info.imageView = m_renderTargets->gbufferView(i);
@@ -340,20 +361,54 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
 		writes.push_back(write);
 	}
 
-	// Depth as extra binding
+	// Depth (binding 3) - uses nearest-filter sampler (linear often unsupported for depth)
 	vk::DescriptorImageInfo depthInfo{};
-	depthInfo.sampler = m_renderTargets->gbufferSampler();
+	depthInfo.sampler = m_renderTargets->depthSampler();
 	depthInfo.imageView = m_renderTargets->depthSampledView();
 	depthInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	infos.push_back(depthInfo);
 
 	vk::WriteDescriptorSet depthWrite{};
 	depthWrite.dstSet = m_globalDescriptorSet;
-	depthWrite.dstBinding = VulkanRenderTargets::kGBufferCount;
+	depthWrite.dstBinding = 3;
 	depthWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
 	depthWrite.descriptorCount = 1;
 	depthWrite.pImageInfo = &infos.back();
 	writes.push_back(depthWrite);
+
+	// Specular (binding 4): G-buffer attachment 3
+	{
+		vk::DescriptorImageInfo info{};
+		info.sampler = m_renderTargets->gbufferSampler();
+		info.imageView = m_renderTargets->gbufferView(3);
+		info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		infos.push_back(info);
+
+		vk::WriteDescriptorSet write{};
+		write.dstSet = m_globalDescriptorSet;
+		write.dstBinding = 4;
+		write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		write.descriptorCount = 1;
+		write.pImageInfo = &infos.back();
+		writes.push_back(write);
+	}
+
+	// Emissive (binding 5): G-buffer attachment 4
+	{
+		vk::DescriptorImageInfo info{};
+		info.sampler = m_renderTargets->gbufferSampler();
+		info.imageView = m_renderTargets->gbufferView(4);
+		info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		infos.push_back(info);
+
+		vk::WriteDescriptorSet write{};
+		write.dstSet = m_globalDescriptorSet;
+		write.dstBinding = 5;
+		write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		write.descriptorCount = 1;
+		write.pImageInfo = &infos.back();
+		writes.push_back(write);
+	}
 
 	m_vulkanDevice->device().updateDescriptorSets(writes, {});
 }
@@ -781,16 +836,34 @@ void VulkanRenderer::requestClear() {
 	m_renderingSession->requestClear();
 }
 
+void VulkanRenderer::zbufferClear(int mode) {
+	if (mode) {
+		// Enable zbuffering + clear
+		gr_zbuffering = 1;
+		gr_zbuffering_mode = GR_ZBUFF_FULL;
+		gr_global_zbuffering = 1;
+		m_renderingSession->setDepthTest(true);
+		m_renderingSession->setDepthWrite(true);
+		m_renderingSession->requestDepthClear();
+	} else {
+		// Disable zbuffering
+		gr_zbuffering = 0;
+		gr_zbuffering_mode = GR_ZBUFF_NONE;
+		gr_global_zbuffering = 0;
+		m_renderingSession->setDepthTest(false);
+	}
+}
+
 void VulkanRenderer::createDeferredLightingResources() {
 	// Fullscreen triangle (covers entire screen with 3 vertices, no clipping)
 	// Positions are in clip space: vertex shader passes through directly
 	struct FullscreenVertex {
-		float x, y;
+		float x, y, z;
 	};
 	static const FullscreenVertex fullscreenVerts[] = {
-		{-1.0f, -1.0f},
-		{ 3.0f, -1.0f},
-		{-1.0f,  3.0f}
+		{-1.0f, -1.0f, 0.0f},
+		{ 3.0f, -1.0f, 0.0f},
+		{-1.0f,  3.0f, 0.0f}
 	};
 
 	m_fullscreenMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -911,13 +984,38 @@ void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
 		gr_projection_matrix,
 		getMinUniformBufferAlignment());
 
-	if (lights.empty()) {
-		return;
-	}
+		if (lights.empty()) {
+			return;
+		}
 
-	// Activate swapchain rendering without depth (target set by endDeferredGeometry)
-	// ensureRenderingActive starts the render pass if not already active
-	m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
+		// Activate swapchain rendering without depth (target set by endDeferredGeometry)
+		// ensureRenderingStarted starts the render pass if not already active
+		ensureRenderingStarted(cmd);
+
+	// Deferred lighting pass owns full-screen viewport/scissor and disables depth.
+	{
+		const auto extent = m_vulkanDevice->swapchainExtent();
+
+		vk::Viewport viewport{};
+		viewport.x = 0.f;
+		viewport.y = static_cast<float>(extent.height);
+		viewport.width = static_cast<float>(extent.width);
+		viewport.height = -static_cast<float>(extent.height);
+		viewport.minDepth = 0.f;
+		viewport.maxDepth = 1.f;
+		cmd.setViewport(0, 1, &viewport);
+
+		vk::Rect2D scissor{{0, 0}, extent};
+		cmd.setScissor(0, 1, &scissor);
+
+		cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+		cmd.setCullMode(vk::CullModeFlagBits::eNone);
+		cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
+		cmd.setDepthTestEnable(VK_FALSE);
+		cmd.setDepthWriteEnable(VK_FALSE);
+		cmd.setDepthCompareOp(vk::CompareOp::eAlways);
+		cmd.setStencilTestEnable(VK_FALSE);
+	}
 
 	// Get pipeline and layout for deferred shader
 	// TODO: These should be cached, for now we create them on demand
@@ -949,6 +1047,15 @@ void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
 	ctx.uniformBuffer = uniformBuffer;
 	ctx.pipeline = pipeline;
 	ctx.ambientPipeline = ambientPipeline;
+	ctx.dynamicBlendEnable = m_vulkanDevice->supportsExtendedDynamicState3() && m_vulkanDevice->extDyn3Caps().colorBlendEnable;
+
+	// Bind global (set=1) deferred descriptor set using the *deferred* pipeline layout.
+	// Binding via the standard pipeline layout is not descriptor-set compatible because set 0 differs.
+	cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+	                       ctx.layout,
+	                       1, 1,
+	                       &m_globalDescriptorSet,
+	                       0, nullptr);
 
 	// Get mesh buffers
 	vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
