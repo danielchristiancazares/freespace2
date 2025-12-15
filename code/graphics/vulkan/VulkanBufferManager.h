@@ -39,6 +39,9 @@ class VulkanBufferManager {
 	void* mapBuffer(gr_buffer_handle handle);
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
 
+	// Ensure buffer exists with at least minSize; returns the VkBuffer
+	vk::Buffer ensureBuffer(gr_buffer_handle handle, vk::DeviceSize minSize);
+
 	vk::Buffer getBuffer(gr_buffer_handle handle) const;
 	BufferType getBufferType(gr_buffer_handle handle) const;
 

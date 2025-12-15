@@ -137,12 +137,6 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
 	samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
 	samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
 	m_gbufferSampler = m_device.device().createSamplerUnique(samplerInfo);
-
-	vkprintf("Created G-buffer: %u attachments, format %d, %ux%u\n",
-		kGBufferCount,
-		static_cast<int>(m_gbufferFormat),
-		extent.width,
-		extent.height);
 }
 
 } // namespace vulkan

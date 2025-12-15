@@ -4,14 +4,15 @@
 #include "graphics/grinternal.h"
 
 #include <vulkan/vulkan.hpp>
+#include <optional>
 #include <cstdint>
 
 namespace graphics {
 namespace vulkan {
 
-struct ModelUniformState {
-	gr_buffer_handle bufferHandle{};          // Engine-level buffer handle currently bound to descriptor
-	uint32_t dynamicOffset = UINT32_MAX;      // Dynamic offset for next draw; UINT32_MAX means "unset"
+struct DynamicUniformBinding {
+	gr_buffer_handle bufferHandle{};
+	uint32_t dynamicOffset = 0;
 };
 
 class VulkanFrame {
@@ -44,8 +45,14 @@ class VulkanFrame {
 	void advanceTimeline() { ++m_timelineValue; }
 
 	vk::DescriptorSet modelDescriptorSet = nullptr;
-	ModelUniformState modelUniformState;
-	ModelUniformState sceneUniformState;
+	std::optional<DynamicUniformBinding> modelUniformBinding;
+	std::optional<DynamicUniformBinding> sceneUniformBinding;
+
+	void resetPerFrameBindings()
+	{
+		modelUniformBinding.reset();
+		sceneUniformBinding.reset();
+	}
 
 	void record_submit_info(uint32_t frameIndex, uint32_t imageIndex, uint64_t timelineValue, uint64_t submitSerial);
 	uint64_t lastSubmitSerial() const { return m_lastSubmitSerial; }
