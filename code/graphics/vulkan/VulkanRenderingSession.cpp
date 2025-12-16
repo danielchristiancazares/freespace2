@@ -121,6 +121,10 @@ void VulkanRenderingSession::requestClear() {
 	m_shouldClearDepth = true;
 }
 
+void VulkanRenderingSession::requestDepthClear() {
+	m_shouldClearDepth = true;
+}
+
 void VulkanRenderingSession::setClearColor(float r, float g, float b, float a) {
 	m_clearColor[0] = r;
 	m_clearColor[1] = g;
@@ -269,15 +273,14 @@ void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandB
 // ---- Layout transitions ----
 
 void VulkanRenderingSession::transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	Assertion(imageIndex < m_swapchainLayouts.size(),
+		"imageIndex %u out of bounds (swapchain has %zu images)", imageIndex, m_swapchainLayouts.size());
+
 	vk::ImageMemoryBarrier2 toRender{};
 	toRender.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
 	toRender.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 	toRender.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-	if (imageIndex < m_swapchainLayouts.size()) {
-		toRender.oldLayout = m_swapchainLayouts[imageIndex];
-	} else {
-		toRender.oldLayout = vk::ImageLayout::eUndefined;
-	}
+	toRender.oldLayout = m_swapchainLayouts[imageIndex];
 	toRender.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
 	toRender.image = m_device.swapchainImage(imageIndex);
 	toRender.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -289,9 +292,7 @@ void VulkanRenderingSession::transitionSwapchainToAttachment(vk::CommandBuffer c
 	depInfo.pImageMemoryBarriers = &toRender;
 	cmd.pipelineBarrier2(depInfo);
 
-	if (imageIndex < m_swapchainLayouts.size()) {
-		m_swapchainLayouts[imageIndex] = vk::ImageLayout::eColorAttachmentOptimal;
-	}
+	m_swapchainLayouts[imageIndex] = vk::ImageLayout::eColorAttachmentOptimal;
 }
 
 void VulkanRenderingSession::transitionDepthToAttachment(vk::CommandBuffer cmd) {
@@ -319,16 +320,15 @@ void VulkanRenderingSession::transitionDepthToAttachment(vk::CommandBuffer cmd) 
 }
 
 void VulkanRenderingSession::transitionSwapchainToPresent(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	Assertion(imageIndex < m_swapchainLayouts.size(),
+		"imageIndex %u out of bounds (swapchain has %zu images)", imageIndex, m_swapchainLayouts.size());
+
 	vk::ImageMemoryBarrier2 toPresent{};
 	toPresent.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 	toPresent.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
 	toPresent.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
 	toPresent.dstAccessMask = {};
-	if (imageIndex < m_swapchainLayouts.size()) {
-		toPresent.oldLayout = m_swapchainLayouts[imageIndex];
-	} else {
-		toPresent.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	}
+	toPresent.oldLayout = m_swapchainLayouts[imageIndex];
 	toPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;
 	toPresent.image = m_device.swapchainImage(imageIndex);
 	toPresent.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -340,9 +340,7 @@ void VulkanRenderingSession::transitionSwapchainToPresent(vk::CommandBuffer cmd,
 	depInfo.pImageMemoryBarriers = &toPresent;
 	cmd.pipelineBarrier2(depInfo);
 
-	if (imageIndex < m_swapchainLayouts.size()) {
-		m_swapchainLayouts[imageIndex] = vk::ImageLayout::ePresentSrcKHR;
-	}
+	m_swapchainLayouts[imageIndex] = vk::ImageLayout::ePresentSrcKHR;
 }
 
 void VulkanRenderingSession::transitionGBufferToAttachment(vk::CommandBuffer cmd) {

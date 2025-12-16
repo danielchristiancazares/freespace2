@@ -3,6 +3,8 @@ Param(
     [string]$BuildDir = "build",
     [string]$Vulkan = "true",
     [string]$ShaderCompilation = "true",
+    [string]$CxxStandard = "",
+    [string]$ConfigureOnly = "false",
     [string]$Clean = "false",
     [string]$Target = "",
     [string]$ShaderToolPath = "",
@@ -33,8 +35,14 @@ function Invoke-Quietly {
 
     Write-Host "$Description... " -NoNewline
 
-    $output = & $Command @Arguments 2>&1
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & $Command @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 
     if ($exitCode -ne 0) {
         Write-Host "FAILED" -ForegroundColor Red
@@ -55,6 +63,7 @@ function Invoke-Quietly {
 
 $EnableVulkan = ConvertTo-Bool $Vulkan
 $EnableShaderCompilation = ConvertTo-Bool $ShaderCompilation
+$EnableConfigureOnly = ConvertTo-Bool $ConfigureOnly
 $EnableClean = ConvertTo-Bool $Clean
 $EnableTests = ConvertTo-Bool $Tests
 $EnableVerbose = ConvertTo-Bool $Verbose
@@ -111,9 +120,25 @@ if ($ResolvedShaderToolPath -and $EnableShaderCompilation) {
     $configureArgs += "-DSHADERTOOL_PATH=$ResolvedShaderToolPath"
 }
 
+if ($CxxStandard -and $CxxStandard.Trim()) {
+    if ($CxxStandard -notmatch '^\d+$') {
+        Write-Error "CxxStandard must be a numeric value like '17', '20', or '23'. Got '$CxxStandard'."
+        exit 1
+    }
+    $configureArgs += "-DCMAKE_CXX_STANDARD=$CxxStandard"
+    $configureArgs += "-DCMAKE_CXX_STANDARD_REQUIRED=ON"
+    $configureArgs += "-DCMAKE_CXX_EXTENSIONS=OFF"
+}
+
 $result = Invoke-Quietly -Description "Configuring" -Command "cmake" -Arguments $configureArgs -ShowOutput $EnableVerbose
 if ($result -ne 0) {
     exit $result
+}
+
+if ($EnableConfigureOnly) {
+    Write-Host ""
+    Write-Host "Configure succeeded." -ForegroundColor Green
+    exit 0
 }
 
 # Build

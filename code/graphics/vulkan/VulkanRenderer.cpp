@@ -187,10 +187,10 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	// Upload any pending textures before rendering begins (no render pass active yet)
 	// This is the explicit upload flush point - textures requested before rendering starts
 	// will be queued and flushed here
-	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
-	m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
+		Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
+		m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
 
-		// Delegate barrier setup and render state reset to VulkanRenderingSession
+		// Setup swapchain/depth barriers and reset render state for the new frame
 		m_renderingSession->beginFrame(cmd, imageIndex);
 	}
 
@@ -200,7 +200,7 @@ void VulkanRenderer::endFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	}
 	vk::CommandBuffer cmd = frame.commandBuffer();
 
-	// Delegate render pass termination and present barrier to VulkanRenderingSession
+	// Terminate any active rendering and transition swapchain for present
 	m_renderingSession->endFrame(cmd, imageIndex);
 
 	cmd.end();
@@ -316,6 +316,26 @@ VulkanFrame* VulkanRenderer::getCurrentRecordingFrame() {
 
 const VulkanRenderingSession::RenderTargetInfo& VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd) {
 	return m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
+}
+
+void VulkanRenderer::beginDeferredLighting(vk::CommandBuffer cmd, bool clearNonColorBufs)
+{
+	if (!cmd) {
+		return;
+	}
+	m_renderingSession->beginDeferredPass(clearNonColorBufs);
+	// Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
+	m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
+}
+
+void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
+{
+	m_renderingSession->endDeferredGeometry(cmd);
+}
+
+void VulkanRenderer::setPendingRenderTargetSwapchain()
+{
+	m_renderingSession->requestSwapchainTarget();
 }
 
 void VulkanRenderer::bindDeferredGlobalDescriptors() {
@@ -816,6 +836,24 @@ void VulkanRenderer::requestClear() {
 	m_renderingSession->requestClear();
 }
 
+void VulkanRenderer::zbufferClear(int mode) {
+	if (mode) {
+		// Enable zbuffering + clear
+		gr_zbuffering = 1;
+		gr_zbuffering_mode = GR_ZBUFF_FULL;
+		gr_global_zbuffering = 1;
+		m_renderingSession->setDepthTest(true);
+		m_renderingSession->setDepthWrite(true);
+		m_renderingSession->requestDepthClear();
+	} else {
+		// Disable zbuffering
+		gr_zbuffering = 0;
+		gr_zbuffering_mode = GR_ZBUFF_NONE;
+		gr_global_zbuffering = 0;
+		m_renderingSession->setDepthTest(false);
+	}
+}
+
 void VulkanRenderer::createDeferredLightingResources() {
 	// Fullscreen triangle (covers entire screen with 3 vertices, no clipping)
 	// Positions are in clip space: vertex shader passes through directly
@@ -946,13 +984,13 @@ void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
 		gr_projection_matrix,
 		getMinUniformBufferAlignment());
 
-	if (lights.empty()) {
-		return;
-	}
+		if (lights.empty()) {
+			return;
+		}
 
-	// Activate swapchain rendering without depth (target set by endDeferredGeometry)
-	// ensureRenderingActive starts the render pass if not already active
-	m_renderingSession->ensureRenderingActive(cmd, m_recordingImage);
+		// Activate swapchain rendering without depth (target set by endDeferredGeometry)
+		// ensureRenderingStarted starts the render pass if not already active
+		ensureRenderingStarted(cmd);
 
 	// Deferred lighting pass owns full-screen viewport/scissor and disables depth.
 	{

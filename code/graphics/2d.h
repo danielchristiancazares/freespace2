@@ -744,8 +744,9 @@ typedef struct screen {
 	// Sets mode.  Returns previous mode.
 	std::function<int(int mode)> gf_zbuffer_set;
 
-	// Clears the zbuffer.  If use_zbuffer is FALSE, then zbuffering mode is ignored and zbuffer is always off.
-	std::function<void(int use_zbuffer)> gf_zbuffer_clear;
+	// Clears the zbuffer if mode is TRUE (also enables zbuffering).
+	// If mode is FALSE, disables zbuffering.
+	std::function<void(int mode)> gf_zbuffer_clear;
 
 	// Set the stencil buffer mode. Returns previous mode
 	std::function<int(int mode)> gf_stencil_set;

@@ -37,6 +37,7 @@ public:
 
 	// Clear control
 	void requestClear();
+	void requestDepthClear();
 	void setClearColor(float r, float g, float b, float a);
 
 	// State setters

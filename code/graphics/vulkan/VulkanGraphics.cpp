@@ -35,6 +35,23 @@ namespace {
 std::unique_ptr<VulkanRenderer> renderer_instance;
 VulkanFrame* g_currentFrame = nullptr;  // Injected by setup_frame, used by render functions
 
+enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish };
+DeferredBoundaryState g_deferredBoundaryState = DeferredBoundaryState::Idle;
+
+const char* deferredBoundaryStateName(DeferredBoundaryState state)
+{
+	switch (state) {
+	case DeferredBoundaryState::Idle:
+		return "Idle";
+	case DeferredBoundaryState::InGeometry:
+		return "InGeometry";
+	case DeferredBoundaryState::AwaitFinish:
+		return "AwaitFinish";
+	default:
+		return "Unknown";
+	}
+}
+
 // Helper functions
 vk::Viewport createFullScreenViewport()
 {
@@ -100,9 +117,9 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 // Begin a new frame for rendering and set initial dynamic state.
 // Called immediately after flip() via gr_setup_frame() per API contract.
 // Injects g_currentFrame for use by render functions.
-	void gr_vulkan_setup_frame()
-	{
-		Assertion(renderer_instance != nullptr, "setup_frame called without renderer");
+		void gr_vulkan_setup_frame()
+		{
+			Assertion(renderer_instance != nullptr, "setup_frame called without renderer");
 
 	// Inject frame into module context - render functions will use g_currentFrame
 	g_currentFrame = renderer_instance->getCurrentRecordingFrame();
@@ -111,13 +128,15 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 	// Reset per-frame uniform bindings (optional will be empty at frame start)
 	g_currentFrame->resetPerFrameBindings();
 
-	vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-	Assertion(cmd, "Frame has no valid command buffer");
+		vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
+		Assertion(cmd, "Frame has no valid command buffer");
 
-	// DO NOT start the render pass here - allow gr_clear to set clear flags first.
-	// The render pass will start lazily when the first draw or clear occurs.
+		g_deferredBoundaryState = DeferredBoundaryState::Idle;
 
-		// Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
+		// DO NOT start the render pass here - allow gr_clear to set clear flags first.
+		// The render pass will start lazily when the first draw or clear occurs.
+
+			// Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
 		vk::Viewport viewport = createFullScreenViewport();
 		cmd.setViewport(0, 1, &viewport);
 
@@ -239,8 +258,6 @@ void gr_vulkan_resize_buffer(gr_buffer_handle handle, size_t size)
 
 void stub_update_transform_buffer(void* /*data*/, size_t /*size*/) {}
 
-void stub_set_clear_color(int /*r*/, int /*g*/, int /*b*/) {}
-
 	void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode)
 	{
 		applyClipToScreen(x, y, w, h, resize_mode);
@@ -253,8 +270,6 @@ void stub_set_clear_color(int /*r*/, int /*g*/, int /*b*/) {}
 			}
 		}
 	}
-
-int stub_set_cull(int /*cull*/) { return 0; }
 
 int stub_set_color_buffer(int /*mode*/) { return 0; }
 
@@ -291,7 +306,18 @@ void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
 	if (!renderer_instance) {
 		return;
 	}
-	renderer_instance->beginDeferredLighting(clearNonColorBufs);
+	VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
+	if (!frame) {
+		return;
+	}
+	if (g_deferredBoundaryState != DeferredBoundaryState::Idle) {
+		mprintf(("Vulkan deferred API misuse: begin() called while state=%s; resetting to Idle.\n",
+			deferredBoundaryStateName(g_deferredBoundaryState)));
+		renderer_instance->setPendingRenderTargetSwapchain();
+		g_deferredBoundaryState = DeferredBoundaryState::Idle;
+	}
+	renderer_instance->beginDeferredLighting(frame->commandBuffer(), clearNonColorBufs);
+	g_deferredBoundaryState = DeferredBoundaryState::InGeometry;
 }
 
 void gr_vulkan_deferred_lighting_msaa()
@@ -308,7 +334,13 @@ void gr_vulkan_deferred_lighting_end()
 	if (!frame) {
 		return;
 	}
+	if (g_deferredBoundaryState != DeferredBoundaryState::InGeometry) {
+		mprintf(("Vulkan deferred API misuse: end() called while state=%s; ignoring.\n",
+			deferredBoundaryStateName(g_deferredBoundaryState)));
+		return;
+	}
 	renderer_instance->endDeferredGeometry(frame->commandBuffer());
+	g_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
 }
 
 void gr_vulkan_deferred_lighting_finish()
@@ -318,6 +350,16 @@ void gr_vulkan_deferred_lighting_finish()
 	}
 	VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
 	if (!frame) {
+		return;
+	}
+	if (g_deferredBoundaryState == DeferredBoundaryState::InGeometry) {
+		mprintf(("Vulkan deferred API misuse: finish() called without end(); auto-ending geometry.\n"));
+		renderer_instance->endDeferredGeometry(frame->commandBuffer());
+		g_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
+	}
+	if (g_deferredBoundaryState != DeferredBoundaryState::AwaitFinish) {
+		mprintf(("Vulkan deferred API misuse: finish() called while state=%s; ignoring.\n",
+			deferredBoundaryStateName(g_deferredBoundaryState)));
 		return;
 	}
 
@@ -336,8 +378,9 @@ void gr_vulkan_deferred_lighting_finish()
 			}
 		}
 
-		// Switch back to swapchain rendering mode for subsequent draws
-		renderer_instance->setPendingRenderTargetSwapchain();
+				// Switch back to swapchain rendering mode for subsequent draws
+				renderer_instance->setPendingRenderTargetSwapchain();
+		g_deferredBoundaryState = DeferredBoundaryState::Idle;
 	}
 
 void stub_set_line_width(float width)
@@ -1208,9 +1251,39 @@ bool gr_vulkan_get_property(gr_property p, void* dest)
 	return false;
 }
 
-void stub_push_debug_group(const char*) {}
+void gr_vulkan_push_debug_group(const char* name)
+{
+	if (!g_currentFrame) {
+		return;
+	}
+	vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
+	if (!cmd) {
+		return;
+	}
 
-void stub_pop_debug_group() {}
+	vk::DebugUtilsLabelEXT label{};
+	label.pLabelName = name;
+	// Default color (white with alpha)
+	label.color[0] = 1.0f;
+	label.color[1] = 1.0f;
+	label.color[2] = 1.0f;
+	label.color[3] = 1.0f;
+
+	cmd.beginDebugUtilsLabelEXT(label);
+}
+
+void gr_vulkan_pop_debug_group()
+{
+	if (!g_currentFrame) {
+		return;
+	}
+	vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
+	if (!cmd) {
+		return;
+	}
+
+	cmd.endDebugUtilsLabelEXT();
+}
 
 int stub_create_query_object() { return -1; }
 
@@ -1283,6 +1356,11 @@ void init_function_pointers()
 		}
 		return 0;
 	};
+	gr_screen.gf_zbuffer_clear = [](int mode) {
+		if (renderer_instance) {
+			renderer_instance->zbufferClear(mode);
+		}
+	};
 
 	// Texture preloading
 	gr_screen.gf_preload = [](int bitmap_num, int is_aabitmap) -> int {
@@ -1329,6 +1407,10 @@ void init_function_pointers()
 
 	// Line width
 	gr_screen.gf_set_line_width = stub_set_line_width;
+
+	// Debug groups
+	gr_screen.gf_push_debug_group = gr_vulkan_push_debug_group;
+	gr_screen.gf_pop_debug_group = gr_vulkan_pop_debug_group;
 
 	// Capabilities
 	gr_screen.gf_is_capable = gr_vulkan_is_capable;
