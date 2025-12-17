@@ -166,33 +166,32 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	m_frameLifecycle.begin(m_currentFrame);
 	m_isRecording = true;
 
-	// Reset per-frame uniform bindings (optional will be empty at frame start)
-	frame.resetPerFrameBindings();
+		// Reset per-frame uniform bindings (optional will be empty at frame start)
+		frame.resetPerFrameBindings();
 
-	// Sync model descriptors BEFORE command buffer recording (unconditional)
-	Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
-	Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
-	Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
+		vk::CommandBuffer cmd = frame.commandBuffer();
 
-	// Ensure vertex heap buffer exists and sync descriptors
-	vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
-	beginModelDescriptorSync(frame, m_currentFrame, vertexHeapBuffer);
-
-	vk::CommandBuffer cmd = frame.commandBuffer();
-
-	vk::CommandBufferBeginInfo beginInfo;
-	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+		vk::CommandBufferBeginInfo beginInfo;
+		beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
 	cmd.begin(beginInfo);
 
-	// Upload any pending textures before rendering begins (no render pass active yet)
-	// This is the explicit upload flush point - textures requested before rendering starts
-	// will be queued and flushed here
-		Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
-		m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
+		// Upload any pending textures before rendering begins (no render pass active yet)
+		// This is the explicit upload flush point - textures requested before rendering starts
+		// will be queued and flushed here
+			Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
+			m_textureManager->flushPendingUploads(frame, cmd, m_currentFrame);
 
-		// Setup swapchain/depth barriers and reset render state for the new frame
-		m_renderingSession->beginFrame(cmd, imageIndex);
-	}
+			// Sync model descriptors AFTER upload flush so newly-resident textures are written this frame
+			Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
+			Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
+
+			// Ensure vertex heap buffer exists and sync descriptors
+			vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
+			beginModelDescriptorSync(frame, m_currentFrame, vertexHeapBuffer);
+
+			// Setup swapchain/depth barriers and reset render state for the new frame
+			m_renderingSession->beginFrame(cmd, imageIndex);
+		}
 
 void VulkanRenderer::endFrame(VulkanFrame& frame, uint32_t imageIndex) {
 	if (!m_isRecording) {
@@ -638,14 +637,17 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
 	// Binding 1: Write all texture descriptors for RESIDENT textures
 	// Note: We write all resident textures every frame. In the future, this could be optimized
 	// to track dirty slots, but for now we keep it simple and write everything.
-	for (auto& [handle, record] : m_textureManager->allTextures()) {
-		if (record.state != VulkanTextureManager::TextureState::Resident) {
-			continue;
-		}
+		for (auto& [handle, record] : m_textureManager->allTextures()) {
+			if (record.state != VulkanTextureManager::TextureState::Resident) {
+				continue;
+			}
 
-		auto& state = record.bindingState;
-		writeTextureDescriptor(frame.modelDescriptorSet, state.arrayIndex, handle);
-	}
+			auto& state = record.bindingState;
+			if (state.arrayIndex == MODEL_OFFSET_ABSENT) {
+				continue;
+			}
+			writeTextureDescriptor(frame.modelDescriptorSet, state.arrayIndex, handle);
+		}
 
 	// Write fallback descriptor into retired slots
 	// This ensures any stale references sample black instead of destroyed image
