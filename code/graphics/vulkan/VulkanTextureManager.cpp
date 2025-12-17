@@ -60,16 +60,21 @@ uint32_t bytesPerPixel(const bitmap& bmp)
 } // namespace
 
 VulkanTextureManager::VulkanTextureManager(vk::Device device,
-	const vk::PhysicalDeviceMemoryProperties& memoryProps,
-	vk::Queue transferQueue,
-	uint32_t transferQueueIndex)
-	: m_device(device)
-	, m_memoryProperties(memoryProps)
-	, m_transferQueue(transferQueue)
-	, m_transferQueueIndex(transferQueueIndex)
+		const vk::PhysicalDeviceMemoryProperties& memoryProps,
+		vk::Queue transferQueue,
+		uint32_t transferQueueIndex)
+		: m_device(device)
+		, m_memoryProperties(memoryProps)
+		, m_transferQueue(transferQueue)
+		, m_transferQueueIndex(transferQueueIndex)
 {
 	createDefaultSampler();
 	createFallbackTexture();
+
+	m_freeBindlessSlots.reserve(kMaxBindlessTextures - 1);
+	for (uint32_t slot = kMaxBindlessTextures; slot-- > 1;) {
+		m_freeBindlessSlots.push_back(slot);
+	}
 }
 
 uint32_t VulkanTextureManager::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const
@@ -251,6 +256,8 @@ void VulkanTextureManager::createFallbackTexture()
 
 	// Set the handle so getFallbackTextureHandle() returns valid value
 	m_fallbackTextureHandle = kFallbackTextureHandle;
+
+	onTextureResident(kFallbackTextureHandle);
 }
 
 vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key)
@@ -488,10 +495,10 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
 	viewInfo.subresourceRange.layerCount = layers;
 	auto view = m_device.createImageViewUnique(viewInfo);
 
-	// Store record
-	TextureRecord record{};
-	record.gpu.image = std::move(image);
-	record.gpu.memory = std::move(imageMem);
+		// Store record
+		TextureRecord record{};
+		record.gpu.image = std::move(image);
+		record.gpu.memory = std::move(imageMem);
 	record.gpu.imageView = std::move(view);
 	record.gpu.sampler = m_defaultSampler.get();
 	record.gpu.width = width;
@@ -500,13 +507,13 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
 	record.gpu.mipLevels = 1;
 	record.gpu.format = format;
 	// Image already transitioned to shader read layout in the upload command buffer.
-	record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-	record.state = TextureState::Resident;
-	record.lastUsedFrame = 0;
-	m_textures[baseFrame] = std::move(record);
-	onTextureResident(baseFrame, bm_get_array_index(baseFrame));
-	return true;
-}
+		record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		record.state = TextureState::Resident;
+		record.lastUsedFrame = 0;
+		m_textures[baseFrame] = std::move(record);
+		onTextureResident(baseFrame);
+		return true;
+	}
 
 VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident(int bitmapHandle,
 	VulkanFrame& frame,
@@ -796,8 +803,8 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 		record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 		record.pendingFrameIndex = currentFrameIndex;
 		record.lastUsedFrame = currentFrameIndex;
-		onTextureResident(baseFrame, bm_get_array_index(baseFrame));
-	}
+			onTextureResident(baseFrame);
+		}
 
 	m_pendingUploads.swap(remaining);
 }
@@ -808,7 +815,7 @@ void VulkanTextureManager::markUploadsCompleted(uint32_t completedFrameIndex)
 		auto& record = kv.second;
 		if (record.state == TextureState::Uploading && record.pendingFrameIndex == completedFrameIndex) {
 			record.state = TextureState::Resident;
-			onTextureResident(kv.first, bm_get_array_index(kv.first));
+			onTextureResident(kv.first);
 		}
 	}
 }
@@ -894,17 +901,44 @@ void VulkanTextureManager::cleanup()
 	m_pendingDestructions.clear();
 }
 
-void VulkanTextureManager::onTextureResident(int textureHandle, uint32_t arrayIndex)
+void VulkanTextureManager::onTextureResident(int textureHandle)
 {
-	Assertion(arrayIndex < kMaxBindlessTextures,
-	          "Texture array index %u exceeds maximum %u",
-	          arrayIndex, kMaxBindlessTextures);
-
 	auto it = m_textures.find(textureHandle);
 	Assertion(it != m_textures.end(), "onTextureResident called for unknown texture handle %d", textureHandle);
 
 	auto& record = it->second;
-	record.bindingState.arrayIndex = arrayIndex;
+	if (textureHandle == kFallbackTextureHandle) {
+		record.bindingState.arrayIndex = 0;
+		return;
+	}
+
+	// Stable assignment: once a texture owns a slot, keep it.
+	if (record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
+		return;
+	}
+
+	if (m_freeBindlessSlots.empty()) {
+		// No slots available; leave as absent so model shader will skip sampling.
+		return;
+	}
+
+	record.bindingState.arrayIndex = m_freeBindlessSlots.back();
+	m_freeBindlessSlots.pop_back();
+}
+
+uint32_t VulkanTextureManager::getBindlessSlotIndex(int textureHandle) const
+{
+	auto it = m_textures.find(textureHandle);
+	if (it == m_textures.end()) {
+		return MODEL_OFFSET_ABSENT;
+	}
+
+	const auto& record = it->second;
+	if (record.state != TextureState::Resident) {
+		return MODEL_OFFSET_ABSENT;
+	}
+
+	return record.bindingState.arrayIndex;
 }
 
 void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial)
@@ -984,8 +1018,6 @@ vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textu
 
 } // namespace vulkan
 } // namespace graphics
-
-
 
 
 

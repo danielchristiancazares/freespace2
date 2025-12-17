@@ -14,29 +14,24 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanBufferManager.*` | Buffer creation, updates, deferred deletion |
 | `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache |
 | `VulkanShaderManager.*` | Shader module loading/caching by type + variant |
+| `VulkanShaderReflection.*` | SPIR-V reflection helpers for pipeline layout/validation |
 | `VulkanPipelineManager.*` | Pipeline creation/caching by `PipelineKey` |
 | `VulkanDescriptorLayouts.*` | Set layouts, pipeline layouts, descriptor pool allocation |
+| `VulkanDeferredLights.*` | Deferred lighting pass orchestration and light volume meshes |
 | `VulkanRenderTargets.*` | Depth buffer, G-buffer, resize handling |
 | `VulkanRingBuffer.*` | Per-frame transient allocations (uniform, vertex, staging) |
 | `FrameLifecycleTracker.*` | State machine for "are we recording?" checks |
 | `VulkanLayoutContracts.*` | Shader ↔ pipeline layout binding contracts |
-| `VulkanConstants.h` | Shared constants (⚠️ see note below) |
+| `VulkanModelValidation.*` | Model draw validation and safety checks |
+| `VulkanModelTypes.h` | Shared model/mesh-related types |
+| `VulkanVertexTypes.h` | Vertex layout/type definitions |
+| `VulkanClip.h` | Clipping and scissor helpers |
+| `VulkanDebug.*` | Vulkan debug helpers and instrumentation |
+| `VulkanConstants.h` | Shared constants (frames-in-flight, bindless limits) |
 
-## Constants — Known Issue
+## Constants
 
-**Bug:** Two different frame-count constants exist:
-
-```cpp
-// VulkanConstants.h
-constexpr uint32_t kFramesInFlight = 3;
-
-// VulkanRenderer.h
-static constexpr size_t MAX_FRAMES_IN_FLIGHT = 2;  // actual frame ring size
-```
-
-`VulkanTextureManager` uses `kFramesInFlight` for descriptor tracking, but only 2 frames exist. The `clearRetiredSlotsIfAllFramesUpdated` logic waits for 3 frames to cycle before clearing retired slots — this never happens, so retired slot tracking leaks.
-
-**Fix:** Unify on one constant. Delete `MAX_FRAMES_IN_FLIGHT`, use `kFramesInFlight` everywhere.
+- `kFramesInFlight` in `VulkanConstants.h` defines the frame-ring size and any per-frame tracking. Avoid duplicating a second frames-in-flight constant elsewhere.
 
 ## Entry Points
 
@@ -72,10 +67,10 @@ Swapchain recreation triggers `VulkanRenderTargets::resize()`.
 
 Coordinates:
 - Initialization order: device → layouts → render targets → session → frames → managers
-- Frame ring (`MAX_FRAMES_IN_FLIGHT` frames via `VulkanFrame`)
+- Frame ring (`kFramesInFlight` frames via `VulkanFrame`)
 - CPU/GPU sync via `VulkanFrame::wait_for_gpu()` fence
 - Frame lifecycle tracking via `FrameLifecycleTracker`
-- Descriptor state: global set (frame-wide) and model sets (per-draw)
+- Descriptor state: global set (frame-wide), model set (per-frame; bound per draw via dynamic offsets), and per-draw push descriptors
 
 Key methods:
 - `initialize()` / `shutdown()`
@@ -87,13 +82,16 @@ Model descriptor sync happens in `beginFrame()` via `beginModelDescriptorSync()`
 ### `VulkanRenderingSession` (Render Pass State Machine)
 
 Responsible for:
-- Per-frame state reset (`resetFrameState()`)
-- Image layout transitions (swapchain, depth, G-buffer)
-- Render mode switching:
-  - `RenderMode::Swapchain` — forward rendering
-  - `RenderMode::DeferredGBuffer` — deferred geometry pass
-- Lazy render pass begin (`ensureRenderingActive()`)
-- Dynamic state application (`applyDynamicState()`)
+- Dynamic-rendering state machine (single “current target” truth)
+- Image layout transitions (swapchain, depth, G-buffer) via `pipelineBarrier2`
+- Target switching:
+  - `requestSwapchainTarget()` — swapchain + depth
+  - `beginDeferredPass()` — select G-buffer target
+  - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
+- Lazy render pass begin (`ensureRenderingActive()`), with RAII end via `ActivePass`
+- Dynamic state application (`applyDynamicState()`) on first begin
+
+The render target’s “contract” (attachment formats + count) is exposed as `RenderTargetInfo` and is used to key pipelines.
 
 **Y-flip:** Viewport has negative height; front-face is set to clockwise to preserve winding.
 
@@ -122,6 +120,24 @@ Owns:
 | `VulkanBufferManager` | Buffer CRUD, deferred deletion (retire → destroy after N frames) |
 | `VulkanTextureManager` | Upload scheduling, residency state machine, sampler cache |
 
+### Pipelines (`VulkanPipelineManager` + `VulkanLayoutContracts`)
+
+Pipelines are “contract-driven” and cached by `PipelineKey`:
+- `PipelineKey` includes shader type + variant flags, render target contract (color/depth formats, attachment count, sample count), blend mode, and (for vertex-attribute shaders) `vertex_layout::hash()`.
+- Shader layout contracts (`VulkanLayoutContracts`) define, per `shader_type`:
+  - which pipeline layout to use (`Standard`, `Model`, `Deferred`)
+  - which vertex input mode to use (`VertexAttributes` vs. `VertexPulling`)
+
+Pipeline layout families (descriptor model):
+- **Standard:** set 0 = per-draw push descriptors, set 1 = global set.
+- **Model:** set 0 = bindless model set + dynamic UBO, push constants (vertex pulling; no vertex attributes).
+- **Deferred:** set 0 = deferred push descriptors, set 1 = global G-buffer set.
+
+Caching layers:
+- `VulkanShaderManager` caches shader modules by (type, flags).
+- `VulkanPipelineManager` caches vertex input state by `vertex_layout::hash()` and pipelines by `PipelineKey`.
+- `VulkanDevice` owns a `VkPipelineCache` persisted as `vulkan_pipeline.cache` and passed into pipeline creation.
+
 ## Synchronization Primitives
 
 | Primitive | Usage |
@@ -139,12 +155,12 @@ flip()
 ├── VulkanFrame::wait_for_gpu()           # fence wait
 ├── managers: onFrameEnd(), markUploadsCompleted()
 ├── acquireNextImage()                    # recreate swapchain if needed
-└── beginFrame()
-    ├── reset command pool
-    ├── begin command buffer
-    ├── beginModelDescriptorSync()        # descriptor writes
-    ├── flushPendingUploads()             # texture staging
-    └── VulkanRenderingSession::resetFrameState()
+	└── beginFrame()
+	    ├── reset command pool
+	    ├── begin command buffer
+	    ├── beginModelDescriptorSync()        # descriptor writes
+	    ├── flushPendingUploads()             # texture staging
+	    └── VulkanRenderingSession::beginFrame()
 
 gr_vulkan_setup_frame()
 ├── inject g_currentFrame
@@ -167,3 +183,5 @@ gr_vulkan_setup_frame()
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
 - **Swapchain resize cascades.** Anything tied to swapchain extent must handle `recreateSwapchain()`.
+- **`PipelineKey.layout_hash` is caller-owned for vertex-attribute shaders.** If a shader uses `VertexAttributes`, ensure `PipelineKey.layout_hash = layout.hash()` (vertex-pulling shaders intentionally ignore the layout hash).
+- **Pipeline layout compatibility matters.** “Deferred” pipelines use a different set-0 layout than “Standard”; bind the global set using the matching pipeline layout when mixing pipeline families.

@@ -1,5 +1,6 @@
 #include "VulkanRingBuffer.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <optional>
 
@@ -47,7 +48,9 @@ VulkanRingBuffer::Allocation VulkanRingBuffer::allocate(vk::DeviceSize requestSi
 std::optional<VulkanRingBuffer::Allocation> VulkanRingBuffer::try_allocate(vk::DeviceSize requestSize,
 	vk::DeviceSize alignmentOverride)
 {
-	const vk::DeviceSize align = alignmentOverride ? alignmentOverride : m_alignment;
+	// Never allow an override to weaken the ring's baseline alignment (which is typically
+	// derived from device limits like minUniformBufferOffsetAlignment).
+	const vk::DeviceSize align = std::max(m_alignment, alignmentOverride ? alignmentOverride : vk::DeviceSize{0});
 	vk::DeviceSize alignedOffset = ((m_offset + align - 1) / align) * align;
 
 	// Do not wrap within a frame - this would overwrite in-flight GPU reads
