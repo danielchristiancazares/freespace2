@@ -2,6 +2,7 @@
 
 #include "VulkanConstants.h"
 #include "VulkanFrame.h"
+#include "VulkanModelTypes.h"
 
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -104,9 +105,9 @@ class VulkanTextureManager {
 		Retired // Marked for destruction, awaiting frame drainage
 	};
 
-	struct TextureBindingState {
-		uint32_t arrayIndex = 0;
-	};
+		struct TextureBindingState {
+			uint32_t arrayIndex = MODEL_OFFSET_ABSENT;
+		};
 
 	struct TextureRecord {
 		VulkanTexture gpu;
@@ -149,14 +150,15 @@ class VulkanTextureManager {
 	// Cleanup all resources
 	void cleanup();
 
-	// Descriptor binding management
-	void onTextureResident(int textureHandle, uint32_t arrayIndex);
-	void retireTexture(int textureHandle, uint64_t retireSerial);
+		// Descriptor binding management
+		void onTextureResident(int textureHandle);
+		void retireTexture(int textureHandle, uint64_t retireSerial);
+		uint32_t getBindlessSlotIndex(int textureHandle) const;
 
-	const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
-	void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
-	int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
-	void processPendingDestructions(uint64_t completedSerial);
+		const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
+		void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
+		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
+		void processPendingDestructions(uint64_t completedSerial);
 
 	// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
 	std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
@@ -194,11 +196,14 @@ class VulkanTextureManager {
 		bool& uploadQueued);
 	bool isUploadQueued(int baseFrame) const;
 
-	// Slots that need fallback descriptor written (original slot indices)
-	std::vector<uint32_t> m_retiredSlots;
+		// Slots that need fallback descriptor written (original slot indices)
+		std::vector<uint32_t> m_retiredSlots;
 
-	// Counter for tracking when all frames have processed retired slots
-	uint32_t m_retiredSlotsFrameCounter = 0;
+		// Pool of bindless texture slots (excluding 0, reserved for fallback)
+		std::vector<uint32_t> m_freeBindlessSlots;
+
+		// Counter for tracking when all frames have processed retired slots
+		uint32_t m_retiredSlotsFrameCounter = 0;
 
 	// Fallback "black" texture for retired slots (initialized at startup)
 	int m_fallbackTextureHandle = -1;
@@ -209,7 +214,6 @@ class VulkanTextureManager {
 
 } // namespace vulkan
 } // namespace graphics
-
 
 
 
