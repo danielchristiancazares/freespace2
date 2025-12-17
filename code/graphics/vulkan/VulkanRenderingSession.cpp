@@ -255,8 +255,9 @@ void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandB
 	vk::RenderingAttachmentInfo colorAttachment{};
 	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
 	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	// Clear required: deferred lighting may discard background pixels, leaving undefined content
-	colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+	// Respect m_shouldClearColor: if false, load existing content (e.g., skybox rendered early).
+	// Only clear if explicitly requested or if this is the first render pass of the frame.
+	colorAttachment.loadOp = m_shouldClearColor ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
 	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
 	colorAttachment.clearValue = vk::ClearColorValue(m_clearColor);
 
@@ -268,6 +269,11 @@ void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandB
 	renderingInfo.pDepthAttachment = nullptr;  // No depth for deferred lighting
 
 	cmd.beginRendering(renderingInfo);
+
+	// Clear flag is one-shot; reset after we consume it (if we cleared)
+	if (m_shouldClearColor) {
+		m_shouldClearColor = false;
+	}
 }
 
 // ---- Layout transitions ----

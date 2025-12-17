@@ -656,7 +656,21 @@ void gr_vulkan_render_model(model_material* material_info,
 
 	// Build push constants - texture indices
 	auto toIndex = [](int h) -> uint32_t {
-		return (h >= 0) ? static_cast<uint32_t>(bm_get_array_index(h)) : MODEL_OFFSET_ABSENT;
+		if (h < 0 || renderer_instance == nullptr) {
+			return MODEL_OFFSET_ABSENT;
+		}
+
+		auto* textureManager = renderer_instance->textureManager();
+		if (!textureManager) {
+			return MODEL_OFFSET_ABSENT;
+		}
+
+		const int baseFrame = bm_get_base_frame(h, nullptr);
+		if (baseFrame < 0) {
+			return MODEL_OFFSET_ABSENT;
+		}
+
+		return textureManager->getBindlessSlotIndex(baseFrame);
 	};
 
 	int baseTex   = material_info->get_texture_map(TM_BASE_TYPE);
@@ -876,11 +890,13 @@ void gr_vulkan_render_primitives(material* material_info,
 	}
 
 	// 3. Allocate from uniform ring buffer using dynamic size
+	const size_t uboAlignmentRaw = renderer_instance->getMinUniformOffsetAlignment();
+	const size_t uboAlignment = uboAlignmentRaw == 0 ? 1 : uboAlignmentRaw;
 	const size_t matrixSize = sizeof(matrices);
-	const size_t genericOffset = (matrixSize + 255u) & ~static_cast<size_t>(255);
+	const size_t genericOffset = ((matrixSize + uboAlignment - 1) / uboAlignment) * uboAlignment;
 	const size_t totalUniformSize = genericOffset + genericDataSize;
 
-	auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, 256);
+	auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, uboAlignment);
 	auto* uniformBase = static_cast<char*>(uniformAlloc.mapped);
 	std::memcpy(uniformBase, &matrices, sizeof(matrices));
 	std::memcpy(uniformBase + genericOffset, genericDataPtr, genericDataSize);
@@ -1100,12 +1116,14 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	generic.color = {clr.xyzw.x, clr.xyzw.y, clr.xyzw.z, clr.xyzw.w};
 	generic.intensity = material_info->get_color_scale();
 
-	// Allocate from uniform ring buffer (256-byte alignment required)
+	// Allocate from uniform ring buffer (alignment derived from device limits)
+	const size_t uboAlignmentRaw = renderer_instance->getMinUniformOffsetAlignment();
+	const size_t uboAlignment = uboAlignmentRaw == 0 ? 1 : uboAlignmentRaw;
 	const size_t matrixSize = sizeof(matrices);  // 128 bytes
-	const size_t genericOffset = (matrixSize + 255u) & ~static_cast<size_t>(255);  // Align to 256
+	const size_t genericOffset = ((matrixSize + uboAlignment - 1) / uboAlignment) * uboAlignment;
 	const size_t totalUniformSize = genericOffset + sizeof(generic);
 
-	auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, 256);
+	auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, uboAlignment);
 	auto* uniformBase = static_cast<char*>(uniformAlloc.mapped);
 	std::memcpy(uniformBase, &matrices, sizeof(matrices));
 	std::memcpy(uniformBase + genericOffset, &generic, sizeof(generic));
