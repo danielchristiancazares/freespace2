@@ -117,6 +117,10 @@ if (FSO_BUILD_WITH_VULKAN)
 	target_compile_definitions(code PUBLIC WITH_VULKAN VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 VK_NO_PROTOTYPES)
 	target_link_libraries(code PRIVATE Vulkan::Vulkan)
 endif()
+if (FSO_BUILD_WITH_METAL)
+	target_compile_definitions(code PUBLIC WITH_METAL)
+	target_link_libraries(code PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Cocoa")
+endif()
 
 include(shaders.cmake)
 

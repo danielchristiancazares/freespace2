@@ -535,6 +535,7 @@ cmdline_parm override_arg("-override_data", "Enable override directory", AT_NONE
 cmdline_parm imgui_debug_arg("-imgui_debug", nullptr, AT_NONE);
 cmdline_parm vulkan("-vulkan", nullptr, AT_NONE);
 cmdline_parm vk_stress("-vk_stress", "Enable Vulkan stress mode (buffer churn)", AT_NONE);
+cmdline_parm metal("-metal", nullptr, AT_NONE);
 cmdline_parm multithreading("-threads", nullptr, AT_INT);
 
 char *Cmdline_start_mission = NULL;
@@ -575,6 +576,7 @@ bool Cmdline_override_data = false;
 bool Cmdline_show_imgui_debug = false;
 bool Cmdline_vulkan = false;
 bool Cmdline_vk_stress = false;
+bool Cmdline_metal = false;
 int Cmdline_multithreading = 1;
 
 // Other
@@ -2341,10 +2343,15 @@ bool SetCmdlineParams()
 			Cmdline_vk_stress = true;
 		}
 
-		//Deprecated flags - CommanderDJ
-		if (deprecated_no_emissive_arg.found()) {
-			Cmdline_emissive = 0;
-		}
+
+	if (metal.found()) {
+		Cmdline_metal = true;
+	}
+
+	//Deprecated flags - CommanderDJ
+	if (deprecated_no_emissive_arg.found()) {
+		Cmdline_emissive = 0;
+	}
 
 		if (deprecated_fxaa_arg.found() ) {
 			Gr_aa_mode = AntiAliasMode::FXAA_Medium;

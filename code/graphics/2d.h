@@ -996,6 +996,7 @@ bool gr_lua_context_active();
 #define GR_STUB					(100)
 #define GR_OPENGL (104) // Use OpenGl hardware renderer
 #define GR_VULKAN (105) // Use Vulkan hardware renderer
+#define GR_METAL  (106) // Use Metal hardware renderer (macOS only)
 
 // resolution constants   - always keep resolutions in ascending order and starting from 0  
 #define GR_NUM_RESOLUTIONS			2

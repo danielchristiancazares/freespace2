@@ -609,6 +609,13 @@ if (FSO_BUILD_WITH_VULKAN)
 	)
 endif()
 
+if (FSO_BUILD_WITH_METAL)
+	add_file_folder("Graphics\\\\Metal"
+		graphics/metal/MetalGraphics.h
+		graphics/metal/MetalGraphics.mm
+	)
+endif()
+
 # HeadTracking files
 add_file_folder("HeadTracking"
 	headtracking/headtracking_internal.h

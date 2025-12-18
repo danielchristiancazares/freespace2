@@ -1872,6 +1872,8 @@ void game_init()
 	int graphics_api = GR_DEFAULT;
 	if (Cmdline_vulkan)
 		graphics_api = GR_VULKAN;
+	else if (Cmdline_metal)
+		graphics_api = GR_METAL;
 
 	if (!gr_init(std::move(sdlGraphicsOperations), graphics_api)) {
 		os::dialogs::Message(os::dialogs::MESSAGEBOX_ERROR, "Error initializing graphics!");

@@ -160,6 +160,7 @@ extern bool Cmdline_override_data;
 extern bool Cmdline_show_imgui_debug;
 extern bool Cmdline_vulkan;
 extern bool Cmdline_vk_stress;
+extern bool Cmdline_metal;
 extern int Cmdline_multithreading;
 
 enum class WeaponSpewType { NONE = 0, STANDARD, ALL };

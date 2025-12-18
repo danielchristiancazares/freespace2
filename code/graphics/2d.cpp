@@ -52,6 +52,9 @@
 #ifdef WITH_VULKAN
 #include "graphics/vulkan/VulkanGraphics.h"
 #endif
+#ifdef WITH_METAL
+#include "graphics/metal/MetalGraphics.h"
+#endif
 
 #include <SDL_surface.h>
 
@@ -1538,6 +1541,13 @@ static void gr_init_function_pointers(int mode) {
 		Error(LOCATION, "Vulkan renderer was requested but that was not compiled into this build.");
 #endif
 		break;
+	case GR_METAL:
+#ifdef WITH_METAL
+		graphics::metal::initialize_function_pointers();
+#else
+		Error(LOCATION, "Metal renderer was requested but that was not compiled into this build.");
+#endif
+		break;
 	case GR_STUB:
 		gr_stub_init_function_pointers();
 		break;
@@ -1669,6 +1679,14 @@ static bool gr_init_sub(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, i
 		rc = graphics::vulkan::initialize(std::move(graphicsOps));
 #else
 		Error(LOCATION, "Vulkan renderer was requested but that was not compiled into this build.");
+		rc = false;
+#endif
+		break;
+	case GR_METAL:
+#ifdef WITH_METAL
+		rc = graphics::metal::initialize(std::move(graphicsOps));
+#else
+		Error(LOCATION, "Metal renderer was requested but that was not compiled into this build.");
 		rc = false;
 #endif
 		break;
