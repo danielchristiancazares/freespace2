@@ -12,6 +12,7 @@
 
 #include "globalincs/pstypes.h"
 #include "globalincs/globals.h"
+#include "graphics/2d.h"
 #include "globalincs/linklist.h"
 #include "io/key.h"
 #include "io/joy.h"
@@ -1366,6 +1367,10 @@ void ppsk_hotkeys(int k)
 #endif
 
 	switch (k) {
+		case KEY_F4:
+			gr_print_screen("f4_screenshot");
+			break;
+
 		case KEY_F5:
 		case KEY_F6:
 		case KEY_F7:
