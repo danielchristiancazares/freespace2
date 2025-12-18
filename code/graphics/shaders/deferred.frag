@@ -84,8 +84,7 @@ void GetLightInfo(vec3 position,
 		area_normalisation *= area_normalisation;
 
 		if (dist > lightRadius) {
-			fragOut0 = vec4(1.0, 0.0, 1.0, 1.0);  // Magenta = position is zero
-		return;
+			discard;
 		}
 		attenuation = 1.0 - clamp(sqrt(dist / lightRadius), 0.0, 1.0);
 	}
@@ -121,8 +120,7 @@ void GetLightInfo(vec3 position,
 		area_normalisation = alpha / alpha_adjust;
 
 		if (dist > lightRadius) {
-			fragOut0 = vec4(1.0, 0.0, 1.0, 1.0);  // Magenta = position is zero
-		return;
+			discard;
 		}
 		attenuation = 1.0 - clamp(sqrt(dist / lightRadius), 0.0, 1.0);
 	}
@@ -137,15 +135,13 @@ void GetLightInfo(vec3 position,
 		// Dual cone option matches OpenGL shader behavior
 		if (dualCone != 0u) {
 			if (abs(coneDot) < coneAngle) {
-				fragOut0 = vec4(1.0, 0.0, 1.0, 1.0);  // Magenta = position is zero
-		return;
+				discard;
 			} else {
 				attenuation *= smoothstep(coneAngle, coneInnerAngle, abs(coneDot));
 			}
 		} else {
 			if (coneDot < coneAngle) {
-				fragOut0 = vec4(1.0, 0.0, 1.0, 1.0);  // Magenta = position is zero
-		return;
+				discard;
 			} else {
 				attenuation *= smoothstep(coneAngle, coneInnerAngle, coneDot);
 			}
@@ -159,8 +155,7 @@ void GetLightInfo(vec3 position,
 	}
 	else {
 		// Unknown light type: render nothing
-		fragOut0 = vec4(1.0, 0.0, 1.0, 1.0);  // Magenta = position is zero
-		return;
+		discard;
 	}
 
 	attenuation *= attenuation;
@@ -175,10 +170,8 @@ void main()
 	vec3 position = position_buffer.xyz;
 
 	// If no geometry wrote this pixel, position buffer stays at clear (0,0,0,0)
-	// DEBUG: Output magenta instead of discarding to verify H23
 	if (dot(position, position) < 1.0e-8) {
-		fragOut0 = vec4(1.0, 0.0, 1.0, 1.0);  // Magenta = position is zero
-		return;
+		discard;
 	}
 
 	vec4 diffuse = texture(ColorBuffer, screenPos);

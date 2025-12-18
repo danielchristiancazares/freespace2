@@ -9,7 +9,8 @@ Param(
     [string]$Target = "",
     [string]$ShaderToolPath = "",
     [string]$Tests = "false",
-    [string]$Verbose = "false"
+    [string]$Verbose = "false",
+    [string]$ForceShaders = "true"
 )
 
 Set-StrictMode -Version Latest
@@ -67,6 +68,7 @@ $EnableConfigureOnly = ConvertTo-Bool $ConfigureOnly
 $EnableClean = ConvertTo-Bool $Clean
 $EnableTests = ConvertTo-Bool $Tests
 $EnableVerbose = ConvertTo-Bool $Verbose
+$EnableForceShaders = ConvertTo-Bool $ForceShaders
 
 # Auto-enable tests if we're explicitly building the test target
 if (-not $EnableTests -and $Target -match "unittests") {
@@ -92,6 +94,27 @@ if ($EnableClean -and (Test-Path $BuildDir)) {
     Write-Host "Cleaning... " -NoNewline
     Remove-Item -Recurse -Force $BuildDir
     Write-Host "OK" -ForegroundColor Green
+}
+
+# Force shader recompilation by deleting generated shaders and depfiles
+if ($EnableForceShaders -and -not $EnableClean) {
+    $generatedShadersDir = Join-Path $BuildDir "generated_shaders"
+    $shaderDepDir = Join-Path $BuildDir "code/shaders"
+    $deleted = $false
+
+    if (Test-Path $generatedShadersDir) {
+        Write-Host "Forcing shader recompilation... " -NoNewline
+        Remove-Item -Recurse -Force $generatedShadersDir
+        $deleted = $true
+    }
+    if (Test-Path $shaderDepDir) {
+        if (-not $deleted) { Write-Host "Forcing shader recompilation... " -NoNewline }
+        Remove-Item -Recurse -Force $shaderDepDir
+        $deleted = $true
+    }
+    if ($deleted) {
+        Write-Host "OK" -ForegroundColor Green
+    }
 }
 
 # Configure
