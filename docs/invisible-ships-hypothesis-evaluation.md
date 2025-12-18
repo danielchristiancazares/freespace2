@@ -352,6 +352,59 @@ This finding invalidates the earlier "evidence from logs" that claimed to show m
 
 ## Investigation Log
 
+### H23 Follow-up Reveals Transform Issue (2025-12-18)
+
+Multi-color diagnostic shader test produced unexpected results:
+
+**Test setup:**
+- Modified `deferred.frag` to output distinct colors based on G-buffer validity
+- Discard for empty sky (no G-buffer data)
+- Magenta for missing position, Orange for missing normal, Yellow for missing albedo
+- Cyan for all G-buffer data valid
+
+**Observations:**
+1. One large ship (destroyer/station) appeared CYAN when player turned 180°
+2. Ship was visually behind player, but game logic placed it in front
+3. All other ships remained invisible at any viewing angle
+4. No magenta/orange/yellow visible for ships — only cyan or nothing
+
+**Interpretation:**
+- G-buffer data IS valid for at least one ship (cyan confirms all components present)
+- The issue is not data corruption but incorrect transform/position
+- Ships are rendered at mirrored/inverted screen positions
+- Smaller ships likely rendered entirely off-screen due to same transform error
+
+**New hypothesis:** View matrix Z inversion (H33) — see hypothesis section for details.
+
+---
+
+### Reproducible Position Anomaly Test (2025-12-18)
+
+**Test procedure:**
+1. Load mission, immediately turn off engines
+2. Turn 180° away from known station location
+3. Observe screen for station geometry
+4. Turn back toward actual station location
+5. Move camera toward screen edges
+
+**Observations:**
+- Station geometry visible when facing away from its actual position
+- Station geometry not visible when facing toward its actual position
+- Geometry reappears at screen edges
+- Behavior is reproducible across multiple attempts
+
+**Possible interpretations:**
+
+The observed pattern is consistent with several potential causes:
+1. CPU-side frustum culling returning inverted results
+2. View matrix Z sign error causing objects to transform to opposite positions
+3. Near/far plane configuration issue
+4. Projection matrix sign error
+
+**Next step:** Investigate frustum culling logic and view matrix construction to identify the source of the position anomaly.
+
+---
+
 ### DEBUG Block Removed, Ships Still Invisible (2025-12-17)
 
 **Initial finding:** A DEBUG code block in `model.frag` (lines 53-59) returned early, preventing the production shader logic from executing.
@@ -809,7 +862,7 @@ The DEBUG block was a contributing factor that needed removal, but it was not th
 
 ### Hypothesis 23: G-buffer position data is zero/invalid, triggering deferred shader discard
 
-**Status: PENDING**
+**Status: REJECTED** (G-buffer data is valid; issue is transform-related)
 
 #### Observation
 
@@ -830,66 +883,688 @@ if (dot(position, position) < 1.0e-8) {
 
 The G-buffer position attachment contains zero or near-zero values when sampled by the deferred shader. This triggers the discard condition, causing all ship fragments to be discarded.
 
-Possible causes for zero position data:
-1. **Shader binary not embedded** - The recompiled `model.frag` SPIR-V may not be included in the executable
-2. **G-buffer layout transition** - Position attachment not transitioned to `SHADER_READ_ONLY_OPTIMAL` before sampling
-3. **Descriptor binding** - Wrong image view bound to position sampler
-4. **Attachment write failure** - Position output not reaching the attachment
+#### Evidence
+
+**Initial test (2025-12-18):**
+
+Modified `deferred.frag` to output magenta when position is zero instead of discarding. Result was indeterminate (magenta on magenta background).
+
+**Follow-up test with multi-color diagnostic (2025-12-18):**
+
+Modified `deferred.frag` to output distinct colors:
+```glsl
+// Empty sky (no G-buffer data) - discard
+if (!hasPosition && !hasNormal && !hasDiffuse) { discard; }
+// Geometry present but position missing - MAGENTA
+if (!hasPosition) { fragOut0 = vec4(1.0, 0.0, 1.0, 1.0); return; }
+// Geometry present but normal missing - ORANGE
+if (!hasNormal) { fragOut0 = vec4(1.0, 0.5, 0.0, 1.0); return; }
+// Geometry present but albedo black - YELLOW
+if (!hasDiffuse) { fragOut0 = vec4(1.0, 1.0, 0.0, 1.0); return; }
+// All G-buffer data valid - CYAN
+fragOut0 = vec4(0.0, 1.0, 1.0, 1.0); return;
+```
+
+**Results:**
+- **One large ship (destroyer/station)**: Appeared CYAN when player turned 180°
+- **All other ships**: Remained invisible (no diagnostic color visible)
+- **Position anomaly**: The visible ship appeared BEHIND the player (visible only when turning around), despite game logic placing it in front
+
+#### Interpretation
+
+1. **G-buffer data IS valid** for at least one ship (cyan output confirms position, normal, and albedo all present)
+2. **Position values are WRONG** — ship renders behind player when it should be in front
+3. **Other ships not visible** — either rendered completely off-screen due to same transform issue, or draw calls not issued
+
+This pattern suggests a **view matrix or coordinate system issue** rather than G-buffer content corruption. See H33.
+
+#### Conclusion
+
+**REJECTED as root cause.** G-buffer data is valid (cyan confirms all components present). The issue is that position values place geometry at incorrect screen locations, not that position data is zero/invalid.
+
+---
+
+### Hypothesis 24: Deferred lighting calculation produces zero output
+
+**Status: PENDING** — Candidate (depends on H23 follow-up)
+
+#### Observation
+
+After removing the DEBUG block from `model.frag`:
+- Pipeline sequence is correct
+- Many geometry draws occur per frame
+- Deferred lighting runs
+- Ships remain invisible
+
+H23 test was inconclusive for ship pixels. If ships have valid position data, the lighting calculation may be producing zero output.
+
+#### Hypothesis
+
+One or more terms in the deferred lighting calculation is zero, causing the final output to be zero:
+
+```glsl
+outRgb = computeLighting(...) * diffuseLightColor * attenuation * area_norm;
+```
+
+Possible zero terms:
+1. **`diffuseLightColor`** — Light color uniform is zero or not set
+2. **`attenuation`** — Distance attenuation calculates to zero (light too far, radius wrong)
+3. **`area_norm`** — Area normalization term is zero
+4. **`computeLighting()` result** — Lighting function returns zero (NdotL=0, specular=0, diffuse=0)
+5. **`diffColor`** — G-buffer color is zero (texture sampling failed)
+6. **`normal`** — G-buffer normal is invalid, causing NdotL=0
 
 #### Architecture Check
 
 1. **What would make this NOT a bug?**
-   The discard condition is intentional—it skips pixels with no geometry. If the position buffer correctly contains zeros for empty pixels, the discard is correct behavior. The bug would be that pixels WITH geometry also have zero positions.
+   The lighting could legitimately be zero if lights are too far away, pointing wrong direction, or disabled. However, this would affect all deferred geometry, not just ships.
 
 2. **Expected collateral damage if true:**
-   All deferred-rendered geometry would be invisible (discarded). This matches observed symptoms.
+   All deferred-rendered objects would be dark/invisible. This matches observed symptoms.
 
 3. **Why might engineers have written it this way?**
-   The discard condition optimizes the deferred pass by skipping empty pixels. The assumption is that the G-buffer position attachment contains valid world-space positions for rendered geometry.
+   The lighting calculation is standard PBR. Each term has a physical meaning. Zero output typically indicates missing or invalid input data.
 
 #### Proposed Instrumentation
 
-**A. Verify shader binary is current**
-- What to check: Timestamp of embedded SPIR-V vs source file
-- Where: Build system / embedded resource
-- Supporting result: Old timestamp indicates stale binary
-- Contradicting result: Timestamps match
+**A. Constant output test**
+- What to do: Replace final output with constant yellow `vec4(1,1,0,1)` after lighting calculation
+- Where: End of `main()` in `deferred.frag`
+- Supporting result: Ships appear yellow → lighting path executes, something in calculation is zero
+- Contradicting result: Ships still invisible → something prevents reaching end of main()
 
-**B. Verify G-buffer layout transition**
-- What to log: `oldLayout` and `newLayout` for position attachment at `endDeferredGeometry()`
-- Where: `VulkanRenderingSession::transitionGBufferForSampling()` or equivalent
-- Supporting result: Transition missing or incorrect (not `eShaderReadOnlyOptimal`)
-- Contradicting result: Correct transition to `eShaderReadOnlyOptimal`
-
-**C. Verify descriptor binding**
-- What to log: Image view handles bound to deferred descriptor set vs actual G-buffer attachment views
-- Where: `bindDeferredGlobalDescriptors()`
-- Supporting result: Mismatch between bound views and G-buffer views
-- Contradicting result: Views match
-
-**D. Sample G-buffer content**
-- What to log: Read back a pixel from position attachment after geometry pass
-- Where: After `endDeferredGeometry()`, before deferred lighting
-- Supporting result: Position is (0,0,0,0) where ships should be
-- Contradicting result: Position has valid world-space coordinates
+**B. Term-by-term output**
+- What to do: Output each term as color to identify which is zero:
+  - `fragOut0 = vec4(diffuseLightColor, 1.0);` — Is light color valid?
+  - `fragOut0 = vec4(attenuation, attenuation, attenuation, 1.0);` — Is attenuation valid?
+  - `fragOut0 = vec4(diffColor, 1.0);` — Is G-buffer color valid?
+  - `fragOut0 = vec4(normal * 0.5 + 0.5, 1.0);` — Is G-buffer normal valid?
+  - `fragOut0 = vec4(NdotL, NdotL, NdotL, 1.0);` — Is N·L valid?
 
 #### Evidence
 
-**Instrumentation results (Frame 197 analysis):**
-- Layout transitions: Verified. G-buffers transition `ColorAttachment` → `ShaderReadOnlyOptimal`
-- Descriptor bindings: Verified. G-buffer textures bound to deferred lighting descriptor set
-- Pipeline sequence: Verified. Clear → Draw → End → Deferred Lighting → Swapchain
-- G-buffer draws: 27 per frame with index counts 36-2490
-- Deferred lighting draws: 5 lights (ambient + 3 point + directional)
-- Viewport: 3840×2160, viewportHeight -2160 (correct for Vulkan)
-
-**Still pending:**
-- G-buffer content sampling (is position non-zero where ships are drawn?)
-- Deferred shader texture read verification
+Pending instrumentation. Requires H23 follow-up test to confirm shader executes for ship pixels.
 
 #### Conclusion
 
-Pipeline execution is verified correct. All stages run in proper sequence with correct viewport and scissor settings. The remaining unknown is whether the G-buffer contains valid position data. If position data is zero or near-zero, the deferred shader's discard condition would trigger, causing all fragments to be discarded.
+Pending. This hypothesis is contingent on H23 follow-up confirming that ship pixels have valid position data and the deferred shader executes for them. If H23 follow-up shows cyan ships, H24 becomes the primary candidate.
+
+---
+
+### Hypothesis 26: Float16 G-buffer position overflow
+
+**Status: PENDING**
+
+#### Observation
+
+Ships are invisible. G-buffer format is `VK_FORMAT_R16G16B16A16_SFLOAT` (16-bit float). Maximum representable value for Float16 is approximately 65,504.
+
+#### Hypothesis
+
+If the G-buffer stores world-space coordinates and ships are located beyond ±65,504 units from the origin:
+
+1. Position stored in G-buffer overflows to infinity
+2. `LightVector = LightPos - Position` → `LightPos - Inf = -Inf`
+3. `Attenuation = 1.0 / dot(LightVector, LightVector)` → `1.0 / Inf = 0.0`
+4. All lighting terms multiply by zero, producing black output
+
+Note: The `dot(position, position) < 1.0e-8` check would return false for infinity (not triggering the discard), allowing the shader to continue with corrupted data.
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   If the G-buffer stores view-space positions (relative to camera), values are bounded by the view frustum and overflow is unlikely.
+
+2. **Expected collateral damage if true:**
+   - Objects near world origin (0,0,0) would render correctly
+   - Objects far from origin would be black/invisible
+   - Objects at threshold (~30k-60k units) would show banding artifacts
+
+3. **Why might engineers have written it this way?**
+   Float16 saves memory bandwidth. World-space storage may have been inherited from a different coordinate system or overlooked during format selection.
+
+#### Proposed Instrumentation
+
+**A. Coordinate space verification**
+- Check `model.frag` to determine if `vPosition` is view-space or world-space
+- Check vertex shader to see what space positions are output in
+
+**B. Infinity detection in shader**
+```glsl
+if (isinf(position.x) || isinf(position.y) || isinf(position.z)) {
+    fragOut0 = vec4(1.0, 0.0, 0.0, 1.0);  // Red = overflow detected
+    return;
+}
+```
+
+**C. Teleport test**
+- Move ship/camera to world origin (0,0,0) and observe if ships become visible
+
+#### Evidence
+
+Pending instrumentation.
+
+#### Conclusion
+
+Pending. Requires verification of coordinate space used in G-buffer and overflow detection test.
+
+---
+
+### Hypothesis 27: Depth test enabled on fullscreen lighting pass
+
+**Status: PENDING**
+
+#### Observation
+
+Ships appear invisible (nebula visible through them) rather than as black silhouettes. This distinction suggests the deferred lighting shader may not execute for ship pixels at all.
+
+#### Hypothesis
+
+The fullscreen deferred lighting passes (AMBIENT, DIRECTIONAL) have depth testing incorrectly enabled with `VK_COMPARE_OP_LESS_OR_EQUAL`.
+
+Mechanism:
+1. Fullscreen quad is drawn at Z=1.0 (far plane)
+2. Ship geometry wrote depth Z < 1.0 during G-buffer pass
+3. Depth test: `1.0 <= ship_depth` fails
+4. Fragment shader is culled before execution
+5. Pixel retains previous value (cleared background or nebula)
+
+This would cause ships to appear transparent/invisible rather than black.
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   Depth testing is intentionally disabled for fullscreen passes. Only volumetric light passes (point/spot light spheres) require depth testing.
+
+2. **Expected collateral damage if true:**
+   All deferred geometry would be invisible against any background that was rendered before the deferred pass.
+
+3. **Why might engineers have written it this way?**
+   Point light pipelines require depth testing for light volume culling. This configuration may have been incorrectly copied to fullscreen pass pipelines.
+
+#### Proposed Instrumentation
+
+**A. Pipeline state inspection**
+- Log `VkPipelineDepthStencilStateCreateInfo` for AMBIENT and DIRECTIONAL pipelines
+- Specifically check `depthTestEnable` and `depthCompareOp`
+
+**B. Force disable depth test**
+- Set `depthTestEnable = VK_FALSE` for fullscreen lighting passes
+- Observe if ships become visible (as black silhouettes or lit)
+
+#### Evidence
+
+Pending instrumentation.
+
+#### Conclusion
+
+Pending. H23 follow-up test will help disambiguate: if ships remain invisible with cyan output forced, shader is not executing (supports H27).
+
+---
+
+### Hypothesis 28: Coordinate space mismatch between G-buffer and lights
+
+**Status: PENDING**
+
+#### Observation
+
+Ships are invisible. Position data may be valid but lighting produces zero output.
+
+#### Hypothesis
+
+The G-buffer stores positions in one coordinate space (e.g., view-space) but light uniforms are provided in a different space (e.g., world-space), or vice versa.
+
+Example:
+- G-buffer position: view-space `(0, 0, 10)` (10 units in front of camera)
+- Light position: world-space `(10000, 5000, 3000)`
+- Distance calculation: `length(lightPos - fragPos)` = ~11,000 units
+- Attenuation: `1.0 / (11000²)` ≈ 0.000000008 ≈ 0
+
+Even nearby lights would appear infinitely far away due to the space mismatch.
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   Both G-buffer positions and light positions are consistently in the same coordinate space (typically view-space for deferred rendering).
+
+2. **Expected collateral damage if true:**
+   All deferred lighting would be near-zero. No objects would be lit correctly.
+
+3. **Why might engineers have written it this way?**
+   Coordinate space conventions may differ between the geometry pass (model.frag) and the lighting pass (deferred.frag). Porting from OpenGL or another renderer may have introduced inconsistencies.
+
+#### Proposed Instrumentation
+
+**A. Verify coordinate spaces**
+- In `model.frag`: determine what space `vPosition` is in (check vertex shader output)
+- In `deferred.frag`: determine what space light positions are expected in (check uniform buffer layout)
+
+**B. Visualize distance**
+```glsl
+float dist = length(lightPos.xyz - position.xyz);
+fragOut0 = vec4(vec3(dist * 0.001), 1.0);  // White = huge distance
+```
+If ships appear white (huge distance) when near a light, spaces are mismatched.
+
+#### Evidence
+
+Pending instrumentation.
+
+#### Conclusion
+
+Pending. Requires verification of coordinate spaces in both geometry and lighting shaders.
+
+---
+
+### Hypothesis 29: Zero normals from invalid vertex data
+
+**Status: PENDING**
+
+#### Observation
+
+Deferred lighting executes for ship pixels but produces zero/near-zero output. Position buffer contains valid data. Skybox renders correctly with lighting.
+
+#### Hypothesis
+
+The normal term in the lighting calculation is zero or invalid because ship model vertex normals are not being correctly fetched or transformed in the deferred geometry pass, leading to dot product of zero in lighting equations (`NdotL = 0`).
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   An intentional optimization or shader variant where normals are discarded for certain materials, or a dynamic state where normals are computed on-the-fly in the lighting shader rather than stored in G-buffer.
+
+2. **Expected collateral damage if true:**
+   Any lit geometry relying on normals (specular highlights on other models, particles) would also be unlit or incorrectly lit. Skybox normals would fail similarly if using the same path—but skybox renders correctly, which may contradict this hypothesis.
+
+3. **Why might engineers have written it this way?**
+   To support flat-shaded or unlit materials efficiently by allowing absent normals (via MODEL_OFFSET_ABSENT sentinel), reducing vertex buffer size for performance.
+
+#### Proposed Instrumentation
+
+**A. Visualize G-buffer normals**
+```glsl
+// In deferred.frag
+fragOut0 = vec4(normal * 0.5 + 0.5, 1.0);  // Remap [-1,1] to [0,1] for visualization
+return;
+```
+- Ships appear grey (0.5, 0.5, 0.5) → normals are zero
+- Ships appear colored → normals are valid
+
+**B. Check normal offset in vertex pulling**
+- Log `normalOffset` value in model draw calls
+- Verify it's not MODEL_OFFSET_ABSENT
+
+#### Evidence
+
+Pending instrumentation.
+
+#### Conclusion
+
+Pending.
+
+---
+
+### Hypothesis 30: Attenuation factor clamped to zero
+
+**Status: PENDING**
+
+#### Observation
+
+Deferred lighting path runs but outputs zero. Valid positions confirmed, but ships invisible while skybox (potentially using ambient-only path) shows.
+
+#### Hypothesis
+
+The attenuation term computes to zero for ship pixels because light positions/distances in DeferredLightUBO are incorrectly set relative to ship positions, causing all lights to be out-of-range for finite-attenuation models.
+
+Mechanism:
+- Light radius set too small
+- Light positions incorrect
+- Attenuation formula produces near-zero for actual distances
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   Ships are intentionally placed beyond max light radius for a scene-specific effect, or attenuation is overridden per-light via shader flags.
+
+2. **Expected collateral damage if true:**
+   Point/tube lights would fail to illuminate nearby objects like particles or debris. Distant skybox would be unaffected if using ambient-only path, matching observation.
+
+3. **Why might engineers have written it this way?**
+   To enforce physically-based falloff, preventing over-brightness in dense scenes, with attenuation computed in shader for flexibility across light types.
+
+#### Proposed Instrumentation
+
+**A. Visualize attenuation**
+```glsl
+// In deferred.frag, after computing attenuation
+fragOut0 = vec4(attenuation, attenuation, attenuation, 1.0);
+return;
+```
+- Ships appear black → attenuation is zero
+- Ships appear grey/white → attenuation is valid
+
+**B. Log light data**
+- Log light positions, radii, and attenuation parameters from DeferredLightUBO
+- Compare with ship positions
+
+#### Evidence
+
+Pending instrumentation.
+
+#### Conclusion
+
+Pending.
+
+---
+
+### Hypothesis 31: Diffuse color albedo is black/zero
+
+**Status: PENDING**
+
+#### Observation
+
+Lighting calculation yields zero despite valid positions and execution. Ships invisible, but skybox (possibly using different material) visible.
+
+#### Hypothesis
+
+The `diffColor` term (albedo from G-buffer color attachment) is zero/black because base map textures for ships are not bound or are fully transparent/black in the deferred geometry pass, multiplying lighting to zero.
+
+Possible causes:
+- Texture not bound to bindless slot
+- Texture sampling returns black (wrong UV, mipmap issue)
+- Texture format mismatch
+- Alpha channel causing discard
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   Ships use a special "invisible" material where albedo is zero for stealth effects, or color is modulated post-lighting in a separate pass.
+
+2. **Expected collateral damage if true:**
+   Unlit ships would still show if using emissive/glow maps, but they're invisible. Other textured geometry (UI elements) would also be black if sharing the bindless texture path.
+
+3. **Why might engineers have written it this way?**
+   To allow runtime material overrides via push constants (e.g., flags skipping baseMapIndex), enabling efficient cloaking or damage effects without texture swaps.
+
+#### Proposed Instrumentation
+
+**A. Visualize G-buffer albedo**
+```glsl
+// In deferred.frag
+vec4 albedo = texture(gBufferColor, texCoord);
+fragOut0 = vec4(albedo.rgb, 1.0);
+return;
+```
+- Ships appear black → albedo is zero (texture issue)
+- Ships appear textured → albedo is valid
+
+**B. Force albedo in model.frag**
+```glsl
+// In model.frag
+outColor = vec4(1.0, 0.0, 0.0, 1.0);  // Force red albedo
+```
+- Ships appear red in deferred → albedo reaching G-buffer
+- Ships still invisible → issue elsewhere
+
+#### Evidence
+
+Pending instrumentation.
+
+#### Conclusion
+
+Pending.
+
+---
+
+### Hypothesis 32: computeLighting() returns zero due to missing lights
+
+**Status: PENDING**
+
+#### Observation
+
+Zero lighting output in deferred path for ships. Position data valid, but no visible contribution from lights.
+
+#### Hypothesis
+
+The `computeLighting()` function (or equivalent in shader) sums to zero because no lights are being built or uploaded to DeferredLightUBO for the frame, possibly due to a failure in `buildDeferredLights()` filtering out all ship-relevant lights.
+
+Possible causes:
+- Light culling incorrectly excludes all lights
+- Light count is zero in UBO
+- Light data not uploaded (missing barrier, wrong buffer)
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   A per-frame optimization culls lights outside view frustum, and ships are in a lightless region intentionally.
+
+2. **Expected collateral damage if true:**
+   All deferred-lit geometry would be dark, including skybox if it uses the same light list. But skybox shows, suggesting skybox bypasses deferred lights (uses ambient-only or separate path).
+
+3. **Why might engineers have written it this way?**
+   To minimize UBO uploads by dynamically building light variants (Fullscreen/Sphere/Cylinder) only for active lights, reducing GPU bandwidth in light-heavy scenes.
+
+#### Proposed Instrumentation
+
+**A. Log light count**
+- In `recordDeferredLighting()`, log the number of lights being rendered
+- Already partially instrumented: logs show "lightCount: 5" per frame
+
+**B. Visualize light contribution**
+```glsl
+// In deferred.frag
+fragOut0 = vec4(diffuseLightColor, 1.0);
+return;
+```
+- Ships appear black → light color is zero
+- Ships appear colored → light color is valid
+
+**C. Force constant light**
+```glsl
+// In deferred.frag
+vec3 forcedLight = vec3(1.0, 1.0, 1.0);
+fragOut0 = vec4(albedo.rgb * forcedLight, 1.0);
+return;
+```
+- Ships appear textured → lighting calculation is the issue
+- Ships still invisible → issue is upstream (albedo, position, or shader not executing)
+
+#### Evidence
+
+Partial evidence exists: Frame 197 analysis shows "lightCount: 5" per frame (ambient + 3 point + directional). Lights appear to be present.
+
+#### Conclusion
+
+Pending. Light count appears non-zero based on existing logs, but light data validity not yet confirmed.
+
+---
+
+### Hypothesis 33: View matrix Z inversion causes geometry to render behind camera
+
+**Status: TESTING**
+
+#### Observation
+
+H23 follow-up test (2025-12-18) with multi-color diagnostic shader revealed:
+
+1. One large ship (destroyer/station) appeared CYAN when player turned 180°
+2. The ship was visually located behind the player, but game logic (physics, targeting) placed it in front
+3. All other ships remained invisible — no diagnostic colors visible at any angle
+4. The visible geometry may be from HUD targeting box rendering, not main 3D view
+
+**Additional observation (2025-12-18):**
+
+Reproducible test with clean shaders (no diagnostic code):
+1. Load mission, turn off engines, do 180° turn
+2. Station geometry visible at location opposite to its actual position
+3. Turn toward actual station location — geometry no longer visible
+4. Move camera to screen edge — geometry reappears at edge
+
+This behavior is consistent with an inverted frustum or view transform, though other causes remain possible.
+
+#### Hypothesis
+
+The view matrix used in the Vulkan geometry pass has an inverted Z axis (or equivalent coordinate system error), causing:
+
+1. Objects in front of the camera to transform to negative Z in view space
+2. Projection to place these objects behind the near plane (culled) or behind the camera
+3. Large objects to partially span the mirrored frustum, appearing visible when player turns around
+4. Smaller objects to be entirely off-screen in the mirrored space
+
+This would explain why:
+- Physics/game logic has correct positions (uses different transform path)
+- Visual rendering shows objects at mirrored locations
+- Only one large object is visible (spans enough space to appear in mirrored frustum)
+- Smaller ships are completely invisible (mirrored position is fully off-screen)
+
+#### Architecture Check
+
+1. **What would make this NOT a bug?**
+   The coordinate system might be intentionally different for Vulkan (right-hand vs left-hand, Y-up vs Z-up). However, this would typically be handled in the projection matrix, not the view matrix, and would affect all rendering uniformly.
+
+2. **Expected collateral damage if true:**
+   - All 3D geometry would be mirrored/inverted
+   - HUD elements rendered in screen space would be unaffected
+   - Forward-rendered objects (targeting box) might use a different matrix path and render correctly
+
+3. **Why might engineers have written it this way?**
+   The view matrix construction in `matrix.cpp:30-47` negates position and forward vector:
+   ```cpp
+   vm_vec_copy_scale(&scaled_pos, pos, -1.0f);
+   vm_vec_scale(&scaled_orient.vec.fvec, -1.0f);
+   ```
+   This is standard for OpenGL-style view matrix. If Vulkan expects different conventions (or if there's a sign error elsewhere), the result would be inverted geometry.
+
+#### Proposed Instrumentation
+
+**A. Position-Z visualization (ACTIVE)**
+
+Modified `deferred.frag` to visualize position Z sign:
+```glsl
+float zSign = position.z < 0.0 ? 1.0 : 0.0;
+float depth = clamp(abs(position.z) / 1000.0, 0.0, 1.0);
+fragOut0 = vec4(zSign, depth, 1.0, 1.0);
+```
+
+**Interpretation:**
+| Color | Meaning |
+|-------|---------|
+| Purple/Magenta (R=1, B=1) | Z is negative — geometry behind camera in view space |
+| Cyan/Teal (G+B, no R) | Z is positive — geometry in front of camera |
+| Brighter green component | Farther from camera |
+| No blue | No geometry at that pixel |
+
+**Expected results if H33 is correct:**
+- Ships show purple/magenta (negative Z) when they should show cyan (positive Z)
+- Large destroyer shows purple but is still visible due to size spanning frustum
+
+**B. Compare OpenGL and Vulkan view matrices**
+- Log `gr_view_matrix` values at render time for both backends
+- Check for sign differences in Z-related components
+
+**C. Force identity view matrix**
+- Temporarily set view matrix to identity in Vulkan path
+- If ships appear at screen center, view matrix is the issue
+
+#### Evidence
+
+**Instrumentation results (2025-12-18):**
+
+Log comparison of GPU vs CPU view matrices:
+
+| Source | Forward Vector (fvec) | Z Sign |
+|--------|----------------------|--------|
+| GPU `gr_view_matrix` | `{x:0.012859, y:0.135177, z:-0.990738}` | Negative |
+| CPU `View_matrix` | `{x:-0.012741, y:-0.135188, z:0.990738}` | Positive |
+
+Difference magnitude: 2.277441 (vectors point in opposite directions along Z)
+
+Object position in view space from log:
+```
+viewPos: {x:-12.196, y:-26.455, z:-16.950}
+```
+Objects transformed with GPU matrix have negative Z.
+
+**Relevant code paths:**
+
+1. `create_view_matrix()` in `matrix.cpp:38` negates the forward vector:
+   ```cpp
+   vm_vec_scale(&scaled_orient.vec.fvec, -1.0f);
+   ```
+
+2. `g3_set_view_matrix()` in `3dsetup.cpp` assigns the matrix directly without negation.
+
+3. Frustum culling in `3dmath.cpp` uses `z < MIN_Z` to check if objects are behind camera.
+
+**Observations:**
+
+- GPU view matrix (used for rendering) has negative Z forward
+- CPU View_matrix (used for frustum culling) has positive Z forward
+- This mismatch means objects passing CPU frustum culling (positive Z = in front) may have negative Z in GPU space
+- The relationship between these two matrices and the observed rendering behavior requires further analysis
+
+#### Attempted Fix #1 (2025-12-18)
+
+Changes applied:
+1. `3dsetup.cpp`: Negate forward vector in `g3_set_view_matrix()`
+2. `3dmath.cpp`: Change frustum culling from `z < MIN_Z` to `z > -MIN_Z`
+
+**Result: FAILED**
+
+- Controls became inverted
+- Ship still renders at wrong position
+- Ship still disappears when facing actual location
+
+The attempted fix did not resolve the issue and introduced new problems.
+
+#### Attempted Fix #2 (2025-12-18)
+
+Re-analysis of logs showed:
+- Objects have negative Z in view space (e.g., `z:-3133.889`)
+- Negative Z is forward in OpenGL convention
+- Original `z < MIN_Z` check marks negative Z (in front) as behind — incorrect
+
+Changes applied:
+1. Reverted `g3_set_view_matrix()` negation from Fix #1
+2. Changed frustum culling from `z < MIN_Z` to `z > MIN_Z` in `3dmath.cpp` (lines 41 and 154)
+
+Rationale: If negative Z is forward, then:
+- Negative Z = in front of camera (should pass culling)
+- Positive Z = behind camera (should be culled)
+- `z > MIN_Z` marks positive Z as behind
+
+**Result: FAILED**
+
+- OpenGL geometry now disappearing
+- Frustum culling code in `3dmath.cpp` is shared between OpenGL and Vulkan
+- Changing culling logic breaks the working OpenGL backend
+
+This indicates the original culling logic (`z < MIN_Z`) was correct for OpenGL. The issue is Vulkan-specific and should not be fixed by modifying shared culling code.
+
+#### Attempted Fix #3 (2025-12-18)
+
+Additional frustum plane changes applied:
+- Changed `x > z` to `x > -z`, `x < -z` to `x < z`, etc.
+- Attempting to align frustum checks with "negative Z forward" convention
+
+**Result: FAILED**
+
+Objects continued to disappear. Analysis went in circles with Cursor questioning its own changes.
+
+#### Key Insight
+
+User observation: In the initial v1 Vulkan implementation, objects rendered correctly (though with wrong colors). No core engine logic (including frustum culling) was modified in v1.
+
+**This rules out frustum culling as the cause.** If culling were broken, v1 Vulkan wouldn't have rendered objects at all.
+
+#### Conclusion
+
+The frustum culling investigation was a dead end. All changes to `3dmath.cpp` and `3dsetup.cpp` have been reverted.
+
+The issue must be in Vulkan-specific code that changed since v1, not in shared engine infrastructure. Future investigation should focus on:
+1. What changed in Vulkan rendering path since v1
+2. Vulkan-specific matrix handling or shader differences
+3. Descriptor binding or resource management changes
 
 ---
 
@@ -949,6 +1624,17 @@ Pipeline execution is verified correct. All stages run in proper sequence with c
 | 20. Blending/write mask mismatch | REJECTED | No (blend/mask/format verified) |
 | 21. Deferred disabled, forward broken | SUPERSEDED | No (premise invalidated) |
 | 22. DEBUG block in model.frag | REJECTED | No (contributing factor, not root cause) |
-| **23. G-buffer position zero/invalid** | **PENDING** | **Primary candidate** |
+| 23. G-buffer position zero/invalid | INCONCLUSIVE | Unknown (test indeterminate for ships) |
+| 24. Lighting calculation produces zero | PENDING | Unknown (depends on H23 follow-up) |
+| 26. Float16 position overflow | PENDING | Unknown |
+| 27. Depth test on fullscreen lighting pass | PENDING | Unknown (depends on H23 follow-up) |
+| 28. Coordinate space mismatch | PENDING | Unknown |
+| 29. Zero normals from vertex data | PENDING | Unknown |
+| 30. Attenuation clamped to zero | PENDING | Unknown |
+| 31. Diffuse color albedo is black | PENDING | Unknown |
+| 32. Missing lights in UBO | PENDING | Partially contradicted (lightCount: 5 observed) |
+| 33. View matrix Z inversion | REJECTED | No (frustum culling ruled out) |
 
-**Current Status:** Shader and pipeline verified correct. Layout transitions, descriptor bindings, blend state, write mask, and format all confirmed working. Ships remain invisible. Investigation focuses on H23: G-buffer content verification — does the position buffer contain valid data, or is it zero/invalid triggering the deferred shader's discard condition?
+**Current Status:** H33 frustum culling investigation was a dead end. User confirmed v1 Vulkan rendered objects correctly without modifying core engine logic. Changes to shared culling code broke OpenGL and did not fix Vulkan. All changes reverted.
+
+**Next Step:** Investigate what changed in Vulkan-specific code since v1 that could cause the position anomaly.
