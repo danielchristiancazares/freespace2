@@ -3,6 +3,8 @@
 #include "globalincs/pstypes.h"
 
 using SPIRV_FLOAT_MAT_4x4 = matrix4;
+using SPIRV_FLOAT_MAT_3x3 = matrix;
+using SPIRV_FLOAT_VEC2 = vec2d;
 using SPIRV_FLOAT_VEC3 = vec3d;
 using SPIRV_FLOAT_VEC4 = vec4;
 

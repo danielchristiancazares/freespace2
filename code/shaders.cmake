@@ -3,14 +3,18 @@ set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/graphics/shaders")
 # This is the legacy location of shader code. To avoid duplicating included files, this is added as an include directory
 set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 
-set(VULKAN_SHADERS
-	${SHADER_DIR}/vulkan.frag
-	${SHADER_DIR}/vulkan.vert
-	${SHADER_DIR}/model.frag
-	${SHADER_DIR}/model.vert
-	${SHADER_DIR}/deferred.frag
-	${SHADER_DIR}/deferred.vert
-)
+	set(VULKAN_SHADERS
+		${SHADER_DIR}/vulkan.frag
+		${SHADER_DIR}/vulkan.vert
+		${SHADER_DIR}/model.frag
+		${SHADER_DIR}/model.vert
+		${SHADER_DIR}/deferred.frag
+		${SHADER_DIR}/deferred.vert
+		${SHADER_DIR}/nanovg.frag
+		${SHADER_DIR}/nanovg.vert
+		${SHADER_DIR}/rocketui.frag
+		${SHADER_DIR}/rocketui.vert
+	)
 
 set(SHADERS
 	${SHADER_DIR}/default-material.frag
