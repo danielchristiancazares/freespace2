@@ -159,6 +159,8 @@ class VulkanTextureManager {
 		void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		void processPendingDestructions(uint64_t completedSerial);
+		const std::vector<int>& getNewlyResidentTextures() const { return m_newlyResidentTextures; }
+		void clearNewlyResidentTextures() { m_newlyResidentTextures.clear(); }
 
 	// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
 	std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
@@ -207,6 +209,9 @@ class VulkanTextureManager {
 
 	// Fallback "black" texture for retired slots (initialized at startup)
 	int m_fallbackTextureHandle = -1;
+	
+	// Textures that became Resident in markUploadsCompleted and need descriptor write
+	std::vector<int> m_newlyResidentTextures;
 
 	// Pending destructions: {textureHandle, retireSerial}
 	std::vector<std::pair<int, uint64_t>> m_pendingDestructions;

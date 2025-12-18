@@ -1,7 +1,7 @@
 Param(
     [string]$Dump,
 
-    [string]$SymbolPath = "build\bin\Debug",
+    [string]$SymbolPath = "build\bin",
 
     [string]$CdbPath = "C:\Users\danie\AppData\Local\Microsoft\WindowsApps\cdbx64.exe",
 
@@ -14,15 +14,15 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 
 if ($Help) {
-    Write-Host "Analyzes the newest fs2_*.mdmp dump under build\bin\Debug by default."
+    Write-Host "Analyzes the newest fs2_open_*.mdmp dump under build\bin by default."
     Write-Host ""
     Write-Host "Usage:"
-    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\analyze_minidump.ps1"
-    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\analyze_minidump.ps1 -Dump path\to\dump.mdmp"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\analyze.ps1"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\analyze.ps1 -Dump path\to\dump.mdmp"
     Write-Host ""
     Write-Host "Optional parameters:"
-    Write-Host "  -Dump        Specific dump file (otherwise newest fs2_*.mdmp is used)"
-    Write-Host "  -SymbolPath  Directory containing symbols (default: build\bin\Debug)"
+    Write-Host "  -Dump        Specific dump file (otherwise newest dump is used)"
+    Write-Host "  -SymbolPath  Directory containing symbols (default: build\bin)"
     Write-Host "  -CdbPath     Path to cdbx64.exe (default: $CdbPath)"
     exit 0
 }
@@ -32,23 +32,35 @@ function Get-LatestDump {
         [string]$SearchRoot
     )
 
-    $pattern = "fs2_*.mdmp"
-    $dumpDir = Join-Path $SearchRoot "build\bin\Debug"
-    if (-not (Test-Path -LiteralPath $dumpDir)) {
-        return $null
+    $dumpDirs = @(
+        (Join-Path $SearchRoot "build\bin"),
+        (Join-Path $SearchRoot "build\bin\Debug")
+    )
+
+    foreach ($dumpDir in $dumpDirs) {
+        if (-not (Test-Path -LiteralPath $dumpDir)) {
+            continue
+        }
+
+        $patterns = @("fs2_open_*.mdmp", "fs2_*.mdmp", "*.mdmp")
+        foreach ($pattern in $patterns) {
+            $latest = Get-ChildItem -Path $dumpDir -Filter $pattern -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+
+            if ($latest) {
+                return $latest
+            }
+        }
     }
 
-    $latest = Get-ChildItem -Path $dumpDir -Filter $pattern -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
-
-    return $latest
+    return $null
 }
 
 if (-not $Dump) {
     $candidate = Get-LatestDump -SearchRoot $RepoRoot
     if (-not $candidate) {
-        Write-Error "No dump files matching fs2_*.mdmp found under $RepoRoot\build\bin\Debug. Provide -Dump explicitly."
+        Write-Error "No dump files found under $RepoRoot\build\bin (or build\bin\Debug). Provide -Dump explicitly."
     }
     $Dump = $candidate.FullName
     Write-Host "Using latest dump: $Dump"
