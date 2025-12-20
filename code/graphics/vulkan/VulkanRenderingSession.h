@@ -6,7 +6,6 @@
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace graphics {
@@ -14,21 +13,45 @@ namespace vulkan {
 
 class VulkanRenderingSession {
 public:
-    struct RenderTargetInfo {
+  struct RenderTargetInfo {
     vk::Format colorFormat = vk::Format::eUndefined;
     uint32_t colorAttachmentCount = 1;
     vk::Format depthFormat = vk::Format::eUndefined; // eUndefined => no depth attachment
   };
 
-    VulkanRenderingSession(VulkanDevice& device,
-      VulkanRenderTargets& targets);
+  // RAII guard for active render pass - destruction calls endRendering()
+  struct ActivePass {
+    vk::CommandBuffer cmd{};
+    explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
+    ~ActivePass() { if (cmd) cmd.endRendering(); }
+
+    ActivePass(const ActivePass&) = delete;
+    ActivePass& operator=(const ActivePass&) = delete;
+    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd) { other.cmd = vk::CommandBuffer{}; }
+    ActivePass& operator=(ActivePass&& other) noexcept {
+      if (this != &other) {
+        if (cmd) cmd.endRendering();
+        cmd = other.cmd;
+        other.cmd = vk::CommandBuffer{};
+      }
+      return *this;
+    }
+  };
+
+  struct RenderScope {
+    RenderTargetInfo info;
+    ActivePass guard;
+  };
+
+  VulkanRenderingSession(VulkanDevice& device,
+    VulkanRenderTargets& targets);
 
     // Frame boundaries - called by VulkanRenderer
     void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
     void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
 
-  // Starts dynamic rendering for the *current target* if needed; returns the *actual* target contract.
-  const RenderTargetInfo& ensureRenderingActive(vk::CommandBuffer cmd, uint32_t imageIndex);
+  // Starts dynamic rendering for the *current target*; returns scope that ends the pass on destruction.
+  RenderScope beginRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
 
   // Boundary-facing state transitions (no "pending", no dual state)
   void requestSwapchainTarget();                  // swapchain + depth
@@ -50,8 +73,8 @@ public:
   bool depthTestEnabled() const { return m_depthTest; }
   bool depthWriteEnabled() const { return m_depthWrite; }
 
-    // Dynamic state application (public - called by VulkanRenderer)
-    void applyDynamicState(vk::CommandBuffer cmd);
+  // Dynamic state application (public - called by VulkanRenderer)
+  void applyDynamicState(vk::CommandBuffer cmd);
 
 private:
   // Base class for render target states - polymorphic by design
@@ -80,22 +103,24 @@ private:
     void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
-  // RAII guard for active render pass - destruction calls endRendering()
-  struct ActivePass {
-    vk::CommandBuffer cmd{};
-    explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
-    ~ActivePass() { if (cmd) cmd.endRendering(); }
+  struct ClearOps {
+    vk::AttachmentLoadOp color = vk::AttachmentLoadOp::eLoad;
+    vk::AttachmentLoadOp depth = vk::AttachmentLoadOp::eLoad;
+    vk::AttachmentLoadOp stencil = vk::AttachmentLoadOp::eLoad;
 
-    ActivePass(const ActivePass&) = delete;
-    ActivePass& operator=(const ActivePass&) = delete;
-    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd) { other.cmd = nullptr; }
-    ActivePass& operator=(ActivePass&& other) noexcept {
-      if (this != &other) {
-        if (cmd) cmd.endRendering();
-        cmd = other.cmd;
-        other.cmd = nullptr;
-      }
-      return *this;
+    static ClearOps clearAll()
+    {
+      return { vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear };
+    }
+
+    static ClearOps loadAll()
+    {
+      return { vk::AttachmentLoadOp::eLoad, vk::AttachmentLoadOp::eLoad, vk::AttachmentLoadOp::eLoad };
+    }
+
+    ClearOps withDepthStencilClear() const
+    {
+      return { color, vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear };
     }
   };
 
@@ -113,25 +138,22 @@ private:
   void transitionGBufferToAttachment(vk::CommandBuffer cmd);
   void transitionGBufferToShaderRead(vk::CommandBuffer cmd);
 
-    VulkanDevice& m_device;
-    VulkanRenderTargets& m_targets;
+  VulkanDevice& m_device;
+  VulkanRenderTargets& m_targets;
 
   // Target state - single truth, no pending/active duality
   std::unique_ptr<RenderTargetState> m_target;
-  std::optional<ActivePass> m_activePass;
   RenderTargetInfo m_activeInfo{};
 
-    // Clear state
-    std::array<float, 4> m_clearColor{0.f, 0.f, 0.f, 1.f};
-    float m_clearDepth = 1.0f;
-    bool m_shouldClearColor = true;
-    bool m_shouldClearDepth = true;
-    bool m_shouldClearStencil = true;
+  // Clear state
+  std::array<float, 4> m_clearColor{0.f, 0.f, 0.f, 1.f};
+  float m_clearDepth = 1.0f;
+  ClearOps m_clearOps = ClearOps::clearAll();
 
-    // Dynamic state cache
-    vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;
-    bool m_depthTest = true;
-    bool m_depthWrite = true;
+  // Dynamic state cache
+  vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;
+  bool m_depthTest = true;
+  bool m_depthWrite = true;
 
     // Swapchain image layout tracking (per swapchain image index)
     std::vector<vk::ImageLayout> m_swapchainLayouts;

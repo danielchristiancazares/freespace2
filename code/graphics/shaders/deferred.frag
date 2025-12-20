@@ -180,6 +180,29 @@ void main()
 	vec4 normalData = texture(NormalBuffer, screenPos);
 	vec3 normal = normalize(normalData.xyz);
 
+	// #region agent log - H26, H29, H31: Diagnostic shader output
+	// H26: Check for Float16 position overflow (infinity)
+	bool hasInfPos = isinf(position.x) || isinf(position.y) || isinf(position.z);
+	// H29: Check for zero normals
+	bool hasZeroNormal = dot(normal, normal) < 0.01;
+	// H31: Check for black albedo
+	bool hasBlackAlbedo = dot(diffColor, diffColor) < 0.001;
+	
+	// Diagnostic output: Red=infinity, Green=zero normal, Blue=black albedo, Yellow=multiple issues
+	if (hasInfPos || hasZeroNormal || hasBlackAlbedo) {
+		if (hasInfPos && hasZeroNormal && hasBlackAlbedo) {
+			fragOut0 = vec4(1.0, 1.0, 0.0, 1.0); // Yellow = all issues
+		} else if (hasInfPos) {
+			fragOut0 = vec4(1.0, 0.0, 0.0, 1.0); // Red = infinity
+		} else if (hasZeroNormal) {
+			fragOut0 = vec4(0.0, 1.0, 0.0, 1.0); // Green = zero normal
+		} else if (hasBlackAlbedo) {
+			fragOut0 = vec4(0.0, 0.0, 1.0, 1.0); // Blue = black albedo
+		}
+		return;
+	}
+	// #endregion agent log
+
 	vec3 outRgb = vec3(0.0);
 
 	if (lightType == LT_AMBIENT) {
@@ -214,6 +237,25 @@ void main()
 			* diffuseLightColor
 			* attenuation
 			* area_norm;
+		
+		// #region agent log - H24, H30: Check if lighting calculation produces zero
+		// If output is near-zero, output diagnostic color to identify which term is zero
+		if (dot(outRgb, outRgb) < 0.001) {
+			// Magenta = lighting calculation produced zero
+			// Check individual terms
+			vec3 lightingTerm = computeLighting(specColor.rgb, diffColor, L, normal.xyz, halfVec, eyeDir, roughness, fresnel, NdotL);
+			if (dot(lightingTerm, lightingTerm) < 0.001) {
+				fragOut0 = vec4(1.0, 0.0, 1.0, 1.0); // Magenta = computeLighting zero
+			} else if (attenuation < 0.001) {
+				fragOut0 = vec4(1.0, 0.5, 0.0, 1.0); // Orange = attenuation zero
+			} else if (dot(diffuseLightColor, diffuseLightColor) < 0.001) {
+				fragOut0 = vec4(0.5, 0.0, 1.0, 1.0); // Purple = light color zero
+			} else {
+				fragOut0 = vec4(1.0, 1.0, 0.0, 1.0); // Yellow = area_norm or other term zero
+			}
+			return;
+		}
+		// #endregion agent log
 	}
 
 	fragOut0 = max(vec4(outRgb, 1.0), vec4(0.0));

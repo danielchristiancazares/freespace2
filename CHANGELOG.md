@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Automatically grows buffers when needed without duplicating resize logic
   - Simplifies `updateBufferData()` and `updateBufferDataOffset()` implementations
 - Restructured `VulkanRenderingSession` command recording and frame lifecycle for clarity
+- Vulkan render pass lifetime is now scope-owned via `VulkanRenderingSession::RenderScope` (`ActivePass` RAII), removing runtime active-pass tracking
 - Model uniform binding now structurally required via `setModelUniformBinding()`
   - Fallback auto-populated UBO removed; missing binding prevents draw (matches texture semantics)
 - Renamed `ModelUniformState` to `DynamicUniformBinding` for semantic clarity
