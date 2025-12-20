@@ -72,47 +72,9 @@ void FullscreenLight::record(const DeferredDrawContext& ctx, vk::Buffer fullscre
         vk::Bool32 blendEnable = isAmbient ? VK_FALSE : VK_TRUE;
         ctx.cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
         
-        // #region agent log
-        {
-            const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            static std::atomic<uint64_t> eventCounter{0};
-            const uint64_t seq = eventCounter.fetch_add(1) + 1;
-            std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-            if (logFile.is_open()) {
-                std::string lightTypeStr = isAmbient ? "AMBIENT" : "DIRECTIONAL";
-                std::string blendEnableStr = blendEnable ? "true" : "false";
-                std::string isAmbientStr = isAmbient ? "true" : "false";
-                logFile << "{\"id\":\"log_blend_state_" << seq << "\",\"timestamp\":" << timestamp
-                        << ",\"location\":\"VulkanDeferredLights.cpp:FullscreenLight::record\",\"message\":\"Dynamic blend state set\",\"data\":{\"lightType\":\"" << lightTypeStr
-                        << "\",\"blendEnable\":" << blendEnableStr
-                        << ",\"isAmbient\":" << isAmbientStr
-                        << "},\"sessionId\":\"debug-session\",\"runId\":\"run2\",\"hypothesisId\":\"A\"}\n";
-                logFile.close();
-            }
-        }
-        // #endregion agent log
+
     } else {
-        // #region agent log
-        {
-            const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            static std::atomic<uint64_t> eventCounter{0};
-            const uint64_t seq = eventCounter.fetch_add(1) + 1;
-            std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-            if (logFile.is_open()) {
-                std::string lightTypeStr = isAmbient ? "AMBIENT" : "DIRECTIONAL";
-                std::string blendEnableStr = isAmbient ? "false" : "true";
-                std::string isAmbientStr = isAmbient ? "true" : "false";
-                logFile << "{\"id\":\"log_blend_state_" << seq << "\",\"timestamp\":" << timestamp
-                        << ",\"location\":\"VulkanDeferredLights.cpp:FullscreenLight::record\",\"message\":\"Pipeline blend state (static)\",\"data\":{\"lightType\":\"" << lightTypeStr
-                        << "\",\"blendEnable\":" << blendEnableStr
-                        << ",\"isAmbient\":" << isAmbientStr
-                        << ",\"dynamicBlendEnable\":false},\"sessionId\":\"debug-session\",\"runId\":\"run2\",\"hypothesisId\":\"A\"}\n";
-                logFile.close();
-            }
-        }
-        // #endregion agent log
+
     }
 
     pushLightDescriptors(ctx.cmd, ctx.layout, ctx.uniformBuffer, matrixOffset, lightOffset);
@@ -120,22 +82,7 @@ void FullscreenLight::record(const DeferredDrawContext& ctx, vk::Buffer fullscre
     vk::DeviceSize offset = 0;
     ctx.cmd.bindVertexBuffers(0, 1, &fullscreenVB, &offset);
     
-    // #region agent log
-    {
-        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-        static std::atomic<uint64_t> eventCounter{0};
-        const uint64_t seq = eventCounter.fetch_add(1) + 1;
-        std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-        if (logFile.is_open()) {
-            logFile << R"({"id":"log_deferred_draw_)" << seq << R"(","timestamp":)" << timestamp
-                    << R"(,"location":"VulkanDeferredLights.cpp:FullscreenLight::record","message":"Deferred lighting draw","data":{"lightType":)" << (isAmbient ? R"("AMBIENT")" : R"("DIRECTIONAL")")
-                    << R"(,"vertexCount":3,"isAmbient":)" << (isAmbient ? "true" : "false")
-                    << R"(},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-            logFile.close();
-        }
-    }
-    // #endregion agent log
+
     
     ctx.cmd.draw(3, 1, 0, 0);
 }
@@ -155,22 +102,7 @@ void SphereLight::record(const DeferredDrawContext& ctx,
     ctx.cmd.bindVertexBuffers(0, 1, &sphereVB, &offset);
     ctx.cmd.bindIndexBuffer(sphereIB, 0, vk::IndexType::eUint32);
     
-    // #region agent log
-    {
-        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-        static std::atomic<uint64_t> eventCounter{0};
-        const uint64_t seq = eventCounter.fetch_add(1) + 1;
-        std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-        if (logFile.is_open()) {
-            logFile << R"({"id":"log_deferred_draw_)" << seq << R"(","timestamp":)" << timestamp
-                    << R"(,"location":"VulkanDeferredLights.cpp:SphereLight::record","message":"Deferred lighting draw","data":{"lightType":)" << (light.lightType == LT_POINT ? R"("POINT")" : R"("CONE")")
-                    << R"(,"indexCount":)" << indexCount
-                    << R"(},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-            logFile.close();
-        }
-    }
-    // #endregion agent log
+
     
     ctx.cmd.drawIndexed(indexCount, 1, 0, 0, 0);
 }
@@ -190,21 +122,7 @@ void CylinderLight::record(const DeferredDrawContext& ctx,
     ctx.cmd.bindVertexBuffers(0, 1, &cylinderVB, &offset);
     ctx.cmd.bindIndexBuffer(cylinderIB, 0, vk::IndexType::eUint32);
     
-    // #region agent log
-    {
-        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-        static std::atomic<uint64_t> eventCounter{0};
-        const uint64_t seq = eventCounter.fetch_add(1) + 1;
-        std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-        if (logFile.is_open()) {
-            logFile << R"({"id":"log_deferred_draw_)" << seq << R"(","timestamp":)" << timestamp
-                    << R"(,"location":"VulkanDeferredLights.cpp:CylinderLight::record","message":"Deferred lighting draw","data":{"lightType":"TUBE","indexCount":)" << indexCount
-                    << R"(},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-            logFile.close();
-        }
-    }
-    // #endregion agent log
+
     
     ctx.cmd.drawIndexed(indexCount, 1, 0, 0, 0);
 }
@@ -247,6 +165,8 @@ std::vector<DeferredLight> buildDeferredLights(
         ambient.light.scale[2] = 1.f;
         ambient.light.enable_shadows = 0;
         ambient.light.sourceRadius = 0.f;
+
+
 
         ambient.matrixOffset = uploadUBO(frame, &ambient.matrices, sizeof(ambient.matrices), uniformAlignment);
         ambient.lightOffset = uploadUBO(frame, &ambient.light, sizeof(ambient.light), uniformAlignment);
@@ -292,6 +212,8 @@ std::vector<DeferredLight> buildDeferredLights(
             lightData.scale[1] = 1.f;
             lightData.scale[2] = 1.f;
 
+
+
             l.light = lightData;
             l.matrixOffset = uploadUBO(frame, &l.matrices, sizeof(l.matrices), uniformAlignment);
             l.lightOffset = uploadUBO(frame, &l.light, sizeof(l.light), uniformAlignment);
@@ -322,6 +244,8 @@ std::vector<DeferredLight> buildDeferredLights(
             lightData.scale[0] = meshScale;
             lightData.scale[1] = meshScale;
             lightData.scale[2] = meshScale;
+
+
 
             l.light = lightData;
             l.matrixOffset = uploadUBO(frame, &l.matrices, sizeof(l.matrices), uniformAlignment);

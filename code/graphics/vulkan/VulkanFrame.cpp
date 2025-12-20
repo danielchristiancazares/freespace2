@@ -11,6 +11,7 @@ namespace graphics {
 namespace vulkan {
 
 VulkanFrame::VulkanFrame(vk::Device device,
+	uint32_t frameIndex,
 	uint32_t queueFamilyIndex,
 	const vk::PhysicalDeviceMemoryProperties& memoryProps,
 	vk::DeviceSize uniformBufferSize,
@@ -18,16 +19,21 @@ VulkanFrame::VulkanFrame(vk::Device device,
 	vk::DeviceSize vertexBufferSize,
 	vk::DeviceSize vertexAlignment,
 	vk::DeviceSize stagingBufferSize,
-	vk::DeviceSize stagingAlignment)
+	vk::DeviceSize stagingAlignment,
+	vk::DescriptorSet modelSet)
 	: m_device(device),
+	  m_frameIndex(frameIndex),
 	  m_uniformRing(device, memoryProps, uniformBufferSize, uniformAlignment,
 	                vk::BufferUsageFlagBits::eUniformBuffer),
 	  m_vertexRing(device, memoryProps, vertexBufferSize, vertexAlignment,
 	               vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer),
 	  m_stagingRing(device, memoryProps, stagingBufferSize,
 	                stagingAlignment == 0 ? 1 : stagingAlignment,
-	                vk::BufferUsageFlagBits::eTransferSrc)
+	                vk::BufferUsageFlagBits::eTransferSrc),
+	  m_modelDescriptorSet(modelSet)
 {
+	Assertion(m_modelDescriptorSet, "VulkanFrame requires a valid model descriptor set");
+
 	vk::CommandPoolCreateInfo poolInfo;
 	poolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 	poolInfo.queueFamilyIndex = queueFamilyIndex;
@@ -68,21 +74,6 @@ void VulkanFrame::wait_for_gpu()
 		Assertion(false, "Fence wait failed for Vulkan frame");
 		throw std::runtime_error("Fence wait failed for Vulkan frame");
 	}
-
-	auto resetResult = m_device.resetFences(1, &fence);
-	if (resetResult != vk::Result::eSuccess) {
-		Assertion(false, "Failed to reset fence for Vulkan frame");
-		throw std::runtime_error("Failed to reset fence for Vulkan frame");
-	}
-}
-
-void VulkanFrame::record_submit_info(uint32_t frameIndex, uint32_t imageIndex, uint64_t timelineValue, uint64_t submitSerial)
-{
-	m_lastSubmitFrameIndex = frameIndex;
-	m_lastSubmitImageIndex = imageIndex;
-	m_lastSubmitTimeline = timelineValue;
-	m_lastSubmitSerial = submitSerial;
-	m_hasSubmitInfo = true;
 }
 
 void VulkanFrame::reset()

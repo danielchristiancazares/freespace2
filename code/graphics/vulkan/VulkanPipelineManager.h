@@ -15,14 +15,14 @@ namespace graphics {
 namespace vulkan {
 
 struct PipelineKey {
-  shader_type type;
-  uint32_t variant_flags;
-  VkFormat color_format;
-  VkFormat depth_format;
+  shader_type type = SDR_TYPE_NONE;
+  uint32_t variant_flags = 0;
+  VkFormat color_format = VK_FORMAT_UNDEFINED;
+  VkFormat depth_format = VK_FORMAT_UNDEFINED;
   VkSampleCountFlagBits sample_count{VK_SAMPLE_COUNT_1_BIT};
   uint32_t color_attachment_count{1};
   gr_alpha_blend blend_mode{ALPHA_BLEND_NONE};
-  size_t layout_hash; // Hash of vertex_layout for pipeline keying
+  size_t layout_hash = 0; // Hash of vertex_layout for pipeline keying
   uint32_t color_write_mask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                              VK_COLOR_COMPONENT_A_BIT;
   bool stencil_test_enable = false;

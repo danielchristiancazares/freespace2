@@ -70,6 +70,7 @@ VulkanTextureManager::VulkanTextureManager(vk::Device device,
 {
   createDefaultSampler();
   createFallbackTexture();
+  createDefaultTexture();
 
   m_freeBindlessSlots.reserve(kMaxBindlessTextures - 1);
   for (uint32_t slot = kMaxBindlessTextures; slot-- > 1;) {
@@ -110,18 +111,16 @@ void VulkanTextureManager::createDefaultSampler()
   m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
 }
 
-void VulkanTextureManager::createFallbackTexture()
+void VulkanTextureManager::createSolidTexture(int textureHandle, const uint8_t rgba[4])
 {
-  // Create a 1x1 black texture for use when retired textures are sampled.
-  // This prevents accessing destroyed VkImage/VkImageView resources.
+  // Create a 1x1 RGBA texture for use as a stable descriptor target.
   constexpr uint32_t width = 1;
   constexpr uint32_t height = 1;
   constexpr vk::Format format = vk::Format::eR8G8B8A8Unorm;
-  const uint8_t black[4] = {0, 0, 0, 255}; // RGBA black
 
   // Create staging buffer
   vk::BufferCreateInfo bufInfo;
-  bufInfo.size = sizeof(black);
+  bufInfo.size = 4;
   bufInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
   bufInfo.sharingMode = vk::SharingMode::eExclusive;
   auto stagingBuf = m_device.createBufferUnique(bufInfo);
@@ -135,8 +134,8 @@ void VulkanTextureManager::createFallbackTexture()
   m_device.bindBufferMemory(stagingBuf.get(), stagingMem.get(), 0);
 
   // Copy pixel data to staging
-  void* mapped = m_device.mapMemory(stagingMem.get(), 0, sizeof(black));
-  std::memcpy(mapped, black, sizeof(black));
+  void* mapped = m_device.mapMemory(stagingMem.get(), 0, 4);
+  std::memcpy(mapped, rgba, 4);
   m_device.unmapMemory(stagingMem.get());
 
   // Create image
@@ -239,7 +238,7 @@ void VulkanTextureManager::createFallbackTexture()
   viewInfo.subresourceRange.layerCount = 1;
   auto view = m_device.createImageViewUnique(viewInfo);
 
-  // Store in texture map with synthetic handle
+  // Store record
   TextureRecord record{};
   record.gpu.image = std::move(image);
   record.gpu.memory = std::move(imageMem);
@@ -252,12 +251,8 @@ void VulkanTextureManager::createFallbackTexture()
   record.gpu.format = format;
   record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
   record.state = TextureState::Resident;
-  m_textures[kFallbackTextureHandle] = std::move(record);
-
-  // Set the handle so getFallbackTextureHandle() returns valid value
-  m_fallbackTextureHandle = kFallbackTextureHandle;
-
-  onTextureResident(kFallbackTextureHandle);
+  m_textures[textureHandle] = std::move(record);
+  onTextureResident(textureHandle);
 }
 
 vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key)
@@ -495,10 +490,10 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
   viewInfo.subresourceRange.layerCount = layers;
   auto view = m_device.createImageViewUnique(viewInfo);
 
-    // Store record
-    TextureRecord record{};
-    record.gpu.image = std::move(image);
-    record.gpu.memory = std::move(imageMem);
+  // Store record
+  TextureRecord record{};
+  record.gpu.image = std::move(image);
+  record.gpu.memory = std::move(imageMem);
   record.gpu.imageView = std::move(view);
   record.gpu.sampler = m_defaultSampler.get();
   record.gpu.width = width;
@@ -507,13 +502,34 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
   record.gpu.mipLevels = 1;
   record.gpu.format = format;
   // Image already transitioned to shader read layout in the upload command buffer.
-    record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    record.state = TextureState::Resident;
-    record.lastUsedFrame = 0;
-    m_textures[baseFrame] = std::move(record);
-    onTextureResident(baseFrame);
-    return true;
-  }
+  record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  record.state = TextureState::Resident;
+  record.lastUsedFrame = 0;
+
+  m_textures[baseFrame] = std::move(record);
+  onTextureResident(baseFrame);
+  return true;
+}
+
+void VulkanTextureManager::createFallbackTexture()
+{
+  // Create a 1x1 black texture for use when retired textures are sampled.
+  // This prevents accessing destroyed VkImage/VkImageView resources.
+  const uint8_t black[4] = {0, 0, 0, 255}; // RGBA black
+  createSolidTexture(kFallbackTextureHandle, black);
+
+  // Set the handle so getFallbackTextureHandle() returns valid value
+  m_fallbackTextureHandle = kFallbackTextureHandle;
+}
+
+void VulkanTextureManager::createDefaultTexture()
+{
+  // Create a 1x1 white texture for untextured draws that still require a sampler binding.
+  const uint8_t white[4] = {255, 255, 255, 255}; // RGBA white
+  createSolidTexture(kDefaultTextureHandle, white);
+
+  m_defaultTextureHandle = kDefaultTextureHandle;
+}
 
 VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident(int bitmapHandle,
   VulkanFrame& frame,
@@ -841,61 +857,6 @@ bool VulkanTextureManager::isUploadQueued(int baseFrame) const
   return std::find(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrame) != m_pendingUploads.end();
 }
 
-VulkanTextureManager::TextureDescriptorQuery VulkanTextureManager::queryDescriptor(int bitmapHandle,
-  const SamplerKey& samplerKey)
-{
-  TextureDescriptorQuery result{};
-  result.isFallback = false;
-  result.queuedUpload = false;
-
-  int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
-  if (baseFrame < 0) {
-    // Invalid bitmap handle - return fallback descriptor
-    result.isFallback = true;
-    return result;
-  }
-
-  auto it = m_textures.find(baseFrame);
-  if (it == m_textures.end()) {
-    it = m_textures.emplace(baseFrame, TextureRecord{}).first;
-  }
-  auto& record = it->second;
-
-  // Update sampler
-  record.gpu.sampler = getOrCreateSampler(samplerKey);
-
-  // If not resident, queue upload (if needed) and return fallback
-  if (record.state != TextureState::Resident || !record.gpu.imageView) {
-    // Queue upload if state allows it (Missing, Failed, or Retired that we want to reload)
-    if (record.state == TextureState::Missing || record.state == TextureState::Failed) {
-      // Queue upload if not already queued
-      if (!isUploadQueued(baseFrame)) {
-        m_pendingUploads.push_back(baseFrame);
-        record.state = TextureState::Queued;
-      }
-      result.queuedUpload = true;
-    } else if (record.state == TextureState::Queued || record.state == TextureState::Uploading) {
-      result.queuedUpload = true;
-    }
-    // Return fallback descriptor
-    result.isFallback = true;
-    auto fallbackIt = m_textures.find(kFallbackTextureHandle);
-    if (fallbackIt != m_textures.end() && fallbackIt->second.gpu.imageView) {
-      result.info.imageView = fallbackIt->second.gpu.imageView.get();
-      result.info.sampler = getOrCreateSampler(samplerKey);
-      result.info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    }
-    return result;
-  }
-
-  // Texture is resident - return real descriptor
-  result.info.imageView = record.gpu.imageView.get();
-  Assertion(record.gpu.sampler, "Sampler must be set for resident texture");
-  result.info.sampler = record.gpu.sampler;
-  result.info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  return result;
-}
-
 bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool /*isAABitmap*/)
 {
   return uploadImmediate(bitmapHandle, false);
@@ -1079,5 +1040,3 @@ vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textu
 
 } // namespace vulkan
 } // namespace graphics
-
-

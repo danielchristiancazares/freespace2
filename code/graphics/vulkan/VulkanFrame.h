@@ -4,7 +4,6 @@
 #include "graphics/grinternal.h"
 
 #include <vulkan/vulkan.hpp>
-#include <optional>
 #include <cstdint>
 
 namespace graphics {
@@ -14,7 +13,6 @@ struct BoundUniformBuffer {
   gr_buffer_handle handle{};
   size_t offset = 0;
   size_t size = 0;
-  bool valid = false;
 };
 
 struct DynamicUniformBinding {
@@ -25,6 +23,7 @@ struct DynamicUniformBinding {
 class VulkanFrame {
   public:
   VulkanFrame(vk::Device device,
+    uint32_t frameIndex,
     uint32_t queueFamilyIndex,
     const vk::PhysicalDeviceMemoryProperties& memoryProps,
     vk::DeviceSize uniformBufferSize,
@@ -32,10 +31,13 @@ class VulkanFrame {
     vk::DeviceSize vertexBufferSize,
     vk::DeviceSize vertexAlignment,
     vk::DeviceSize stagingBufferSize,
-    vk::DeviceSize stagingAlignment);
+    vk::DeviceSize stagingAlignment,
+    vk::DescriptorSet modelSet);
 
   void wait_for_gpu();
   void reset();
+
+  uint32_t frameIndex() const { return m_frameIndex; }
 
   vk::CommandBuffer commandBuffer() const { return m_commandBuffer; }
   VulkanRingBuffer& uniformBuffer() { return m_uniformRing; }
@@ -51,27 +53,21 @@ class VulkanFrame {
   uint64_t nextTimelineValue() const { return m_timelineValue + 1; }
   void advanceTimeline() { ++m_timelineValue; }
 
-  vk::DescriptorSet modelDescriptorSet = nullptr;
-  std::optional<DynamicUniformBinding> modelUniformBinding;
-  std::optional<DynamicUniformBinding> sceneUniformBinding;
+  vk::DescriptorSet modelDescriptorSet() const { return m_modelDescriptorSet; }
+  DynamicUniformBinding modelUniformBinding{ gr_buffer_handle::invalid(), 0 };
+  DynamicUniformBinding sceneUniformBinding{ gr_buffer_handle::invalid(), 0 };
   BoundUniformBuffer nanovgData;
 
   void resetPerFrameBindings()
   {
-    modelUniformBinding.reset();
-    sceneUniformBinding.reset();
+    modelUniformBinding = { gr_buffer_handle::invalid(), 0 };
+    sceneUniformBinding = { gr_buffer_handle::invalid(), 0 };
     nanovgData = {};
   }
 
-  void record_submit_info(uint32_t frameIndex, uint32_t imageIndex, uint64_t timelineValue, uint64_t submitSerial);
-  uint64_t lastSubmitSerial() const { return m_lastSubmitSerial; }
-  uint32_t lastSubmitFrameIndex() const { return m_lastSubmitFrameIndex; }
-  uint32_t lastSubmitImageIndex() const { return m_lastSubmitImageIndex; }
-  uint64_t lastSubmitTimeline() const { return m_lastSubmitTimeline; }
-  bool hasSubmitInfo() const { return m_hasSubmitInfo; }
-
   private:
   vk::Device m_device;
+  uint32_t m_frameIndex = 0;
 
   vk::UniqueCommandPool m_commandPool;
   vk::CommandBuffer m_commandBuffer;
@@ -82,15 +78,11 @@ class VulkanFrame {
   vk::UniqueSemaphore m_timelineSemaphore;
   uint64_t m_timelineValue = 0;
 
+  vk::DescriptorSet m_modelDescriptorSet{};
+
   VulkanRingBuffer m_uniformRing;
   VulkanRingBuffer m_vertexRing;
   VulkanRingBuffer m_stagingRing;
-
-  uint64_t m_lastSubmitTimeline = 0;
-  uint32_t m_lastSubmitImageIndex = UINT32_MAX;
-  uint32_t m_lastSubmitFrameIndex = UINT32_MAX;
-  uint64_t m_lastSubmitSerial = 0;
-  bool m_hasSubmitInfo = false;
 };
 
 } // namespace vulkan
