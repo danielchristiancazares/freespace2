@@ -4,6 +4,28 @@
 #include "uniform_structs.h"
 
 #include "tracing/tracing.h"
+#include <fstream>
+#include <chrono>
+#include <sstream>
+
+// #region agent log
+static void agent_log_ubm(const char* location, const char* message, const char* hypothesisId, const char* data = nullptr) {
+	std::ofstream logfile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
+	if (logfile.is_open()) {
+		auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch()).count();
+		logfile << R"({"sessionId":"debug-session","runId":"run1","hypothesisId":")" << hypothesisId
+			<< R"(","location":")" << location << R"(","message":")" << message;
+		if (data) {
+			logfile << R"(","data":")" << data << R"("})";
+		} else {
+			logfile << R"("})";
+		}
+		logfile << "\n";
+		logfile.close();
+	}
+}
+// #endregion agent log
 
 namespace {
 
@@ -85,6 +107,10 @@ UniformBufferManager::~UniformBufferManager()
 }
 void UniformBufferManager::onFrameEnd()
 {
+	// #region agent log
+	agent_log_ubm("UniformBufferManager.cpp:88", "onFrameEnd() entry - before GR_DEBUG_SCOPE", "E");
+	// #endregion agent log
+	
 	GR_DEBUG_SCOPE("Performing uniform frame end operations");
 
 	++_currentFrame;

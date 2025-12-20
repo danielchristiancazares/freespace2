@@ -291,14 +291,28 @@ std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool 
 
 vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout)
 {
+  // Enforce layout contract in all builds: if the shader uses vertex attributes, the key's
+  // layout_hash must match the supplied layout. Correctness by construction: we fix the key
+  // rather than silently reusing a mismatched pipeline.
+  PipelineKey adjustedKey = key;
+  const auto& layoutSpec = getShaderLayoutSpec(key.type);
+  if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
+    const size_t expectedHash = layout.hash();
+    if (adjustedKey.layout_hash != expectedHash) {
+      adjustedKey.layout_hash = expectedHash;
+      throw std::runtime_error("PipelineKey.layout_hash mismatches provided vertex_layout for VertexAttributes shader");
+    }
+  }
+
+  // Lookup with the (possibly validated) key
   auto it = m_pipelines.find(key);
   if (it != m_pipelines.end()) {
     return it->second.get();
   }
 
-  auto pipeline = createPipeline(key, modules, layout);
+  auto pipeline = createPipeline(adjustedKey, modules, layout);
   auto handle = pipeline.get();
-  m_pipelines.emplace(key, std::move(pipeline));
+  m_pipelines.emplace(adjustedKey, std::move(pipeline));
   return handle;
 }
 
@@ -385,35 +399,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
   auto colorWriteMask = static_cast<vk::ColorComponentFlags>(key.color_write_mask);
   auto colorBlendAttachment = buildBlendAttachment(key.blend_mode, colorWriteMask);
   
-  // #region agent log
-  if (key.type == shader_type::SDR_TYPE_DEFERRED_LIGHTING) {
-    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now().time_since_epoch()).count();
-    static std::atomic<uint64_t> eventCounter{0};
-    const uint64_t seq = eventCounter.fetch_add(1) + 1;
-    
-    std::string blendModeStr = (key.blend_mode == ALPHA_BLEND_NONE) ? "NONE" : 
-                               (key.blend_mode == ALPHA_BLEND_ADDITIVE) ? "ADDITIVE" : "OTHER";
-    std::string writeMaskStr = "";
-    if (colorWriteMask & vk::ColorComponentFlagBits::eR) writeMaskStr += "R";
-    if (colorWriteMask & vk::ColorComponentFlagBits::eG) writeMaskStr += "G";
-    if (colorWriteMask & vk::ColorComponentFlagBits::eB) writeMaskStr += "B";
-    if (colorWriteMask & vk::ColorComponentFlagBits::eA) writeMaskStr += "A";
-    if (writeMaskStr.empty()) writeMaskStr = "NONE";
-    
-    std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-    if (logFile.is_open()) {
-      logFile << R"({"id":"log_pipeline_create_)" << seq << R"(","timestamp":)" << timestamp
-              << R"(,"location":"VulkanPipelineManager.cpp:createPipeline","message":"Deferred pipeline created","data":{"blendMode":")" << blendModeStr
-              << R"(","blendEnable":)" << (colorBlendAttachment.blendEnable ? "true" : "false")
-              << R"(,"writeMask":")" << writeMaskStr
-              << R"(,"colorFormat":)" << static_cast<uint32_t>(key.color_format)
-              << R"(,"attachmentCount":)" << key.color_attachment_count
-              << R"(},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-      logFile.close();
-    }
-  }
-  // #endregion agent log
+
   
   std::vector<vk::PipelineColorBlendAttachmentState> attachments(key.color_attachment_count, colorBlendAttachment);
 
@@ -464,6 +450,8 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
     depthStencil.depthWriteEnable = VK_FALSE;
   }
   depthStencil.depthBoundsTestEnable = VK_FALSE;
+  
+
   depthStencil.stencilTestEnable = key.stencil_test_enable ? VK_TRUE : VK_FALSE;
   depthStencil.front.compareOp = static_cast<vk::CompareOp>(key.stencil_compare_op);
   depthStencil.front.compareMask = key.stencil_compare_mask;

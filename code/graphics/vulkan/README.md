@@ -20,7 +20,6 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanDeferredLights.*` | Deferred lighting pass orchestration and light volume meshes |
 | `VulkanRenderTargets.*` | Depth buffer, G-buffer, resize handling |
 | `VulkanRingBuffer.*` | Per-frame transient allocations (uniform, vertex, staging) |
-| `FrameLifecycleTracker.*` | State machine for "are we recording?" checks |
 | `VulkanLayoutContracts.*` | Shader ↔ pipeline layout binding contracts |
 | `VulkanModelValidation.*` | Model draw validation and safety checks |
 | `VulkanModelTypes.h` | Shared model/mesh-related types |
@@ -40,9 +39,9 @@ The engine's renderer glue is in `VulkanGraphics.cpp`. It holds a process-global
 Key contract points:
 
 - `VulkanRenderer::flip()` — called once per frame to submit the previous frame, advance the frame ring, wait on fences, acquire a swapchain image, and begin recording the next frame.
-- `gr_vulkan_setup_frame()` — called immediately after `flip()`. Injects `VulkanFrame*` into the module-local `g_currentFrame` and sets viewport/scissor. Does *not* start rendering (deferred to first draw/clear).
+- `gr_vulkan_setup_frame()` — called immediately after `flip()`. Configures viewport/scissor for the newly recording frame. Does *not* start rendering (deferred to first draw/clear).
 
-**If nothing renders**, trace: `flip()` → `beginFrame()` → `ensureRenderingStarted()` → `VulkanRenderingSession::ensureRenderingActive()`.
+**If nothing renders**, trace: `flip()` → `beginFrame()` → `ensureRenderingStarted()` → `VulkanRenderingSession::beginRendering()`.
 
 ## Architecture
 
@@ -69,7 +68,7 @@ Coordinates:
 - Initialization order: device → layouts → render targets → session → frames → managers
 - Frame ring (`kFramesInFlight` frames via `VulkanFrame`)
 - CPU/GPU sync via `VulkanFrame::wait_for_gpu()` fence
-- Frame lifecycle tracking via `FrameLifecycleTracker`
+- Frame lifecycle tracking via recording typestate: available/in-flight deques + `RecordingState` (`NoRecording`/`ActiveRecording`)
 - Descriptor state: global set (frame-wide), model set (per-frame; bound per draw via dynamic offsets), and per-draw push descriptors
 
 Key methods:
@@ -88,8 +87,8 @@ Responsible for:
   - `requestSwapchainTarget()` — swapchain + depth
   - `beginDeferredPass()` — select G-buffer target
   - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
-- Lazy render pass begin (`ensureRenderingActive()`), with RAII end via `ActivePass`
-- Dynamic state application (`applyDynamicState()`) on first begin
+- Lazy render pass begin via `beginRendering(cmd, imageIndex)` which returns a `RenderScope{RenderTargetInfo info, ActivePass guard}`. Holding the scope == pass active; destruction ends the pass.
+- Dynamic state application (`applyDynamicState()`) is performed inside `beginRendering()` after selecting the target.
 
 The render target’s “contract” (attachment formats + count) is exposed as `RenderTargetInfo` and is used to key pipelines.
 
@@ -163,23 +162,20 @@ flip()
 	    └── VulkanRenderingSession::beginFrame()
 
 gr_vulkan_setup_frame()
-├── inject g_currentFrame
 └── set viewport/scissor
 
 [first draw/clear]
 └── ensureRenderingStarted()
-    ├── VulkanRenderingSession::ensureRenderingActive()
-    └── VulkanRenderingSession::applyDynamicState()
+    └── VulkanRenderingSession::beginRendering() -> RenderScope (RAII ends pass)
 
 [end of frame: next flip() submits and presents]
 ```
 
 ## Common Gotchas
 
-- **`g_currentFrame` is module-local** to `VulkanGraphics.cpp`. Don't try to access it from other translation units.
 - **Buffer handles can be valid before `VkBuffer` exists.** Lazy creation happens on first `updateBufferData()`.
 - **Descriptor writes happen at frame start.** Writing descriptors mid-recording fights the design.
-- **Render pass is lazy.** `setup_frame()` doesn't begin rendering; first draw/clear does.
+- **Render pass is lazy and scope-owned.** `setup_frame()` doesn't begin rendering; first draw/clear does. The render pass is active only while a `RenderScope` is alive.
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
 - **Swapchain resize cascades.** Anything tied to swapchain extent must handle `recreateSwapchain()`.

@@ -7,9 +7,12 @@
 #include "VulkanVertexTypes.h"
 #include "VulkanDebug.h"
 #include "VulkanClip.h"
+#include "VulkanFrameCaps.h"
+#include <array>
 #include <fstream>
 #include <chrono>
 #include <atomic>
+#include <sstream>
 
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_vulkan.h"
@@ -32,55 +35,72 @@ extern matrix4 gr_projection_matrix;
 
 #define BMPMAN_INTERNAL
 #include "bmpman/bm_internal.h"
+#include <fstream>
+#include <chrono>
+#include <sstream>
 
 namespace graphics::vulkan {
 
-// #region agent log
-uint32_t g_gbufferDrawCountThisFrame = 0;
 
-void resetGbufferDrawCount() {
-  g_gbufferDrawCountThisFrame = 0;
-}
-
-void logDebugEventDraw(const char* eventType, const char* location, const char* message, uint32_t indexCount, uint32_t colorAttachmentCount) {
-  const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::steady_clock::now().time_since_epoch()).count();
-  static std::atomic<uint64_t> eventCounter{0};
-  const uint64_t seq = eventCounter.fetch_add(1) + 1;
-  
-  std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-  if (logFile.is_open()) {
-    logFile << R"({"id":"log_)" << seq << R"(","timestamp":)" << timestamp 
-            << R"(,"location":")" << location << R"(","message":")" << message 
-            << R"(","data":{"indexCount":)" << indexCount 
-            << R"(,"colorAttachmentCount":)" << colorAttachmentCount
-            << R"(,"drawNum":)" << (++g_gbufferDrawCountThisFrame)
-            << R"(},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-    logFile.close();
-  }
-}
-// #endregion agent log
 
 namespace {
 std::unique_ptr<VulkanRenderer> renderer_instance;
-VulkanFrame* g_currentFrame = nullptr;  // Injected by setup_frame, used by render functions
 
-enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish };
-DeferredBoundaryState g_deferredBoundaryState = DeferredBoundaryState::Idle;
+float g_requestedLineWidth = 1.0f;
 
-
-const char* deferredBoundaryStateName(DeferredBoundaryState state)
+VulkanRenderer& currentRenderer()
 {
-  switch (state) {
-  case DeferredBoundaryState::Idle:
-    return "Idle";
-  case DeferredBoundaryState::InGeometry:
-    return "InGeometry";
-  case DeferredBoundaryState::AwaitFinish:
-    return "AwaitFinish";
-  default:
-    return "Unknown";
+  Assertion(renderer_instance != nullptr, "Vulkan renderer must be initialized before use");
+  return *renderer_instance;
+}
+
+VulkanFrame& currentFrame()
+{
+  return currentRenderer().recordingFrame();
+}
+
+FrameCtx currentFrameCtx()
+{
+  auto& renderer = currentRenderer();
+  auto& frame = currentFrame();
+  vk::CommandBuffer cmd = frame.commandBuffer();
+  Assertion(cmd, "Frame has no valid command buffer");
+
+  return FrameCtx{ renderer, frame, cmd };
+}
+
+float clampLineWidth(const VkPhysicalDeviceLimits& limits, float requestedWidth)
+{
+  float minWidth = limits.lineWidthRange[0];
+  float maxWidth = limits.lineWidthRange[1];
+
+  if (minWidth > maxWidth) {
+    const float tmp = minWidth;
+    minWidth = maxWidth;
+    maxWidth = tmp;
   }
+
+  float clamped = requestedWidth;
+  if (clamped < minWidth) {
+    clamped = minWidth;
+  } else if (clamped > maxWidth) {
+    clamped = maxWidth;
+  }
+
+  const float granularity = limits.lineWidthGranularity;
+  if (granularity > 0.0f) {
+    const float steps = clamped / granularity;
+    const int roundedSteps = static_cast<int>(steps + 0.5f);
+    clamped = static_cast<float>(roundedSteps) * granularity;
+
+    if (clamped < minWidth) {
+      clamped = minWidth;
+    } else if (clamped > maxWidth) {
+      clamped = maxWidth;
+    }
+  }
+
+  return clamped;
 }
 
 // Helper functions
@@ -199,28 +219,22 @@ uint32_t convertColorWriteMask(const bvec4& mask)
 // Stub implementations for unimplemented functions
 gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 {
-  Assertion(renderer_instance != nullptr, "Vulkan renderer must be initialized before createBuffer");
-  return renderer_instance->createBuffer(type, usage);
+  return currentRenderer().createBuffer(type, usage);
 }
 
 // Begin a new frame for rendering and set initial dynamic state.
 // Called immediately after flip() via gr_setup_frame() per API contract.
-// Injects g_currentFrame for use by render functions.
     void gr_vulkan_setup_frame()
     {
-      Assertion(renderer_instance != nullptr, "setup_frame called without renderer");
+      auto& renderer = currentRenderer();
 
-  // Inject frame into module context - render functions will use g_currentFrame
-  g_currentFrame = renderer_instance->getCurrentRecordingFrame();
-  Assertion(g_currentFrame != nullptr, "setup_frame called outside frame recording");
+  VulkanFrame& frame = renderer.recordingFrame();
 
   // Reset per-frame uniform bindings (optional will be empty at frame start)
-  g_currentFrame->resetPerFrameBindings();
+  frame.resetPerFrameBindings();
 
-    vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
+    vk::CommandBuffer cmd = frame.commandBuffer();
     Assertion(cmd, "Frame has no valid command buffer");
-
-    g_deferredBoundaryState = DeferredBoundaryState::Idle;
 
     // DO NOT start the render pass here - allow gr_clear to set clear flags first.
     // The render pass will start lazily when the first draw or clear occurs.
@@ -232,12 +246,15 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
     // Scissor: current clip region
     vk::Rect2D scissor = createClipScissor();
     cmd.setScissor(0, 1, &scissor);
+
+    // Line width: apply requested width, clamped to device limits
+    const auto& limits = renderer.vulkanDevice()->properties().limits;
+    cmd.setLineWidth(clampLineWidth(limits, g_requestedLineWidth));
   }
 
 void gr_vulkan_delete_buffer(gr_buffer_handle handle)
 {
-  Assertion(renderer_instance != nullptr, "Vulkan renderer must be initialized before deleteBuffer");
-  renderer_instance->deleteBuffer(handle);
+  currentRenderer().deleteBuffer(handle);
 }
 
 static void gr_vulkan_bind_uniform_buffer(uniform_block_type type,
@@ -245,15 +262,15 @@ static void gr_vulkan_bind_uniform_buffer(uniform_block_type type,
   size_t size,
   gr_buffer_handle handle)
 {
-  Assertion(renderer_instance != nullptr, "bind_uniform_buffer called without renderer");
-  Assertion(g_currentFrame != nullptr, "bind_uniform_buffer called before setup_frame");
+  auto& renderer = currentRenderer();
+  auto& frame = currentFrame();
 
   if (type == uniform_block_type::ModelData) {
-    renderer_instance->setModelUniformBinding(*g_currentFrame, handle, offset, size);
+    renderer.setModelUniformBinding(frame, handle, offset, size);
   } else if (type == uniform_block_type::NanoVGData) {
-    g_currentFrame->nanovgData = { handle, offset, size, true };
+    frame.nanovgData = { handle, offset, size };
   } else if (type == uniform_block_type::Matrices) {
-    renderer_instance->setSceneUniformBinding(*g_currentFrame, handle, offset, size);
+    renderer.setSceneUniformBinding(frame, handle, offset, size);
   } else {
     // Keep running but make it noisy so the offending path gets fixed.
     return;
@@ -263,8 +280,7 @@ static void gr_vulkan_bind_uniform_buffer(uniform_block_type type,
 int stub_preload(int /*bitmap_num*/, int /*is_aabitmap*/) { return 0; }
 int gr_vulkan_preload(int bitmap_num, int is_aabitmap)
 {
-  Assertion(renderer_instance != nullptr, "Vulkan renderer must be initialized before preload");
-  return renderer_instance->preloadTexture(bitmap_num, is_aabitmap != 0);
+  return currentRenderer().preloadTexture(bitmap_num, is_aabitmap != 0);
 }
 void stub_resize_buffer(gr_buffer_handle /*handle*/, size_t /*size*/) {}
 
@@ -307,23 +323,13 @@ SCP_string stub_blob_screen() { return {}; }
       gr_unsize_screen_pos(&gr_screen.clip_right_unscaled, &gr_screen.clip_bottom_unscaled);
       gr_unsize_screen_pos(&gr_screen.clip_width_unscaled, &gr_screen.clip_height_unscaled);
     }
-
-    if (g_currentFrame != nullptr) {
-      vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-      if (cmd) {
-        vk::Rect2D scissor = createClipScissor();
-        cmd.setScissor(0, 1, &scissor);
-      }
-    }
   }
 
 void stub_restore_screen(int /*id*/) {}
 
 void gr_vulkan_update_buffer_data(gr_buffer_handle handle, size_t size, const void* data)
 {
-  if (renderer_instance) {
-    renderer_instance->updateBufferData(handle, size, data);
-  }
+  currentRenderer().updateBufferData(handle, size, data);
 }
 
 void gr_vulkan_update_buffer_data_offset(gr_buffer_handle handle,
@@ -331,16 +337,12 @@ void gr_vulkan_update_buffer_data_offset(gr_buffer_handle handle,
   size_t size,
   const void* data)
 {
-  if (renderer_instance) {
-    renderer_instance->updateBufferDataOffset(handle, offset, size, data);
-  }
+  currentRenderer().updateBufferDataOffset(handle, offset, size, data);
 }
 
 void gr_vulkan_resize_buffer(gr_buffer_handle handle, size_t size)
 {
-  if (renderer_instance) {
-    renderer_instance->resizeBuffer(handle, size);
-  }
+  currentRenderer().resizeBuffer(handle, size);
 }
 
 void stub_update_transform_buffer(void* /*data*/, size_t /*size*/) {}
@@ -348,14 +350,6 @@ void stub_update_transform_buffer(void* /*data*/, size_t /*size*/) {}
   void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode)
   {
     applyClipToScreen(x, y, w, h, resize_mode);
-
-    if (g_currentFrame != nullptr) {
-      vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-      if (cmd) {
-        vk::Rect2D scissor = createClipScissor();
-        cmd.setScissor(0, 1, &scissor);
-      }
-    }
   }
 
 int stub_set_color_buffer(int /*mode*/) { return 0; }
@@ -388,39 +382,18 @@ void stub_scene_texture_end() {}
 
 void stub_copy_effect_texture() {}
 
+void stub_deferred_lighting_begin(bool /*clearNonColorBufs*/) {}
+void stub_deferred_lighting_msaa() {}
+void stub_deferred_lighting_end() {}
+void stub_deferred_lighting_finish() {}
+
 void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
 {
-  // #region agent log
-  const bool deferredEnabled = light_deferred_enabled();
-  if (!deferredEnabled) {
-    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now().time_since_epoch()).count();
-    static std::atomic<uint64_t> eventCounter{0};
-    const uint64_t seq = eventCounter.fetch_add(1) + 1;
-    std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-    if (logFile.is_open()) {
-      logFile << R"({"id":"log_def_)" << seq << R"(","timestamp":)" << timestamp 
-              << R"(,"location":"VulkanGraphics.cpp:gr_vulkan_deferred_lighting_begin","message":"Deferred disabled","data":{"enabled":false},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-      logFile.close();
-    }
-    return;
-  }
-  // #endregion agent log
-  if (!renderer_instance) {
-    return;
-  }
-  VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
-  if (!frame) {
-    return;
-  }
-  if (g_deferredBoundaryState != DeferredBoundaryState::Idle) {
-    mprintf(("Vulkan deferred API misuse: begin() called while state=%s; resetting to Idle.\n",
-      deferredBoundaryStateName(g_deferredBoundaryState)));
-    renderer_instance->setPendingRenderTargetSwapchain();
-    g_deferredBoundaryState = DeferredBoundaryState::Idle;
-  }
-  renderer_instance->beginDeferredLighting(frame->commandBuffer(), clearNonColorBufs);
-  g_deferredBoundaryState = DeferredBoundaryState::InGeometry;
+  Assertion(light_deferred_enabled(), "Deferred lighting begin called while deferred lighting is disabled");
+
+  auto& renderer = currentRenderer();
+  VulkanFrame& frame = renderer.recordingFrame();
+  renderer.deferredLightingBegin(frame, clearNonColorBufs);
 }
 
 void gr_vulkan_deferred_lighting_msaa()
@@ -430,121 +403,26 @@ void gr_vulkan_deferred_lighting_msaa()
 
 void gr_vulkan_deferred_lighting_end()
 {
-  if (!renderer_instance) {
-    return;
-  }
-  VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
-  if (!frame) {
-    return;
-  }
-  if (g_deferredBoundaryState != DeferredBoundaryState::InGeometry) {
-    mprintf(("Vulkan deferred API misuse: end() called while state=%s; ignoring.\n",
-      deferredBoundaryStateName(g_deferredBoundaryState)));
-    return;
-  }
-  renderer_instance->endDeferredGeometry(frame->commandBuffer());
-  g_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
+  auto& renderer = currentRenderer();
+  VulkanFrame& frame = renderer.recordingFrame();
+  renderer.deferredLightingEnd(frame);
 }
 
 void gr_vulkan_deferred_lighting_finish()
 {
-  if (!renderer_instance) {
-    return;
-  }
-  VulkanFrame* frame = renderer_instance->getCurrentRecordingFrame();
-  if (!frame) {
-    return;
-  }
-  if (g_deferredBoundaryState == DeferredBoundaryState::InGeometry) {
-    mprintf(("Vulkan deferred API misuse: finish() called without end(); auto-ending geometry.\n"));
-    renderer_instance->endDeferredGeometry(frame->commandBuffer());
-    g_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
-  }
-  if (g_deferredBoundaryState != DeferredBoundaryState::AwaitFinish) {
-    mprintf(("Vulkan deferred API misuse: finish() called while state=%s; ignoring.\n",
-      deferredBoundaryStateName(g_deferredBoundaryState)));
-    return;
-  }
-
-  // Bind G-buffer textures to global descriptor set
-  renderer_instance->bindDeferredGlobalDescriptors();
-
-    // Record deferred lighting draws
-    renderer_instance->recordDeferredLighting(*frame);
-
-    // Restore scissor to current clip state for subsequent draws
-    {
-      vk::CommandBuffer cmd = frame->commandBuffer();
-      if (cmd) {
-        vk::Rect2D scissor = createClipScissor();
-        cmd.setScissor(0, 1, &scissor);
-      }
-    }
-
-        // Switch back to swapchain rendering mode for subsequent draws
-        renderer_instance->setPendingRenderTargetSwapchain();
-    g_deferredBoundaryState = DeferredBoundaryState::Idle;
-  }
+  auto& renderer = currentRenderer();
+  vk::Rect2D scissor = createClipScissor();
+  VulkanFrame& frame = renderer.recordingFrame();
+  renderer.deferredLightingFinish(frame, scissor);
+}
 
 void stub_set_line_width(float width)
 {
-  static float s_requestedWidth = 1.0f;
-
   // Sanitize input
   if (!(width > 0.0f)) {
     width = 1.0f;
   }
-  s_requestedWidth = width;
-
-  if (!renderer_instance) {
-    return;
-  }
-
-  // Clamp to device limits (prevents validation errors on devices without wideLines)
-  const auto& limits = renderer_instance->vulkanDevice()->properties().limits;
-  float minWidth = limits.lineWidthRange[0];
-  float maxWidth = limits.lineWidthRange[1];
-
-  if (minWidth > maxWidth) {
-    const float tmp = minWidth;
-    minWidth = maxWidth;
-    maxWidth = tmp;
-  }
-
-  float clamped = s_requestedWidth;
-  if (clamped < minWidth) {
-    clamped = minWidth;
-  } else if (clamped > maxWidth) {
-    clamped = maxWidth;
-  }
-
-  // Snap to reported granularity (if any)
-  const float granularity = limits.lineWidthGranularity;
-  if (granularity > 0.0f) {
-    const float steps = clamped / granularity;
-    const int roundedSteps = static_cast<int>(steps + 0.5f);
-    clamped = static_cast<float>(roundedSteps) * granularity;
-
-    if (clamped < minWidth) {
-      clamped = minWidth;
-    } else if (clamped > maxWidth) {
-      clamped = maxWidth;
-    }
-  }
-
-  // Apply to current command buffer if recording
-  VulkanFrame* frame = g_currentFrame;
-  if (!frame) {
-    frame = renderer_instance->getCurrentRecordingFrame();
-  }
-  if (!frame) {
-    return;
-  }
-
-  vk::CommandBuffer cmd = frame->commandBuffer();
-  if (cmd) {
-    cmd.setLineWidth(clamped);
-  }
+  g_requestedLineWidth = width;
 }
 
 void stub_draw_sphere(material* /*material_def*/, float /*rad*/) {}
@@ -597,12 +475,9 @@ void stub_render_shield_impact(shield_material* /*material_info*/,
 }
 
 struct ModelDrawContext {
-  VulkanFrame& frame;
-  vk::CommandBuffer cmd;
+  const ModelBoundFrame& bound;
   vk::Pipeline pipeline;
   vk::PipelineLayout pipelineLayout;
-  vk::DescriptorSet modelSet;
-  uint32_t modelDynamicOffset;
   ModelPushConstants pcs;
   const indexed_vertex_source& vertSource;
   const vertex_buffer& vbuffer;
@@ -611,20 +486,23 @@ struct ModelDrawContext {
 
 static void issueModelDraw(const ModelDrawContext& ctx)
 {
-  ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
+  auto cmd = ctx.bound.ctx.cmd;
+  cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
 
   // Set model descriptor set + dynamic UBO offset
-  ctx.cmd.bindDescriptorSets(
+  const auto modelSet = ctx.bound.modelSet;
+  const auto modelDynamicOffset = ctx.bound.modelUbo.dynamicOffset;
+  cmd.bindDescriptorSets(
     vk::PipelineBindPoint::eGraphics,
     ctx.pipelineLayout,
     0,
     1,
-    &ctx.modelSet,
+    &modelSet,
     1,
-    &ctx.modelDynamicOffset);
+    &modelDynamicOffset);
 
   // Push constants (vertex layout + texture indices)
-  ctx.cmd.pushConstants(
+  cmd.pushConstants(
     ctx.pipelineLayout,
     vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
     0,
@@ -634,7 +512,7 @@ static void issueModelDraw(const ModelDrawContext& ctx)
   // Per-batch index data
   const buffer_data& batch = ctx.vbuffer.tex_buf[ctx.texi];
 
-  vk::Buffer indexBuffer = renderer_instance->getBuffer(ctx.vertSource.Ibuffer_handle);
+  vk::Buffer indexBuffer = ctx.bound.ctx.renderer.getBuffer(ctx.vertSource.Ibuffer_handle);
   Assertion(indexBuffer, "Invalid index buffer handle %d", ctx.vertSource.Ibuffer_handle.value());
 
   // Select index type based on VB_FLAG_LARGE_INDEX
@@ -647,11 +525,11 @@ static void issueModelDraw(const ModelDrawContext& ctx)
   const vk::DeviceSize indexOffsetBytes =
     static_cast<vk::DeviceSize>(ctx.vertSource.Index_offset + batch.index_offset);
 
-  ctx.cmd.bindIndexBuffer(indexBuffer, indexOffsetBytes, indexType);
+  cmd.bindIndexBuffer(indexBuffer, indexOffsetBytes, indexType);
 
   const uint32_t indexCount = static_cast<uint32_t>(batch.n_verts);
 
-  ctx.cmd.drawIndexed(
+  cmd.drawIndexed(
     indexCount,
     1,  // instanceCount
     0,  // firstIndex (we already baked the byte offset above)
@@ -659,9 +537,7 @@ static void issueModelDraw(const ModelDrawContext& ctx)
     0   // firstInstance
   );
   
-  // #region agent log
-  // Note: We log G-buffer draws from gr_vulkan_render_model where we have access to colorAttachmentCount
-  // #endregion agent log
+
 }
 
 void gr_vulkan_render_model(model_material* material_info,
@@ -669,12 +545,7 @@ void gr_vulkan_render_model(model_material* material_info,
   vertex_buffer* bufferp,
   size_t texi)
 {
-  if (renderer_instance) {
-    renderer_instance->incrementModelDraw();
-  }
-
   // Preconditions - frame injected by setup_frame, parameters must be valid
-  Assertion(g_currentFrame != nullptr, "render_model called before setup_frame");
   Assertion(renderer_instance != nullptr, "render_model called without renderer");
   Assertion(material_info != nullptr, "render_model called with null material_info");
   Assertion(vert_source != nullptr, "render_model called with null vert_source");
@@ -682,15 +553,17 @@ void gr_vulkan_render_model(model_material* material_info,
   Assertion(texi < bufferp->tex_buf.size(), "render_model called with invalid texi %zu (size=%zu)",
             texi, bufferp->tex_buf.size());
 
-  VulkanFrame& frame = *g_currentFrame;
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "render_model called with null command buffer");
+  auto ctxBase = currentFrameCtx();
+  auto cmd = ctxBase.cmd;
+  auto bound = requireModelBound(ctxBase);
+  ctxBase.renderer.incrementModelDraw();
 
   // Start rendering FIRST and get the actual target contract
-  const auto& rt = renderer_instance->ensureRenderingStarted(cmd);
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  const auto& rt = renderScope.info;
 
   // Get shader modules for model shader
-  ShaderModules modules = renderer_instance->getShaderModules(SDR_TYPE_MODEL);
+  ShaderModules modules = ctxBase.renderer.getShaderModules(SDR_TYPE_MODEL);
   Assertion(modules.vert != nullptr, "Model vertex shader not loaded");
   Assertion(modules.frag != nullptr, "Model fragment shader not loaded");
 
@@ -700,7 +573,7 @@ void gr_vulkan_render_model(model_material* material_info,
   key.variant_flags          = material_info->get_shader_flags();
   key.color_format           = static_cast<VkFormat>(rt.colorFormat);
   key.depth_format           = static_cast<VkFormat>(rt.depthFormat);
-  key.sample_count           = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+  key.sample_count           = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
   key.color_attachment_count = rt.colorAttachmentCount;
   key.blend_mode             = material_info->get_blend_mode();
   // Model shaders ignore layout_hash (vertex pulling)
@@ -709,13 +582,13 @@ void gr_vulkan_render_model(model_material* material_info,
 
   // Get or create pipeline (pass empty layout for vertex pulling)
   vertex_layout emptyLayout;
-  vk::Pipeline pipeline = renderer_instance->getPipeline(key, modules, emptyLayout);
+  vk::Pipeline pipeline = ctxBase.renderer.getPipeline(key, modules, emptyLayout);
   Assertion(pipeline, "Pipeline creation failed for model shader (variant_flags=0x%x)", key.variant_flags);
 
-  vk::PipelineLayout layout = renderer_instance->getModelPipelineLayout();
+  vk::PipelineLayout layout = ctxBase.renderer.getModelPipelineLayout();
 
   // Get buffers
-  vk::Buffer vertexBuffer = renderer_instance->getBuffer(vert_source->Vbuffer_handle);
+  vk::Buffer vertexBuffer = ctxBase.renderer.getBuffer(vert_source->Vbuffer_handle);
   Assertion(vertexBuffer, "Invalid vertex buffer handle %d", vert_source->Vbuffer_handle.value());
 
   // Build push constants - vertex layout offsets
@@ -762,12 +635,13 @@ void gr_vulkan_render_model(model_material* material_info,
   }
 
   // Build push constants - texture indices
-  auto toIndex = [](int h) -> uint32_t {
-    if (h < 0 || renderer_instance == nullptr) {
+  auto& renderer = ctxBase.renderer;
+  auto toIndex = [&renderer](int h) -> uint32_t {
+    if (h < 0) {
       return MODEL_OFFSET_ABSENT;
     }
 
-    auto* textureManager = renderer_instance->textureManager();
+    auto* textureManager = renderer.textureManager();
     if (!textureManager) {
       return MODEL_OFFSET_ABSENT;
     }
@@ -792,10 +666,6 @@ void gr_vulkan_render_model(model_material* material_info,
   pcs.matrixIndex    = 0;  // Unused
   pcs.flags          = material_info->get_shader_flags();
 
-  // Use the per-frame model descriptor set (allocated and synced at frame start)
-  Assertion(frame.modelDescriptorSet, "Model descriptor set must be allocated at frame start");
-  vk::DescriptorSet modelSet = frame.modelDescriptorSet;
-
   // Dynamic state: compensate for viewport Y-flip (CCW becomes CW)
   cmd.setFrontFace(vk::FrontFace::eClockwise);
 
@@ -806,35 +676,50 @@ void gr_vulkan_render_model(model_material* material_info,
   gr_zbuffer_type zMode = material_info->get_depth_mode();
   bool depthWrite = (zMode == ZBUFFER_TYPE_WRITE || zMode == ZBUFFER_TYPE_FULL);
   bool depthTest = (zMode == ZBUFFER_TYPE_READ || zMode == ZBUFFER_TYPE_FULL);
+  const bool hasDepthAttachment = (rt.depthFormat != vk::Format::eUndefined);
+  if (!hasDepthAttachment) {
+    depthTest = false;
+    depthWrite = false;
+  }
   cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
   cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
-  cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+  cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
+  cmd.setStencilTestEnable(VK_FALSE);
 
-  // Enforce contract: ModelData must be bound via gr_bind_uniform_buffer
-  Assertion(frame.modelUniformBinding.has_value(), "ModelData UBO binding not set; call gr_bind_uniform_buffer first");
-  uint32_t dynOffset = frame.modelUniformBinding->dynamicOffset;
+  // Extended dynamic state 3: per-material blending must be re-enabled after the session baseline disables it.
+  if (ctxBase.renderer.supportsExtendedDynamicState3()) {
+    const auto& caps = ctxBase.renderer.getExtendedDynamicState3Caps();
+    Assertion(rt.colorAttachmentCount <= VulkanRenderTargets::kGBufferCount,
+      "render_model: unexpected colorAttachmentCount=%u (max=%u)",
+      rt.colorAttachmentCount,
+      VulkanRenderTargets::kGBufferCount);
+
+    if (caps.colorBlendEnable) {
+      vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
+      std::array<vk::Bool32, VulkanRenderTargets::kGBufferCount> enables{};
+      enables.fill(blendEnable);
+      cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(rt.colorAttachmentCount, enables.data()));
+    }
+    if (caps.colorWriteMask) {
+      vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+        vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+      std::array<vk::ColorComponentFlags, VulkanRenderTargets::kGBufferCount> masks{};
+      masks.fill(mask);
+      cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(rt.colorAttachmentCount, masks.data()));
+    }
+  }
 
   ModelDrawContext ctx{
-    frame,
-    cmd,
+    bound,
     pipeline,
     layout,
-    modelSet,
-    dynOffset,
     pcs,
     *vert_source,
     *bufferp,
     texi,
   };
 
-  // #region agent log
-  // Log G-buffer draws (colorAttachmentCount == 5 indicates G-buffer)
-  if (rt.colorAttachmentCount == 5) {
-    const buffer_data& batch = bufferp->tex_buf[texi];
-    const uint32_t indexCount = static_cast<uint32_t>(batch.n_verts);
-    logDebugEventDraw("GBUFFER_DRAW", "VulkanGraphics.cpp:gr_vulkan_render_model", "G-buffer draw", indexCount, rt.colorAttachmentCount);
-  }
-  // #endregion agent log
+
 
   issueModelDraw(ctx);
 }
@@ -847,23 +732,20 @@ void gr_vulkan_render_primitives(material* material_info,
   gr_buffer_handle buffer_handle,
   size_t buffer_offset)
 {
-  if (renderer_instance) {
-    renderer_instance->incrementPrimDraw();
-  }
-
   // Preconditions - frame injected by setup_frame, parameters must be valid
-  Assertion(g_currentFrame != nullptr, "render_primitives called before setup_frame");
   Assertion(renderer_instance != nullptr, "render_primitives called without renderer");
   Assertion(material_info != nullptr, "render_primitives called with null material_info");
   Assertion(layout != nullptr, "render_primitives called with null vertex layout");
   Assertion(n_verts > 0, "render_primitives called with zero vertices");
 
-  VulkanFrame& frame = *g_currentFrame;
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "render_primitives called with null command buffer");
+  auto ctxBase = currentFrameCtx();
+  auto& frame = ctxBase.frame;
+  vk::CommandBuffer cmd = ctxBase.cmd;
+  ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  const auto& rt = renderer_instance->ensureRenderingStarted(cmd);
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  const auto& rt = renderScope.info;
 
   // Use the shader type requested by the material
   shader_type shaderType = material_info->get_shader_type();
@@ -901,7 +783,7 @@ void gr_vulkan_render_primitives(material* material_info,
   }
 
   // Get shader modules
-  ShaderModules shaderModules = renderer_instance->getShaderModules(shaderType);
+  ShaderModules shaderModules = ctxBase.renderer.getShaderModules(shaderType);
   Assertion(shaderModules.vert != nullptr, "render_primitives missing vertex shader for shaderType=%d", static_cast<int>(shaderType));
   Assertion(shaderModules.frag != nullptr, "render_primitives missing fragment shader for shaderType=%d", static_cast<int>(shaderType));
 
@@ -911,13 +793,13 @@ void gr_vulkan_render_primitives(material* material_info,
   pipelineKey.variant_flags = material_info->get_shader_flags();
   pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
   pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
-  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
   pipelineKey.color_attachment_count = rt.colorAttachmentCount;
   pipelineKey.blend_mode = material_info->get_blend_mode();
   pipelineKey.layout_hash = layout->hash();
 
   // Get or create pipeline (passes vertex_layout for vertex input state)
-  vk::Pipeline pipeline = renderer_instance->getPipeline(pipelineKey, shaderModules, *layout);
+  vk::Pipeline pipeline = ctxBase.renderer.getPipeline(pipelineKey, shaderModules, *layout);
   Assertion(pipeline, "render_primitives pipeline creation failed (shaderType=%d, layout_hash=0x%x)",
     static_cast<int>(shaderType), static_cast<unsigned int>(pipelineKey.layout_hash));
 
@@ -926,7 +808,7 @@ void gr_vulkan_render_primitives(material* material_info,
     "render_primitives called with invalid buffer handle (shaderType=%d, material=%p)",
     static_cast<int>(material_info->get_shader_type()), static_cast<const void*>(material_info));
 
-  vk::Buffer vertexBuffer = renderer_instance->getBuffer(buffer_handle);
+  vk::Buffer vertexBuffer = ctxBase.renderer.getBuffer(buffer_handle);
   Assertion(vertexBuffer, "render_primitives got null buffer for handle %d (shaderType=%d, material=%p)",
     buffer_handle.value(), static_cast<int>(material_info->get_shader_type()),
     static_cast<const void*>(material_info));
@@ -1006,7 +888,7 @@ void gr_vulkan_render_primitives(material* material_info,
   }
 
   // 3. Allocate from uniform ring buffer using dynamic size
-  const size_t uboAlignmentRaw = renderer_instance->getMinUniformOffsetAlignment();
+  const size_t uboAlignmentRaw = ctxBase.renderer.getMinUniformOffsetAlignment();
   const size_t uboAlignment = uboAlignmentRaw == 0 ? 1 : uboAlignmentRaw;
   const size_t matrixSize = sizeof(matrices);
   const size_t genericOffset = ((matrixSize + uboAlignment - 1) / uboAlignment) * uboAlignment;
@@ -1034,7 +916,7 @@ void gr_vulkan_render_primitives(material* material_info,
     auto samplerKey = VulkanTextureManager::SamplerKey{};
     samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
 
-    baseMapInfo = renderer_instance->getTextureDescriptor(
+    baseMapInfo = ctxBase.renderer.getTextureDescriptor(
       textureHandle, frame, cmd, samplerKey);
   }
 
@@ -1065,7 +947,7 @@ void gr_vulkan_render_primitives(material* material_info,
   // Push descriptors
   cmd.pushDescriptorSetKHR(
     vk::PipelineBindPoint::eGraphics,
-    renderer_instance->getPipelineLayout(),
+    ctxBase.renderer.getPipelineLayout(),
     0, // set 0
     writeCount,
     writes.data());
@@ -1086,12 +968,17 @@ void gr_vulkan_render_primitives(material* material_info,
   gr_zbuffer_type zbufferMode = material_info->get_depth_mode();
   bool depthTest = (zbufferMode == gr_zbuffer_type::ZBUFFER_TYPE_READ || zbufferMode == gr_zbuffer_type::ZBUFFER_TYPE_FULL);
   bool depthWrite = (zbufferMode == gr_zbuffer_type::ZBUFFER_TYPE_WRITE || zbufferMode == gr_zbuffer_type::ZBUFFER_TYPE_FULL);
+  const bool hasDepthAttachment = (rt.depthFormat != vk::Format::eUndefined);
+  if (!hasDepthAttachment) {
+    depthTest = false;
+    depthWrite = false;
+  }
   cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
   cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
   cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
   cmd.setStencilTestEnable(VK_FALSE);
-  if (renderer_instance->supportsExtendedDynamicState3()) {
-    const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+  if (ctxBase.renderer.supportsExtendedDynamicState3()) {
+    const auto& caps = ctxBase.renderer.getExtendedDynamicState3Caps();
     if (caps.colorBlendEnable) {
       // H7 fix: respect material blend mode instead of unconditionally disabling
       vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
@@ -1175,38 +1062,33 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   int n_verts,
   gr_buffer_handle buffer_handle)
 {
-  if (renderer_instance) {
-    renderer_instance->incrementPrimDraw();
-  }
-
-  Assertion(g_currentFrame != nullptr, "render_nanovg called before setup_frame");
   Assertion(renderer_instance != nullptr, "render_nanovg called without renderer");
   Assertion(material_info != nullptr, "render_nanovg called with null material_info");
   Assertion(layout != nullptr, "render_nanovg called with null vertex layout");
   Assertion(n_verts > 0, "render_nanovg called with zero vertices");
   Assertion(buffer_handle.isValid(), "render_nanovg called with invalid vertex buffer handle");
 
-  VulkanFrame& frame = *g_currentFrame;
-  Assertion(frame.nanovgData.valid, "render_nanovg called without NanoVGData uniform buffer bound");
-  Assertion(frame.nanovgData.handle.isValid(), "render_nanovg called with invalid NanoVGData buffer handle");
-
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "render_nanovg called with null command buffer");
+  auto ctxBase = currentFrameCtx();
+  auto cmd = ctxBase.cmd;
+  auto nv = requireNanoVGBound(ctxBase);
+  ctxBase.renderer.incrementPrimDraw();
 
   // NanoVG requires stencil. If we're currently rendering to a swapchain-without-depth target
   // or a non-swapchain target (deferred G-buffer), switch back to the swapchain target with depth/stencil.
-  auto rt = renderer_instance->ensureRenderingStarted(cmd);
-  const auto swapchainFormat = static_cast<vk::Format>(renderer_instance->getSwapChainImageFormat());
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  auto rt = renderScope.info;
+  const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.depthFormat == vk::Format::eUndefined || rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
-    renderer_instance->setPendingRenderTargetSwapchain();
-    rt = renderer_instance->ensureRenderingStarted(cmd);
+    ctxBase.renderer.setPendingRenderTargetSwapchain();
+    renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+    rt = renderScope.info;
   }
 
   Assertion(rt.depthFormat != vk::Format::eUndefined, "render_nanovg requires a depth/stencil attachment");
-  Assertion(renderer_instance->renderTargets() != nullptr, "render_nanovg requires render targets");
-  Assertion(renderer_instance->renderTargets()->depthHasStencil(), "render_nanovg requires a stencil-capable depth format");
+  Assertion(ctxBase.renderer.renderTargets() != nullptr, "render_nanovg requires render targets");
+  Assertion(ctxBase.renderer.renderTargets()->depthHasStencil(), "render_nanovg requires a stencil-capable depth format");
 
-  ShaderModules shaderModules = renderer_instance->getShaderModules(SDR_TYPE_NANOVG);
+  ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_NANOVG);
   Assertion(shaderModules.vert != nullptr, "NanoVG vertex shader not loaded");
   Assertion(shaderModules.frag != nullptr, "NanoVG fragment shader not loaded");
 
@@ -1215,7 +1097,7 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   pipelineKey.variant_flags = 0;
   pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
   pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
-  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
   pipelineKey.color_attachment_count = rt.colorAttachmentCount;
   pipelineKey.blend_mode = material_info->get_blend_mode();
   pipelineKey.layout_hash = layout->hash();
@@ -1238,24 +1120,26 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   pipelineKey.back_depth_fail_op = static_cast<VkStencilOp>(convertStencilOperation(backStencilOp.depthFailOperation));
   pipelineKey.back_pass_op = static_cast<VkStencilOp>(convertStencilOperation(backStencilOp.successOperation));
 
-  vk::Pipeline pipeline = renderer_instance->getPipeline(pipelineKey, shaderModules, *layout);
+  vk::Pipeline pipeline = ctxBase.renderer.getPipeline(pipelineKey, shaderModules, *layout);
   Assertion(pipeline, "Pipeline creation failed for NanoVG shader");
 
-  vk::Buffer vertexBuffer = renderer_instance->getBuffer(buffer_handle);
+  vk::Buffer vertexBuffer = ctxBase.renderer.getBuffer(buffer_handle);
   Assertion(vertexBuffer, "Failed to resolve Vulkan vertex buffer for NanoVG handle %d", buffer_handle.value());
 
-  vk::Buffer uniformBuffer = renderer_instance->getBuffer(frame.nanovgData.handle);
-  Assertion(uniformBuffer, "Failed to resolve Vulkan uniform buffer for NanoVGData handle %d", frame.nanovgData.handle.value());
+  vk::Buffer uniformBuffer = ctxBase.renderer.getBuffer(nv.nanovgUbo.handle);
+  Assertion(uniformBuffer, "Failed to resolve Vulkan uniform buffer for NanoVGData handle %d", nv.nanovgUbo.handle.value());
 
   vk::DescriptorBufferInfo nanovgInfo{};
   nanovgInfo.buffer = uniformBuffer;
-  nanovgInfo.offset = frame.nanovgData.offset;
-  nanovgInfo.range = frame.nanovgData.size;
+  nanovgInfo.offset = nv.nanovgUbo.offset;
+  nanovgInfo.range = nv.nanovgUbo.size;
 
   auto samplerKey = VulkanTextureManager::SamplerKey{};
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
-  vk::DescriptorImageInfo textureInfo =
-    renderer_instance->getTextureDescriptor(material_info->get_texture_map(TM_BASE_TYPE), frame, cmd, samplerKey);
+  const int textureHandle = material_info->get_texture_map(TM_BASE_TYPE);
+  vk::DescriptorImageInfo textureInfo = material_info->is_textured()
+    ? ctxBase.renderer.getTextureDescriptor(textureHandle, ctxBase.frame, cmd, samplerKey)
+    : ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
 
   std::array<vk::WriteDescriptorSet, 2> writes{};
   writes[0].dstBinding = 1;
@@ -1269,7 +1153,7 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   writes[1].pImageInfo = &textureInfo;
 
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, renderer_instance->getPipelineLayout(), 0, 2, writes.data());
+  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, ctxBase.renderer.getPipelineLayout(), 0, 2, writes.data());
 
   vk::DeviceSize vbOffset = 0;
   cmd.bindVertexBuffers(0, 1, &vertexBuffer, &vbOffset);
@@ -1282,8 +1166,8 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   cmd.setDepthCompareOp(vk::CompareOp::eAlways);
   cmd.setStencilTestEnable(material_info->is_stencil_enabled() ? VK_TRUE : VK_FALSE);
 
-  if (renderer_instance->supportsExtendedDynamicState3()) {
-    const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+  if (ctxBase.renderer.supportsExtendedDynamicState3()) {
+    const auto& caps = ctxBase.renderer.getExtendedDynamicState3Caps();
     if (caps.colorBlendEnable) {
       vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
       cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
@@ -1309,29 +1193,26 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   int n_verts,
   gr_buffer_handle buffer_handle)
 {
-  if (renderer_instance) {
-    renderer_instance->incrementPrimDraw();
-  }
-
   // Preconditions
-  Assertion(g_currentFrame != nullptr, "render_primitives_batched called before setup_frame");
   Assertion(renderer_instance != nullptr, "render_primitives_batched called without renderer");
   Assertion(material_info != nullptr, "render_primitives_batched called with null material_info");
   Assertion(layout != nullptr, "render_primitives_batched called with null vertex layout");
   Assertion(n_verts > 0, "render_primitives_batched called with zero vertices");
 
-  VulkanFrame& frame = *g_currentFrame;
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "render_primitives_batched called with null command buffer");
+  auto ctxBase = currentFrameCtx();
+  auto& frame = ctxBase.frame;
+  vk::CommandBuffer cmd = ctxBase.cmd;
+  ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  const auto& rt = renderer_instance->ensureRenderingStarted(cmd);
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  const auto& rt = renderScope.info;
 
   // Force batched bitmap shader
   shader_type shaderType = SDR_TYPE_BATCHED_BITMAP;
 
   // Get shader modules
-  ShaderModules shaderModules = renderer_instance->getShaderModules(shaderType);
+  ShaderModules shaderModules = ctxBase.renderer.getShaderModules(shaderType);
   Assertion(shaderModules.vert != nullptr, "Batched bitmap vertex shader not loaded");
   Assertion(shaderModules.frag != nullptr, "Batched bitmap fragment shader not loaded");
 
@@ -1341,18 +1222,18 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   pipelineKey.variant_flags = material_info->get_shader_flags();
   pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
   pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
-  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
   pipelineKey.color_attachment_count = rt.colorAttachmentCount;
   pipelineKey.blend_mode = material_info->get_blend_mode();
   pipelineKey.layout_hash = layout->hash();
 
   // Get or create pipeline
-  vk::Pipeline pipeline = renderer_instance->getPipeline(pipelineKey, shaderModules, *layout);
+  vk::Pipeline pipeline = ctxBase.renderer.getPipeline(pipelineKey, shaderModules, *layout);
   Assertion(pipeline, "Pipeline creation failed for batched bitmap shader");
 
   // Get vertex buffer
   Assertion(buffer_handle.isValid(), "render_primitives_batched called with invalid buffer handle");
-  vk::Buffer vertexBuffer = renderer_instance->getBuffer(buffer_handle);
+  vk::Buffer vertexBuffer = ctxBase.renderer.getBuffer(buffer_handle);
   Assertion(vertexBuffer, "Failed to get buffer for handle %d", buffer_handle.value());
 
   // Get matrices from global state (uses simpler struct than default-material)
@@ -1367,7 +1248,7 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   generic.intensity = material_info->get_color_scale();
 
   // Allocate from uniform ring buffer (alignment derived from device limits)
-  const size_t uboAlignmentRaw = renderer_instance->getMinUniformOffsetAlignment();
+  const size_t uboAlignmentRaw = ctxBase.renderer.getMinUniformOffsetAlignment();
   const size_t uboAlignment = uboAlignmentRaw == 0 ? 1 : uboAlignmentRaw;
   const size_t matrixSize = sizeof(matrices);  // 128 bytes
   const size_t genericOffset = ((matrixSize + uboAlignment - 1) / uboAlignment) * uboAlignment;
@@ -1391,14 +1272,12 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 
   // Get texture descriptor (batched rendering requires texture)
   int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
-  if (textureHandle < 0) {
-    return;  // Early exit - batched rendering requires texture array
-  }
+  Assertion(textureHandle >= 0, "render_primitives_batched requires a base texture");
 
   auto samplerKey = VulkanTextureManager::SamplerKey{};
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
 
-  vk::DescriptorImageInfo baseMapInfo = renderer_instance->getTextureDescriptor(
+  vk::DescriptorImageInfo baseMapInfo = ctxBase.renderer.getTextureDescriptor(
     textureHandle, frame, cmd, samplerKey);
 
   // Build push descriptor writes (3 bindings: 0=matrix, 1=generic, 2=texture)
@@ -1425,7 +1304,7 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   // Push descriptors (no descriptor set allocation needed)
   cmd.pushDescriptorSetKHR(
     vk::PipelineBindPoint::eGraphics,
-    renderer_instance->getPipelineLayout(),
+    ctxBase.renderer.getPipelineLayout(),
     0,  // set 0 (per-draw push descriptors)
     3,  // all three bindings
     writes.data());
@@ -1446,14 +1325,19 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   gr_zbuffer_type zbufferMode = material_info->get_depth_mode();
   bool depthTest = (zbufferMode == ZBUFFER_TYPE_READ || zbufferMode == ZBUFFER_TYPE_FULL);
   bool depthWrite = (zbufferMode == ZBUFFER_TYPE_WRITE || zbufferMode == ZBUFFER_TYPE_FULL);
+  const bool hasDepthAttachment = (rt.depthFormat != vk::Format::eUndefined);
+  if (!hasDepthAttachment) {
+    depthTest = false;
+    depthWrite = false;
+  }
   cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
   cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
   cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
   cmd.setStencilTestEnable(VK_FALSE);
 
   // Set extended dynamic state 3 (if supported)
-  if (renderer_instance->supportsExtendedDynamicState3()) {
-    const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+  if (ctxBase.renderer.supportsExtendedDynamicState3()) {
+    const auto& caps = ctxBase.renderer.getExtendedDynamicState3Caps();
     if (caps.colorBlendEnable) {
       // H7 fix: respect material blend mode instead of unconditionally disabling
       vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
@@ -1490,12 +1374,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   gr_buffer_handle vertex_buffer,
   gr_buffer_handle index_buffer)
 {
-  if (renderer_instance) {
-    renderer_instance->incrementPrimDraw();
-  }
-
   // Preconditions
-  Assertion(g_currentFrame != nullptr, "render_rocket_primitives called before setup_frame");
   Assertion(renderer_instance != nullptr, "render_rocket_primitives called without renderer");
   Assertion(material_info != nullptr, "render_rocket_primitives called with null material_info");
   Assertion(layout != nullptr, "render_rocket_primitives called with null vertex layout");
@@ -1508,19 +1387,22 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   // RocketUI expects 2D projection in gr_projection_matrix
   gr_set_2d_matrix();
 
-  VulkanFrame& frame = *g_currentFrame;
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "render_rocket_primitives called with null command buffer");
+  auto ctxBase = currentFrameCtx();
+  auto& frame = ctxBase.frame;
+  vk::CommandBuffer cmd = ctxBase.cmd;
+  ctxBase.renderer.incrementPrimDraw();
 
   // Ensure we're rendering to swapchain (menus/UI are swapchain-targeted).
-  auto rt = renderer_instance->ensureRenderingStarted(cmd);
-  const auto swapchainFormat = static_cast<vk::Format>(renderer_instance->getSwapChainImageFormat());
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  auto rt = renderScope.info;
+  const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
-    renderer_instance->setPendingRenderTargetSwapchain();
-    rt = renderer_instance->ensureRenderingStarted(cmd);
+    ctxBase.renderer.setPendingRenderTargetSwapchain();
+    renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+    rt = renderScope.info;
   }
 
-  ShaderModules shaderModules = renderer_instance->getShaderModules(SDR_TYPE_ROCKET_UI);
+  ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_ROCKET_UI);
   Assertion(shaderModules.vert != nullptr, "Rocket UI vertex shader not loaded");
   Assertion(shaderModules.frag != nullptr, "Rocket UI fragment shader not loaded");
 
@@ -1529,18 +1411,18 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   pipelineKey.variant_flags = 0;
   pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
   pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
-  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer_instance->getSampleCount());
+  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
   pipelineKey.color_attachment_count = rt.colorAttachmentCount;
   pipelineKey.blend_mode = material_info->get_blend_mode();
   pipelineKey.layout_hash = layout->hash();
   pipelineKey.color_write_mask = convertColorWriteMask(material_info->get_color_mask());
 
-  vk::Pipeline pipeline = renderer_instance->getPipeline(pipelineKey, shaderModules, *layout);
+  vk::Pipeline pipeline = ctxBase.renderer.getPipeline(pipelineKey, shaderModules, *layout);
   Assertion(pipeline, "Pipeline creation failed for Rocket UI shader");
 
-  vk::Buffer vertexBuffer = renderer_instance->getBuffer(vertex_buffer);
+  vk::Buffer vertexBuffer = ctxBase.renderer.getBuffer(vertex_buffer);
   Assertion(vertexBuffer, "Failed to resolve Vulkan vertex buffer for Rocket UI handle %d", vertex_buffer.value());
-  vk::Buffer indexBuffer = renderer_instance->getBuffer(index_buffer);
+  vk::Buffer indexBuffer = ctxBase.renderer.getBuffer(index_buffer);
   Assertion(indexBuffer, "Failed to resolve Vulkan index buffer for Rocket UI handle %d", index_buffer.value());
 
   // Build Rocket UI uniform data (matches rocketui_data std140 layout)
@@ -1554,7 +1436,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   rocketData.horizontalSwipeOffset = material_info->get_horizontal_swipe();
 
   // Allocate uniform block for binding 1
-  const size_t uboAlignmentRaw = renderer_instance->getMinUniformOffsetAlignment();
+  const size_t uboAlignmentRaw = ctxBase.renderer.getMinUniformOffsetAlignment();
   const size_t uboAlignment = uboAlignmentRaw == 0 ? 1 : uboAlignmentRaw;
   auto uniformAlloc = frame.uniformBuffer().allocate(sizeof(rocketData), uboAlignment);
   std::memcpy(uniformAlloc.mapped, &rocketData, sizeof(rocketData));
@@ -1576,7 +1458,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   if (textureHandle >= 0) {
     auto samplerKey = VulkanTextureManager::SamplerKey{};
     samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
-    baseMapInfo = renderer_instance->getTextureDescriptor(textureHandle, frame, cmd, samplerKey);
+    baseMapInfo = ctxBase.renderer.getTextureDescriptor(textureHandle, frame, cmd, samplerKey);
 
     writes[1].dstBinding = 2;
     writes[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
@@ -1586,7 +1468,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   }
 
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, renderer_instance->getPipelineLayout(), 0, writeCount, writes.data());
+  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, ctxBase.renderer.getPipelineLayout(), 0, writeCount, writes.data());
 
   vk::DeviceSize vbOffset = 0;
   cmd.bindVertexBuffers(0, 1, &vertexBuffer, &vbOffset);
@@ -1600,8 +1482,8 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   cmd.setDepthCompareOp(vk::CompareOp::eAlways);
   cmd.setStencilTestEnable(VK_FALSE);
 
-  if (renderer_instance->supportsExtendedDynamicState3()) {
-    const auto& caps = renderer_instance->getExtendedDynamicState3Caps();
+  if (ctxBase.renderer.supportsExtendedDynamicState3()) {
+    const auto& caps = ctxBase.renderer.getExtendedDynamicState3Caps();
     if (caps.colorBlendEnable) {
       vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
       cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
@@ -1627,7 +1509,7 @@ bool gr_vulkan_is_capable(gr_capability capability)
   switch (capability) {
   case gr_capability::CAPABILITY_INSTANCED_RENDERING:
     // Report instancing only when the device supports attribute divisors
-    return renderer_instance && renderer_instance->supportsVertexAttributeDivisor();
+    return currentRenderer().supportsVertexAttributeDivisor();
   case gr_capability::CAPABILITY_PERSISTENT_BUFFER_MAPPING:
     // Disabled for now: our buffer upload path expects non-null data on creation,
     // while the persistent-mapped path would pass nullptr initially.
@@ -1639,11 +1521,8 @@ bool gr_vulkan_is_capable(gr_capability capability)
 bool gr_vulkan_get_property(gr_property p, void* dest)
 {
   if (p == gr_property::UNIFORM_BUFFER_OFFSET_ALIGNMENT) {
-    if (renderer_instance) {
-      *reinterpret_cast<int*>(dest) = static_cast<int>(renderer_instance->getMinUniformBufferAlignment());
-      return true;
-    }
-    *reinterpret_cast<int*>(dest) = 256;
+    Assertion(dest != nullptr, "gr_vulkan_get_property called with null dest");
+    *reinterpret_cast<int*>(dest) = static_cast<int>(currentRenderer().getMinUniformBufferAlignment());
     return true;
   }
   return false;
@@ -1651,13 +1530,19 @@ bool gr_vulkan_get_property(gr_property p, void* dest)
 
 void gr_vulkan_push_debug_group(const char* name)
 {
-  if (!g_currentFrame) {
-    return;
+  // #region agent log
+  std::ofstream logfile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
+  if (logfile.is_open()) {
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count();
+    logfile << R"({"sessionId":"debug-session","runId":"post-fix","hypothesisId":"D","location":"VulkanGraphics.cpp:1530","message":"gr_vulkan_push_debug_group entry","data":"name=)" << (name ? name : "null") << R"("})" << "\n";
+    logfile.close();
   }
-  vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-  if (!cmd) {
-    return;
-  }
+  // #endregion agent log
+  
+  Assertion(name != nullptr, "gr_vulkan_push_debug_group called with null name");
+  auto ctxBase = currentFrameCtx();
+  auto cmd = ctxBase.cmd;
 
   vk::DebugUtilsLabelEXT label{};
   label.pLabelName = name;
@@ -1672,15 +1557,8 @@ void gr_vulkan_push_debug_group(const char* name)
 
 void gr_vulkan_pop_debug_group()
 {
-  if (!g_currentFrame) {
-    return;
-  }
-  vk::CommandBuffer cmd = g_currentFrame->commandBuffer();
-  if (!cmd) {
-    return;
-  }
-
-  cmd.endDebugUtilsLabelEXT();
+  auto ctxBase = currentFrameCtx();
+  ctxBase.cmd.endDebugUtilsLabelEXT();
 }
 
 int stub_create_query_object() { return -1; }
@@ -1714,21 +1592,14 @@ void init_function_pointers()
 
   // Core frame management
   gr_screen.gf_flip = []() {
-    g_currentFrame = nullptr;
-    if (renderer_instance) {
-      renderer_instance->flip();
-    }
+    currentRenderer().flip();
   };
   gr_screen.gf_setup_frame = gr_vulkan_setup_frame;
   gr_screen.gf_clear = []() {
-    if (renderer_instance) {
-      renderer_instance->requestClear();
-    }
+    currentRenderer().requestClear();
   };
   gr_screen.gf_set_clear_color = [](int r, int g, int b) {
-    if (renderer_instance) {
-      renderer_instance->setClearColor(r, g, b);
-    }
+    currentRenderer().setClearColor(r, g, b);
   };
 
   // Clipping
@@ -1737,35 +1608,21 @@ void init_function_pointers()
 
   // Depth/cull state
   gr_screen.gf_set_cull = [](int cull) -> int {
-    if (renderer_instance) {
-      return renderer_instance->setCullMode(cull);
-    }
-    return 0;
+    return currentRenderer().setCullMode(cull);
   };
   gr_screen.gf_zbuffer_set = [](int mode) -> int {
-    if (renderer_instance) {
-      return renderer_instance->setZbufferMode(mode);
-    }
-    return mode;
+    return currentRenderer().setZbufferMode(mode);
   };
   gr_screen.gf_zbuffer_get = []() -> int {
-    if (renderer_instance) {
-      return renderer_instance->getZbufferMode();
-    }
-    return 0;
+    return currentRenderer().getZbufferMode();
   };
   gr_screen.gf_zbuffer_clear = [](int mode) {
-    if (renderer_instance) {
-      renderer_instance->zbufferClear(mode);
-    }
+    currentRenderer().zbufferClear(mode);
   };
 
   // Texture preloading
   gr_screen.gf_preload = [](int bitmap_num, int is_aabitmap) -> int {
-    if (renderer_instance) {
-      return renderer_instance->preloadTexture(bitmap_num, is_aabitmap != 0);
-    }
-    return 0;
+    return currentRenderer().preloadTexture(bitmap_num, is_aabitmap != 0);
   };
 
   // Buffer management
@@ -1775,21 +1632,14 @@ void init_function_pointers()
   gr_screen.gf_update_buffer_data_offset = gr_vulkan_update_buffer_data_offset;
   gr_screen.gf_resize_buffer = gr_vulkan_resize_buffer;
   gr_screen.gf_map_buffer = [](gr_buffer_handle handle) -> void* {
-    if (renderer_instance) {
-      return renderer_instance->mapBuffer(handle);
-    }
-    return nullptr;
+    return currentRenderer().mapBuffer(handle);
   };
   gr_screen.gf_flush_mapped_buffer = [](gr_buffer_handle handle, size_t offset, size_t size) {
-    if (renderer_instance) {
-      renderer_instance->flushMappedBuffer(handle, offset, size);
-    }
+    currentRenderer().flushMappedBuffer(handle, offset, size);
   };
   gr_screen.gf_bind_uniform_buffer = gr_vulkan_bind_uniform_buffer;
   gr_screen.gf_register_model_vertex_heap = [](gr_buffer_handle handle) {
-    Assertion(renderer_instance != nullptr,
-      "register_model_vertex_heap called before renderer initialization");
-    renderer_instance->setModelVertexHeapHandle(handle);
+    currentRenderer().setModelVertexHeapHandle(handle);
   };
 
   // Rendering
@@ -1800,10 +1650,17 @@ void init_function_pointers()
   gr_screen.gf_render_rocket_primitives = gr_vulkan_render_rocket_primitives;
 
   // Deferred lighting
-  gr_screen.gf_deferred_lighting_begin = gr_vulkan_deferred_lighting_begin;
-  gr_screen.gf_deferred_lighting_msaa = gr_vulkan_deferred_lighting_msaa;
-  gr_screen.gf_deferred_lighting_end = gr_vulkan_deferred_lighting_end;
-  gr_screen.gf_deferred_lighting_finish = gr_vulkan_deferred_lighting_finish;
+  if (light_deferred_enabled()) {
+    gr_screen.gf_deferred_lighting_begin = gr_vulkan_deferred_lighting_begin;
+    gr_screen.gf_deferred_lighting_msaa = gr_vulkan_deferred_lighting_msaa;
+    gr_screen.gf_deferred_lighting_end = gr_vulkan_deferred_lighting_end;
+    gr_screen.gf_deferred_lighting_finish = gr_vulkan_deferred_lighting_finish;
+  } else {
+    gr_screen.gf_deferred_lighting_begin = stub_deferred_lighting_begin;
+    gr_screen.gf_deferred_lighting_msaa = stub_deferred_lighting_msaa;
+    gr_screen.gf_deferred_lighting_end = stub_deferred_lighting_end;
+    gr_screen.gf_deferred_lighting_finish = stub_deferred_lighting_finish;
+  }
 
   // Line width
   gr_screen.gf_set_line_width = stub_set_line_width;
