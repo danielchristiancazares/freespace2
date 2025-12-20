@@ -144,19 +144,14 @@ TEST(VulkanPipelineManager, Scenario_UninitializedPipelineKey_DoesNotMatchModelT
 {
 	// Given an uninitialized PipelineKey (zero-initialized)
 	PipelineKey uninitKey{};
-	// type is zero-initialized to 0
+	// type uses a safe default (SDR_TYPE_NONE) to avoid accidentally matching SDR_TYPE_MODEL (0)
 
 	// When comparing with SDR_TYPE_MODEL enum value
-	// Then even though the value is 0, the comparison should work correctly
-	// This test verifies that the comparison logic correctly identifies model vs uninitialized
-	EXPECT_EQ(static_cast<int>(uninitKey.type), 0)
-		<< "Uninitialized PipelineKey.type is 0";
-	
-	// Note: This test documents the behavior - if type is 0, it will match SDR_TYPE_MODEL
-	// This is expected behavior since SDR_TYPE_MODEL == 0, but highlights the importance
-	// of proper initialization to avoid false matches
-	EXPECT_TRUE(uninitKey.type == SDR_TYPE_MODEL)
-		<< "Uninitialized PipelineKey with type=0 will match SDR_TYPE_MODEL (this is why proper initialization is critical)";
+	// Then it should not match SDR_TYPE_MODEL by accident
+	EXPECT_EQ(static_cast<int>(uninitKey.type), -1)
+		<< "Default PipelineKey.type should be SDR_TYPE_NONE (-1)";
+	EXPECT_FALSE(uninitKey.type == SDR_TYPE_MODEL)
+		<< "Default PipelineKey.type should not match SDR_TYPE_MODEL";
 }
 
 TEST(VulkanPipelineManager, Scenario_DynamicRenderingRequired)

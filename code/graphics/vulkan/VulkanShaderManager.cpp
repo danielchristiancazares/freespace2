@@ -103,21 +103,7 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path)
   for (const auto& df : embedded) {
     if (!stricmp(df.filename, filename.c_str())) {
       foundEmbedded = true;
-      // #region agent log
-      {
-        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count();
-        static std::atomic<uint64_t> eventCounter{0};
-        const uint64_t seq = eventCounter.fetch_add(1) + 1;
-        std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-        if (logFile.is_open()) {
-          logFile << R"({"id":"log_shader_)" << seq << R"(","timestamp":)" << timestamp
-                  << R"(,"location":"VulkanShaderManager.cpp:loadModule","message":"Loading embedded shader","data":{"filename":")" << filename
-                  << R"(","size":)" << df.size << R"(},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-          logFile.close();
-        }
-      }
-      // #endregion agent log
+
       // Ensure alignment by copying to a uint32_t vector if needed
       std::vector<uint32_t> code((df.size + 3) / 4);
       std::memcpy(code.data(), df.data, df.size);
@@ -132,21 +118,7 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path)
   }
 
   // Fallback to filesystem
-  // #region agent log
-  {
-    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now().time_since_epoch()).count();
-    static std::atomic<uint64_t> eventCounter{0};
-    const uint64_t seq = eventCounter.fetch_add(1) + 1;
-    std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-    if (logFile.is_open()) {
-      logFile << R"({"id":"log_shader_)" << seq << R"(","timestamp":)" << timestamp
-              << R"(,"location":"VulkanShaderManager.cpp:loadModule","message":"Loading filesystem shader","data":{"filename":")" << filename
-              << R"(","path":")" << path << R"("},"sessionId":"debug-session","runId":"run2","hypothesisId":"A"})" << "\n";
-      logFile.close();
-    }
-  }
-  // #endregion agent log
+
   std::ifstream file(path, std::ios::binary | std::ios::ate);
   if (!file) {
     throw std::runtime_error("Failed to open shader module " + path);
