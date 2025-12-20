@@ -127,16 +127,6 @@ class VulkanTextureManager {
 		}
 	};
 
-	struct TextureDescriptorQuery {
-		vk::DescriptorImageInfo info;
-		bool isFallback = false;
-		bool queuedUpload = false;
-	};
-
-	// Query descriptor for a bitmap; queues upload if needed but never throws.
-	// Returns fallback descriptor if texture is not resident.
-	TextureDescriptorQuery queryDescriptor(int bitmapHandle, const SamplerKey& samplerKey);
-
 	// Flush pending uploads (only callable when no rendering is active).
 	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 	void markUploadsCompleted(uint32_t completedFrameIndex);
@@ -158,6 +148,7 @@ class VulkanTextureManager {
 		const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
 		void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
+		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
 		void processPendingDestructions(uint64_t completedSerial);
 		const std::vector<int>& getNewlyResidentTextures() const { return m_newlyResidentTextures; }
 		void clearNewlyResidentTextures() { m_newlyResidentTextures.clear(); }
@@ -170,6 +161,8 @@ class VulkanTextureManager {
 
 	// Synthetic handle for fallback texture (won't collide with bmpman handles which are >= 0)
 	static constexpr int kFallbackTextureHandle = -1000;
+	// Synthetic handle for default white texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kDefaultTextureHandle = -1001;
 
   private:
 	vk::Device m_device;
@@ -188,7 +181,9 @@ class VulkanTextureManager {
 
 	vk::Sampler getOrCreateSampler(const SamplerKey& key);
 	bool uploadImmediate(int baseFrame, bool isAABitmap);
+	void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
 	void createFallbackTexture();
+	void createDefaultTexture();
 	TextureRecord* ensureTextureResident(int bitmapHandle,
 		VulkanFrame& frame,
 		vk::CommandBuffer cmd,
@@ -209,6 +204,8 @@ class VulkanTextureManager {
 
 	// Fallback "black" texture for retired slots (initialized at startup)
 	int m_fallbackTextureHandle = -1;
+	// Default "white" texture for untextured draws (initialized at startup)
+	int m_defaultTextureHandle = -1;
 	
 	// Textures that became Resident in markUploadsCompleted and need descriptor write
 	std::vector<int> m_newlyResidentTextures;
@@ -219,7 +216,5 @@ class VulkanTextureManager {
 
 } // namespace vulkan
 } // namespace graphics
-
-
 
 

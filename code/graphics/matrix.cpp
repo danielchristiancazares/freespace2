@@ -53,9 +53,18 @@ static void create_perspective_projection_matrix(matrix4 *out, float left, float
 	out->a1d[5] = 2.0f * near_dist / (top - bottom);
 	out->a1d[8] = (right + left) / (right - left);
 	out->a1d[9] = (top + bottom) / (top - bottom);
-	out->a1d[10] = -(far_dist + near_dist) / (far_dist - near_dist);
 	out->a1d[11] = -1.0f;
-	out->a1d[14] = -2.0f * far_dist * near_dist / (far_dist - near_dist);
+
+	// Vulkan uses [0, 1] depth range, OpenGL uses [-1, 1]
+	if (gr_screen.mode == GR_VULKAN) {
+		// Vulkan projection: maps Z from [near, far] to [0, 1]
+		out->a1d[10] = -far_dist / (far_dist - near_dist);
+		out->a1d[14] = -(far_dist * near_dist) / (far_dist - near_dist);
+	} else {
+		// OpenGL projection: maps Z from [near, far] to [-1, 1]
+		out->a1d[10] = -(far_dist + near_dist) / (far_dist - near_dist);
+		out->a1d[14] = -2.0f * far_dist * near_dist / (far_dist - near_dist);
+	}
 }
 
 static void create_orthographic_projection_matrix(matrix4* out, float left, float right, float bottom, float top, float near_dist, float far_dist)
@@ -64,11 +73,20 @@ static void create_orthographic_projection_matrix(matrix4* out, float left, floa
 
 	out->a1d[0] = 2.0f / (right - left);
 	out->a1d[5] = 2.0f / (top - bottom);
-	out->a1d[10] = -2.0f / (far_dist - near_dist);
 	out->a1d[12] = -(right + left) / (right - left);
 	out->a1d[13] = -(top + bottom) / (top - bottom);
-	out->a1d[14] = -(far_dist + near_dist) / (far_dist - near_dist);
 	out->a1d[15] = 1.0f;
+
+	// Vulkan uses [0, 1] depth range, OpenGL uses [-1, 1]
+	if (gr_screen.mode == GR_VULKAN) {
+		// Vulkan orthographic: maps Z from [near, far] to [0, 1]
+		out->a1d[10] = -1.0f / (far_dist - near_dist);
+		out->a1d[14] = -near_dist / (far_dist - near_dist);
+	} else {
+		// OpenGL orthographic: maps Z from [near, far] to [-1, 1]
+		out->a1d[10] = -2.0f / (far_dist - near_dist);
+		out->a1d[14] = -(far_dist + near_dist) / (far_dist - near_dist);
+	}
 }
 
 void gr_start_instance_matrix(const vec3d *offset, const matrix *rotation)
