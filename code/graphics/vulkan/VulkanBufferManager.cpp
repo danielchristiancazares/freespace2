@@ -161,15 +161,14 @@ void* VulkanBufferManager::mapBuffer(gr_buffer_handle handle)
 
 void VulkanBufferManager::flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size)
 {
-	if (!handle.isValid() || static_cast<size_t>(handle.value()) >= m_buffers.size()) {
-		return;
-	}
+	Assertion(handle.isValid() && static_cast<size_t>(handle.value()) < m_buffers.size(),
+	          "Invalid buffer handle %d in flushMappedBuffer", handle.value());
 
 	auto& buffer = m_buffers[handle.value()];
 
-	if (!buffer.mapped) {
-		return;
-	}
+	Assertion(buffer.mapped != nullptr, "flushMappedBuffer called on unmapped buffer");
+	(void)offset;
+	(void)size;
 
 	// For host-coherent memory, flush is a no-op
 	// For non-coherent, we'd need vkFlushMappedMemoryRanges
