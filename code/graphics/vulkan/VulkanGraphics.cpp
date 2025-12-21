@@ -1088,13 +1088,16 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
 
   // NanoVG requires stencil. If we're currently rendering to a swapchain-without-depth target
   // or a non-swapchain target (deferred G-buffer), switch back to the swapchain target with depth/stencil.
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  auto rt = renderScope.info;
+  std::optional<VulkanRenderingSession::RenderScope> renderScope;
+  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+  auto rt = renderScope->info;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.depthFormat == vk::Format::eUndefined || rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
+    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
+    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-    rt = renderScope.info;
+    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+    rt = renderScope->info;
   }
 
   Assertion(rt.depthFormat != vk::Format::eUndefined, "render_nanovg requires a depth/stencil attachment");
@@ -1406,13 +1409,16 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Ensure we're rendering to swapchain (menus/UI are swapchain-targeted).
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  auto rt = renderScope.info;
+  std::optional<VulkanRenderingSession::RenderScope> renderScope;
+  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+  auto rt = renderScope->info;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
+    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
+    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-    rt = renderScope.info;
+    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+    rt = renderScope->info;
   }
 
   ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_ROCKET_UI);

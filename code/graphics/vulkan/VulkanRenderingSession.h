@@ -22,17 +22,37 @@ public:
   // RAII guard for active render pass - destruction calls endRendering()
   struct ActivePass {
     vk::CommandBuffer cmd{};
-    explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
-    ~ActivePass() { if (cmd) cmd.endRendering(); }
+    VulkanRenderingSession* session = nullptr;
+    ActivePass(vk::CommandBuffer c, VulkanRenderingSession* s) : cmd(c), session(s) {}
+    ~ActivePass()
+    {
+      if (cmd) {
+        cmd.endRendering();
+      }
+      if (session) {
+        session->m_renderingActive = false;
+      }
+    }
 
     ActivePass(const ActivePass&) = delete;
     ActivePass& operator=(const ActivePass&) = delete;
-    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd) { other.cmd = vk::CommandBuffer{}; }
+    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd), session(other.session)
+    {
+      other.cmd = vk::CommandBuffer{};
+      other.session = nullptr;
+    }
     ActivePass& operator=(ActivePass&& other) noexcept {
       if (this != &other) {
-        if (cmd) cmd.endRendering();
+        if (cmd) {
+          cmd.endRendering();
+        }
+        if (session) {
+          session->m_renderingActive = false;
+        }
         cmd = other.cmd;
+        session = other.session;
         other.cmd = vk::CommandBuffer{};
+        other.session = nullptr;
       }
       return *this;
     }
@@ -52,6 +72,7 @@ public:
 
   // Starts dynamic rendering for the *current target*; returns scope that ends the pass on destruction.
   RenderScope beginRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
+  bool renderingActive() const { return m_renderingActive; }
 
   // Boundary-facing state transitions (no "pending", no dual state)
   void requestSwapchainTarget();                  // swapchain + depth
@@ -157,6 +178,8 @@ private:
 
     // Swapchain image layout tracking (per swapchain image index)
     std::vector<vk::ImageLayout> m_swapchainLayouts;
+
+    bool m_renderingActive = false;
   };
 
 } // namespace vulkan

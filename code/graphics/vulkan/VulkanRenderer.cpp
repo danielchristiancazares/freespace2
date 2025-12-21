@@ -12,6 +12,7 @@
 #include "VulkanDebug.h"
 #include "osapi/outwnd.h"
 #include "bmpman/bmpman.h"
+#include "cmdline/cmdline.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -45,6 +46,7 @@ bool VulkanRenderer::initialize() {
   createRenderTargets();
   createRenderingSession();
   createUploadCommandPool();
+  createSubmitTimelineSemaphore();
   createFrames();
 
   // Initialize managers using VulkanDevice handles
@@ -131,6 +133,76 @@ void VulkanRenderer::createUploadCommandPool() {
   m_uploadCommandPool = m_vulkanDevice->device().createCommandPoolUnique(poolInfo);
 }
 
+void VulkanRenderer::createSubmitTimelineSemaphore() {
+  vk::SemaphoreTypeCreateInfo timelineType;
+  timelineType.semaphoreType = vk::SemaphoreType::eTimeline;
+  timelineType.initialValue = 0;
+
+  vk::SemaphoreCreateInfo semaphoreInfo;
+  semaphoreInfo.pNext = &timelineType;
+  m_submitTimeline = m_vulkanDevice->device().createSemaphoreUnique(semaphoreInfo);
+  Assertion(m_submitTimeline, "Failed to create submit timeline semaphore");
+}
+
+uint64_t VulkanRenderer::queryCompletedSerial() const
+{
+  if (!m_submitTimeline) {
+    return m_completedSerial;
+  }
+
+#if defined(VULKAN_HPP_NO_EXCEPTIONS)
+  auto rv = m_vulkanDevice->device().getSemaphoreCounterValue(m_submitTimeline.get());
+  if (rv.result != vk::Result::eSuccess) {
+    return m_completedSerial;
+  }
+  return rv.value;
+#else
+  return m_vulkanDevice->device().getSemaphoreCounterValue(m_submitTimeline.get());
+#endif
+}
+
+void VulkanRenderer::maybeRunVulkanStress()
+{
+  if (!Cmdline_vk_stress) {
+    return;
+  }
+
+  Assertion(m_bufferManager != nullptr, "Vulkan stress mode requires an initialized buffer manager");
+
+  constexpr size_t kScratchSize = 64 * 1024;
+  constexpr size_t kBufferCount = 64;
+  constexpr size_t kOpsPerFrame = 8;
+  constexpr size_t kMinUpdateSize = 256;
+
+  if (m_stressScratch.empty()) {
+    m_stressScratch.resize(kScratchSize, 0xA5);
+  }
+  if (m_stressBuffers.empty()) {
+    m_stressBuffers.reserve(kBufferCount);
+    for (size_t i = 0; i < kBufferCount; ++i) {
+      const BufferType type = (i % 3 == 0) ? BufferType::Vertex
+                             : (i % 3 == 1) ? BufferType::Index
+                                            : BufferType::Uniform;
+      m_stressBuffers.push_back(m_bufferManager->createBuffer(type, BufferUsageHint::Dynamic));
+    }
+  }
+
+  // Bounded churn: resize/update a subset each frame, periodically delete to exercise deferred releases.
+  const size_t count = m_stressBuffers.size();
+  const size_t maxUpdate = std::max(kMinUpdateSize + 1, m_stressScratch.size());
+  for (size_t op = 0; op < kOpsPerFrame; ++op) {
+    const size_t idx = (static_cast<size_t>(m_frameCounter) * 131u + op * 17u) % count;
+    const size_t size = kMinUpdateSize +
+                        ((static_cast<size_t>(m_frameCounter) * 4099u + idx * 97u) % (maxUpdate - kMinUpdateSize));
+    m_bufferManager->updateBufferData(m_stressBuffers[idx], size, m_stressScratch.data());
+  }
+
+  if ((m_frameCounter % 4u) == 0u) {
+    const size_t idx = (static_cast<size_t>(m_frameCounter) / 4u) % count;
+    m_bufferManager->deleteBuffer(m_stressBuffers[idx]);
+  }
+}
+
 uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
   auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
 
@@ -188,6 +260,8 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
     "New frame started while deferred boundary state was not idle");
   m_deferredBoundaryState = DeferredBoundaryState::Idle;
+  Assertion(m_renderingSession && !m_renderingSession->renderingActive(),
+    "beginFrame called while rendering is still active (RenderScope not destroyed)");
 
   // Reset per-frame uniform bindings
   frame.resetPerFrameBindings();
@@ -198,6 +272,15 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
   cmd.begin(beginInfo);
 
+  // Collect serial-gated deferred releases opportunistically at a known safe point.
+  m_completedSerial = std::max(m_completedSerial, queryCompletedSerial());
+  if (m_bufferManager) {
+    m_bufferManager->collect(m_completedSerial);
+  }
+  if (m_textureManager) {
+    m_textureManager->collect(m_completedSerial);
+  }
+
   // Upload any pending textures before rendering begins (no render pass active yet).
   // This is the explicit upload flush point - textures requested before rendering starts
   // will be queued and flushed here.
@@ -207,6 +290,7 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
   m_bufferManager->setSafeRetireSerial(m_submitSerial);
+  maybeRunVulkanStress();
   m_textureManager->flushPendingUploads(frame, cmd, m_frameCounter);
 
   // Sync model descriptors AFTER upload flush so newly-resident textures are written this frame.
@@ -250,9 +334,9 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   signalSemaphores[0].semaphore = frame.renderFinished();
   signalSemaphores[0].stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 
-  signalSemaphores[1].semaphore = frame.timelineSemaphore();
-  signalSemaphores[1].value = frame.nextTimelineValue();
-  signalSemaphores[1].stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+  signalSemaphores[1].semaphore = m_submitTimeline.get();
+  signalSemaphores[1].value = m_submitSerial + 1; // will become submitSerial below
+  signalSemaphores[1].stageMask = vk::PipelineStageFlagBits2::eAllCommands;
 
   vk::SubmitInfo2 submitInfo;
   submitInfo.waitSemaphoreInfoCount = 1;
@@ -263,13 +347,14 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   submitInfo.pSignalSemaphoreInfos = signalSemaphores;
 
   const uint64_t submitSerial = ++m_submitSerial;
+  signalSemaphores[1].value = submitSerial;
   if (m_textureManager) {
     m_textureManager->setSafeRetireSerial(m_submitSerial);
   }
   if (m_bufferManager) {
     m_bufferManager->setSafeRetireSerial(m_submitSerial);
   }
-  const uint64_t timelineValue = frame.nextTimelineValue();
+  const uint64_t timelineValue = submitSerial;
 
 #if defined(VULKAN_HPP_NO_EXCEPTIONS)
   m_vulkanDevice->graphicsQueue().submit2(submitInfo, fence);
@@ -286,8 +371,6 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
       m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
     }
   }
-
-  frame.advanceTimeline();
 
   graphics::vulkan::SubmitInfo info{};
   info.imageIndex = imageIndex;
@@ -331,7 +414,12 @@ void VulkanRenderer::recycleOneInFlight()
 
   // We recycle in FIFO order, so submission serials should complete monotonically.
   f.wait_for_gpu();
-  m_completedSerial = std::max(m_completedSerial, inflight.submit.serial);
+  const uint64_t completed = queryCompletedSerial();
+  m_completedSerial = std::max(m_completedSerial, completed);
+  Assertion(m_completedSerial >= inflight.submit.serial,
+    "Completed serial (%llu) must be >= recycled submission serial (%llu)",
+    static_cast<unsigned long long>(m_completedSerial),
+    static_cast<unsigned long long>(inflight.submit.serial));
   prepareFrameForReuse(f, m_completedSerial);
 
   m_availableFrames.push_back(AvailableFrame{ &f, m_completedSerial });

@@ -21,6 +21,7 @@
 #include "VulkanDeferredLights.h"
 
 #include <array>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -151,12 +152,13 @@ class VulkanRenderer {
 	static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
 	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
 
-	void createUploadCommandPool();
-	void createDescriptorResources();
-	void createFrames();
-	void createVertexBuffer();
-	void createRenderTargets();
-	void createRenderingSession();
+		void createUploadCommandPool();
+		void createSubmitTimelineSemaphore();
+		void createDescriptorResources();
+		void createFrames();
+		void createVertexBuffer();
+		void createRenderTargets();
+		void createRenderingSession();
 	void createDeferredLightingResources();
 
 	uint32_t acquireImage(VulkanFrame& frame);
@@ -176,10 +178,13 @@ class VulkanRenderer {
 
 		void immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder);
 
-	// Descriptor sync helpers
-	void writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer);
-	void writeTextureDescriptor(vk::DescriptorSet set, uint32_t arrayIndex, int textureHandle);
-	void writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex);
+		uint64_t queryCompletedSerial() const;
+		void maybeRunVulkanStress();
+
+		// Descriptor sync helpers
+		void writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer);
+		void writeTextureDescriptor(vk::DescriptorSet set, uint32_t arrayIndex, int textureHandle);
+		void writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex);
 
 	void prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial);
 
@@ -210,6 +215,9 @@ class VulkanRenderer {
 	vk::UniqueBuffer m_vertexBuffer;
 		vk::UniqueDeviceMemory m_vertexBufferMemory;
 
+		// Global GPU completion timeline (serial == timeline value).
+		vk::UniqueSemaphore m_submitTimeline;
+
 		// Per-frame draw counters
 		uint32_t m_frameModelDraws = 0;
 		uint32_t m_framePrimDraws = 0;
@@ -217,7 +225,11 @@ class VulkanRenderer {
 		uint64_t m_submitSerial = 0;
 		uint64_t m_completedSerial = 0;
 
-	DeferredBoundaryState m_deferredBoundaryState = DeferredBoundaryState::Idle;
+		// Optional stress harness state (enabled via -vk_stress).
+		std::vector<gr_buffer_handle> m_stressBuffers;
+		std::vector<uint8_t> m_stressScratch;
+
+		DeferredBoundaryState m_deferredBoundaryState = DeferredBoundaryState::Idle;
 
 	// Model vertex heap handle - set via setModelVertexHeapHandle when ModelVertex heap is created.
 	// The actual VkBuffer is looked up lazily via queryModelVertexHeapBuffer() since the buffer
