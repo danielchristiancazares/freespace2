@@ -143,6 +143,9 @@ class VulkanTextureManager {
 		void cleanup();
 
 		// Descriptor binding management
+		// Returns a stable bindless slot index for this texture handle.
+		// - If the handle is missing/unavailable/not-yet-resident, the slot's descriptor points at fallback.
+		// - If no slot can be assigned safely, returns slot 0 (fallback).
 		uint32_t getBindlessSlotIndex(int textureHandle);
 
 		// Mark a texture as used by the upcoming submission (bindless or descriptor bind).
@@ -177,8 +180,9 @@ class VulkanTextureManager {
 		// Flush pending uploads (upload phase only; records GPU work).
 		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 
+		void processPendingRetirements();
 		void retryPendingBindlessSlots();
-		bool tryAssignBindlessSlot(int textureHandle);
+		bool tryAssignBindlessSlot(int textureHandle, bool allowResidentEvict);
 		void onTextureResident(int textureHandle);
 		void retireTexture(int textureHandle, uint64_t retireSerial);
 
@@ -197,7 +201,8 @@ class VulkanTextureManager {
 	std::unordered_map<int, ResidentTexture> m_residentTextures; // keyed by base frame (or synthetic handles)
 	std::unordered_map<int, UnavailableTexture> m_unavailableTextures; // keyed by base frame
 	std::unordered_map<int, uint32_t> m_bindlessSlots; // keyed by base frame
-	std::unordered_set<int> m_pendingBindlessSlots; // resident textures waiting for a bindless slot (retry each frame)
+	std::unordered_set<int> m_pendingBindlessSlots; // textures waiting for a bindless slot assignment (retry each frame start)
+	std::unordered_set<int> m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)
 	std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
 	std::vector<int> m_pendingUploads; // base frame handles queued for upload
 

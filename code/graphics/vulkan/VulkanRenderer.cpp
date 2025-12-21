@@ -784,7 +784,7 @@ void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
   vk::Buffer vertexHeapBuffer,
   const std::vector<std::pair<uint32_t, int>>& textures) {
   std::vector<vk::WriteDescriptorSet> writes;
-  writes.reserve(textures.size() + 1);
+  writes.reserve(2);
 
   // Binding 0: Vertex heap SSBO
   Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
@@ -804,21 +804,37 @@ void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
   heapWrite.pBufferInfo = &heapInfo;
   writes.push_back(heapWrite);
 
-  // Binding 1: Textures
-  std::vector<vk::DescriptorImageInfo> imageInfos;
-  imageInfos.reserve(textures.size());
-  for (const auto& [arrayIndex, handle] : textures) {
-    VulkanTextureManager::SamplerKey samplerKey{};
-    samplerKey.address = vk::SamplerAddressMode::eRepeat;
-    samplerKey.filter = vk::Filter::eLinear;
+  // Binding 1: Bindless textures
+  // Correctness rule: every slot must always point at a valid descriptor (fallback until resident).
+  VulkanTextureManager::SamplerKey samplerKey{};
+  samplerKey.address = vk::SamplerAddressMode::eRepeat;
+  samplerKey.filter = vk::Filter::eLinear;
 
-    Assertion(m_textureManager != nullptr, "updateModelDescriptors called before texture manager initialization");
+  Assertion(m_textureManager != nullptr, "updateModelDescriptors called before texture manager initialization");
+  const int fallbackHandle = m_textureManager->getFallbackTextureHandle();
+  Assertion(fallbackHandle != -1, "Fallback texture handle must be initialized");
+  const vk::DescriptorImageInfo fallbackInfo = m_textureManager->getTextureDescriptorInfo(fallbackHandle, samplerKey);
+  Assertion(fallbackInfo.imageView, "Fallback texture must have a valid imageView");
+
+  std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> bindlessInfos{};
+  bindlessInfos.fill(fallbackInfo);
+
+  for (const auto& [arrayIndex, handle] : textures) {
+    Assertion(arrayIndex < kMaxBindlessTextures,
+      "updateModelDescriptors: slot index %u out of range (max %u)", arrayIndex, kMaxBindlessTextures);
     vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
     Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
-    imageInfos.push_back(info);
-    writes.push_back({set, 1, arrayIndex, 1, vk::DescriptorType::eCombinedImageSampler,
-      &imageInfos.back(), nullptr, nullptr});
+    bindlessInfos[arrayIndex] = info;
   }
+
+  vk::WriteDescriptorSet texturesWrite{};
+  texturesWrite.dstSet = set;
+  texturesWrite.dstBinding = 1;
+  texturesWrite.dstArrayElement = 0;
+  texturesWrite.descriptorCount = kMaxBindlessTextures;
+  texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  texturesWrite.pImageInfo = bindlessInfos.data();
+  writes.push_back(texturesWrite);
 
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
 }
