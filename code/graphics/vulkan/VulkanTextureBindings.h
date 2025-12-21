@@ -2,6 +2,7 @@
 
 #include "VulkanDebug.h"
 #include "VulkanModelTypes.h"
+#include "VulkanPhaseContexts.h"
 #include "VulkanTextureId.h"
 #include "VulkanTextureManager.h"
 
@@ -26,7 +27,9 @@ public:
 		}
 
 		auto info = m_textures.getTextureDescriptorInfo(id.value, samplerKey);
-		if (!info.imageView) {
+		if (info.imageView) {
+			m_textures.markTextureUsedBaseFrame(id.value, currentFrameIndex);
+		} else {
 			m_textures.queueTextureUploadBaseFrame(id.value, currentFrameIndex, samplerKey);
 			info = m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
 		}
@@ -54,9 +57,9 @@ class VulkanTextureUploader {
 public:
 	explicit VulkanTextureUploader(VulkanTextureManager& textures) : m_textures(textures) {}
 
-	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex)
+	void flushPendingUploads(const UploadCtx& ctx)
 	{
-		m_textures.flushPendingUploads(frame, cmd, currentFrameIndex);
+		m_textures.flushPendingUploads(ctx.frame, ctx.cmd, ctx.currentFrameIndex);
 	}
 
 private:
