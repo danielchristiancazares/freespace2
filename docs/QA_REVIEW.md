@@ -35,12 +35,12 @@ Previously:
 - `deleteTexture()` erased immediately too.
 
 Current behavior (mitigation applied in local changes):
-- Eviction path marks textures `Retired` and defers actual destruction via `m_pendingDestructions` +
-  `processPendingDestructions()` (`code/graphics/vulkan/VulkanTextureManager.cpp:906`,
-  `code/graphics/vulkan/VulkanTextureManager.cpp:1022`).
-- `deleteTexture()` now also defers destruction (`code/graphics/vulkan/VulkanTextureManager.cpp:868`).
-- `VulkanRenderer` provides a conservative “safe retire serial” (last submitted) via
-  `VulkanTextureManager::setSafeRetireSerial()` (`code/graphics/vulkan/VulkanRenderer.cpp:205`).
+- Eviction/deletion defers actual destruction via a serial-gated deferred release queue
+  (`code/graphics/vulkan/VulkanDeferredRelease.h`, `code/graphics/vulkan/VulkanTextureManager.cpp`).
+- `VulkanTextureManager::retireTexture()` drops cache state immediately and moves GPU handles into the deferred queue,
+  allowing re-requests without getting stuck in a `Retired` state.
+- `VulkanRenderer` provides a conservative “safe retire serial” (upcoming submit during `beginFrame()`, last submitted after submit)
+  via `VulkanTextureManager::setSafeRetireSerial()`.
 
 Impact:
 - If any submitted command buffer still references a descriptor pointing at an image/view that gets erased,
@@ -56,7 +56,7 @@ Previously:
 Current behavior (mitigation applied in local changes):
 - `prepareFrameForReuse()` is executed exactly once per recycled frame (`code/graphics/vulkan/VulkanRenderer.cpp:307`).
 - A monotonic `m_completedSerial` is tracked from FIFO fence waits and passed into
-  `VulkanTextureManager::processPendingDestructions()` (`code/graphics/vulkan/VulkanRenderer.cpp:319`).
+  `VulkanTextureManager::collect()` and `VulkanBufferManager::collect()` (serial-gated deferred releases).
 
 Impact:
 - Anything keyed off “GPU completed serial” is unreliable.
@@ -159,11 +159,11 @@ The texture manager and its call sites currently mix **resource residency**, **d
 
 3) Use one source of truth for “GPU completed”:
    - Either fences per frame or a timeline semaphore/serial, but it must be consistent and propagated so that
-     `processPendingDestructions()` has a meaningful `completedSerial`.
+     serial-gated deferred releases have a meaningful `completedSerial`.
 
 4) Make state machine explicit and tested:
-   - e.g., `Missing -> Queued -> Uploading (recorded in frame N) -> Resident (GPU completed frame N)` and keep
-     descriptor updates in the same phase (frame start) to avoid mid-pass hazards.
+   - e.g., `Missing -> Queued -> Resident (recorded at frame start)` and keep descriptor updates in the same phase
+     (frame start) to avoid mid-pass hazards.
 
 ## Suggested Next Steps (Practical)
 
