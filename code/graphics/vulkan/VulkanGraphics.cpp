@@ -649,23 +649,7 @@ void gr_vulkan_render_model(model_material* material_info,
 
   // Build push constants - texture indices
   auto& renderer = ctxBase.renderer;
-  auto toIndex = [&renderer](int h) -> uint32_t {
-    if (h < 0) {
-      return MODEL_OFFSET_ABSENT;
-    }
-
-    auto* textureManager = renderer.textureManager();
-    if (!textureManager) {
-      return MODEL_OFFSET_ABSENT;
-    }
-
-    const int baseFrame = bm_get_base_frame(h, nullptr);
-    if (baseFrame < 0) {
-      return MODEL_OFFSET_ABSENT;
-    }
-
-    return textureManager->getBindlessSlotIndex(baseFrame);
-  };
+  auto toIndex = [&renderer](int h) -> uint32_t { return renderer.getBindlessTextureIndex(h); };
 
   int baseTex   = material_info->get_texture_map(TM_BASE_TYPE);
   int glowTex   = material_info->get_texture_map(TM_GLOW_TYPE);
@@ -930,7 +914,7 @@ void gr_vulkan_render_primitives(material* material_info,
     samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
 
     baseMapInfo = ctxBase.renderer.getTextureDescriptor(
-      textureHandle, frame, cmd, samplerKey);
+      textureHandle, samplerKey);
   }
 
   std::array<vk::WriteDescriptorSet, 3> writes{};
@@ -1154,7 +1138,7 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
   const int textureHandle = material_info->get_texture_map(TM_BASE_TYPE);
   vk::DescriptorImageInfo textureInfo = material_info->is_textured()
-    ? ctxBase.renderer.getTextureDescriptor(textureHandle, ctxBase.frame(), cmd, samplerKey)
+    ? ctxBase.renderer.getTextureDescriptor(textureHandle, samplerKey)
     : ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
 
   std::array<vk::WriteDescriptorSet, 2> writes{};
@@ -1294,7 +1278,7 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
 
   vk::DescriptorImageInfo baseMapInfo = ctxBase.renderer.getTextureDescriptor(
-    textureHandle, frame, cmd, samplerKey);
+    textureHandle, samplerKey);
 
   // Build push descriptor writes (3 bindings: 0=matrix, 1=generic, 2=texture)
   std::array<vk::WriteDescriptorSet, 3> writes{};
@@ -1477,7 +1461,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   if (textureHandle >= 0) {
     auto samplerKey = VulkanTextureManager::SamplerKey{};
     samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
-    baseMapInfo = ctxBase.renderer.getTextureDescriptor(textureHandle, frame, cmd, samplerKey);
+    baseMapInfo = ctxBase.renderer.getTextureDescriptor(textureHandle, samplerKey);
 
     writes[1].dstBinding = 2;
     writes[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;

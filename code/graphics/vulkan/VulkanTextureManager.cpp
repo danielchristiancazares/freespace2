@@ -532,14 +532,10 @@ void VulkanTextureManager::createDefaultTexture()
 }
 
 VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident(int bitmapHandle,
-  VulkanFrame& frame,
-  vk::CommandBuffer cmd,
   uint32_t currentFrameIndex,
   const SamplerKey& samplerKey,
-  bool& usedStaging,
   bool& uploadQueued)
 {
-  usedStaging = false;
   uploadQueued = false;
 
   int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
@@ -553,8 +549,8 @@ VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident
   }
   auto& record = it->second;
 
-  // If a previous upload for this record is queued or in flight, just update usage/sampler.
-  if (record.state == TextureState::Uploading || record.state == TextureState::Queued) {
+  // If a previous upload for this record is queued, just update usage/sampler.
+  if (record.state == TextureState::Queued) {
     record.lastUsedFrame = currentFrameIndex;
     record.gpu.sampler = getOrCreateSampler(samplerKey);
     return &record;
@@ -822,36 +818,11 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 
     record.state = TextureState::Resident;
     record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    record.pendingFrameIndex = currentFrameIndex;
     record.lastUsedFrame = currentFrameIndex;
       onTextureResident(baseFrame);
     }
 
   m_pendingUploads.swap(remaining);
-}
-
-void VulkanTextureManager::markUploadsCompleted(uint32_t completedFrameIndex)
-{
-  std::vector<int> newlyResidentTextures;
-  
-  for (auto& kv : m_textures) {
-    auto& record = kv.second;
-    if (record.state == TextureState::Uploading && record.pendingFrameIndex == completedFrameIndex) {
-      record.state = TextureState::Resident;
-      onTextureResident(kv.first);
-      
-      // Track textures that became Resident and got slots (need immediate descriptor write)
-      if (record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
-        newlyResidentTextures.push_back(kv.first);
-      }
-    }
-  }
-  
-  // Notify renderer to write descriptors for newly Resident textures
-  // This will be called from VulkanRenderer::flip() after markUploadsCompleted
-  if (!newlyResidentTextures.empty()) {
-    m_newlyResidentTextures = std::move(newlyResidentTextures);
-  }
 }
 
 bool VulkanTextureManager::isUploadQueued(int baseFrame) const
@@ -1023,11 +994,37 @@ vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textu
   return info;
 }
 
-void VulkanTextureManager::queueTextureUpload(int bitmapHandle, VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
+void VulkanTextureManager::queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
 {
-  bool usedStaging = false;
-  bool uploadQueued = false;
-  ensureTextureResident(bitmapHandle, frame, cmd, currentFrameIndex, samplerKey, usedStaging, uploadQueued);
+  const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
+  if (baseFrame < 0) {
+    return;
+  }
+  queueTextureUploadBaseFrame(baseFrame, currentFrameIndex, samplerKey);
+}
+
+void VulkanTextureManager::queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
+{
+  auto it = m_textures.find(baseFrame);
+  if (it == m_textures.end()) {
+    it = m_textures.emplace(baseFrame, TextureRecord{}).first;
+  }
+  auto& record = it->second;
+
+  // Avoid resurrecting retired records; they will be erased once safe.
+  if (record.state == TextureState::Retired || record.state == TextureState::Failed) {
+    return;
+  }
+
+  record.lastUsedFrame = currentFrameIndex;
+  record.gpu.sampler = getOrCreateSampler(samplerKey);
+
+  if (record.state == TextureState::Missing) {
+    if (!isUploadQueued(baseFrame)) {
+      m_pendingUploads.push_back(baseFrame);
+    }
+    record.state = TextureState::Queued;
+  }
 }
 
 } // namespace vulkan
