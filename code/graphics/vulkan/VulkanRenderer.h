@@ -30,6 +30,9 @@
 namespace graphics {
 namespace vulkan {
 
+class VulkanTextureBindings;
+class VulkanTextureUploader;
+
 // Light volume mesh for deferred rendering
 struct VolumeMesh {
 	gr_buffer_handle vbo;
@@ -40,6 +43,7 @@ struct VolumeMesh {
 class VulkanRenderer {
   public:
 	explicit VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsOps);
+	~VulkanRenderer();
 
 	bool initialize();
 	void shutdown();
@@ -56,16 +60,15 @@ class VulkanRenderer {
 	void zbufferClear(int mode);
 
 
-	// Helper methods for rendering
-	vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
-		VulkanFrame& frame,
-		vk::CommandBuffer cmd,
-		const VulkanTextureManager::SamplerKey& samplerKey);
-	vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
-	void setModelUniformBinding(VulkanFrame& frame,
-		gr_buffer_handle handle,
-		size_t offset,
-		size_t size);
+		// Helper methods for rendering
+		vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
+			const VulkanTextureManager::SamplerKey& samplerKey);
+		vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
+		uint32_t getBindlessTextureIndex(int bitmapHandle);
+		void setModelUniformBinding(VulkanFrame& frame,
+			gr_buffer_handle handle,
+			size_t offset,
+			size_t size);
 	void setSceneUniformBinding(VulkanFrame& frame,
 		gr_buffer_handle handle,
 		size_t offset,
@@ -228,6 +231,10 @@ class VulkanRenderer {
 		// Optional stress harness state (enabled via -vk_stress).
 		std::vector<gr_buffer_handle> m_stressBuffers;
 		std::vector<uint8_t> m_stressScratch;
+
+		// Texture responsibilities are split: bindings are draw-path safe, uploader is upload-phase only.
+		std::unique_ptr<VulkanTextureBindings> m_textureBindings;
+		std::unique_ptr<VulkanTextureUploader> m_textureUploader;
 
 		DeferredBoundaryState m_deferredBoundaryState = DeferredBoundaryState::Idle;
 
