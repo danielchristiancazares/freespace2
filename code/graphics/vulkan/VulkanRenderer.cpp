@@ -2,8 +2,11 @@
 #include "VulkanRenderer.h"
 #include "VulkanGraphics.h"
 #include "VulkanConstants.h"
+#include "VulkanClip.h"
+#include "VulkanFrameCaps.h"
 #include "VulkanFrameFlow.h"
 #include "VulkanTextureBindings.h"
+#include "VulkanMovieManager.h"
 #include "graphics/util/uniform_structs.h"
 
 #include "def_files/def_files.h"
@@ -41,13 +44,12 @@ VulkanRenderer::~VulkanRenderer() = default;
 bool VulkanRenderer::initialize() {
   // Initialize the device layer (instance, surface, physical device, logical device, swapchain)
   if (!m_vulkanDevice->initialize()) {
-    return false;
+	return false;
   }
 
   // Create renderer-specific resources
   createDescriptorResources();
   createRenderTargets();
-  createRenderingSession();
   createUploadCommandPool();
   createSubmitTimelineSemaphore();
   createFrames();
@@ -56,29 +58,36 @@ bool VulkanRenderer::initialize() {
   const SCP_string shaderRoot = "code/graphics/shaders/compiled";
   m_shaderManager = std::make_unique<VulkanShaderManager>(m_vulkanDevice->device(), shaderRoot);
 
+  m_movieManager = std::make_unique<VulkanMovieManager>(*m_vulkanDevice, *m_shaderManager);
+  constexpr uint32_t kMaxMovieTextures = 8;
+  m_movieManager->initialize(kMaxMovieTextures);
+
   m_pipelineManager = std::make_unique<VulkanPipelineManager>(m_vulkanDevice->device(),
-    m_descriptorLayouts->pipelineLayout(),
-    m_descriptorLayouts->modelPipelineLayout(),
-    m_descriptorLayouts->deferredPipelineLayout(),
-    m_vulkanDevice->pipelineCache(),
-    m_vulkanDevice->supportsExtendedDynamicState(),
-    m_vulkanDevice->supportsExtendedDynamicState2(),
-    m_vulkanDevice->supportsExtendedDynamicState3(),
-    m_vulkanDevice->extDyn3Caps(),
-    m_vulkanDevice->supportsVertexAttributeDivisor(),
-    m_vulkanDevice->features13().dynamicRendering == VK_TRUE);
+	m_descriptorLayouts->pipelineLayout(),
+	m_descriptorLayouts->modelPipelineLayout(),
+	m_descriptorLayouts->deferredPipelineLayout(),
+	m_vulkanDevice->pipelineCache(),
+	m_vulkanDevice->supportsExtendedDynamicState(),
+	m_vulkanDevice->supportsExtendedDynamicState2(),
+	m_vulkanDevice->supportsExtendedDynamicState3(),
+	m_vulkanDevice->extDyn3Caps(),
+	m_vulkanDevice->supportsVertexAttributeDivisor(),
+	m_vulkanDevice->features13().dynamicRendering == VK_TRUE);
 
   m_bufferManager = std::make_unique<VulkanBufferManager>(m_vulkanDevice->device(),
-    m_vulkanDevice->memoryProperties(),
-    m_vulkanDevice->graphicsQueue(),
-    m_vulkanDevice->graphicsQueueIndex());
+	m_vulkanDevice->memoryProperties(),
+	m_vulkanDevice->graphicsQueue(),
+	m_vulkanDevice->graphicsQueueIndex());
 
   m_textureManager = std::make_unique<VulkanTextureManager>(m_vulkanDevice->device(),
-    m_vulkanDevice->memoryProperties(),
-    m_vulkanDevice->graphicsQueue(),
-    m_vulkanDevice->graphicsQueueIndex());
+	m_vulkanDevice->memoryProperties(),
+	m_vulkanDevice->graphicsQueue(),
+	m_vulkanDevice->graphicsQueueIndex());
   m_textureBindings = std::make_unique<VulkanTextureBindings>(*m_textureManager);
   m_textureUploader = std::make_unique<VulkanTextureUploader>(*m_textureManager);
+
+  // Rendering session depends on the texture manager for bitmap render targets (RTT).
+  createRenderingSession();
 
   createDeferredLightingResources();
 
@@ -100,24 +109,24 @@ void VulkanRenderer::createFrames() {
   const auto& props = m_vulkanDevice->properties();
   m_availableFrames.clear();
   for (size_t i = 0; i < kFramesInFlight; ++i) {
-    vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
-    Assertion(modelSet, "Failed to allocate model descriptor set for frame %zu", i);
+	vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
+	Assertion(modelSet, "Failed to allocate model descriptor set for frame %zu", i);
 
-    m_frames[i] = std::make_unique<VulkanFrame>(
-      m_vulkanDevice->device(),
-      static_cast<uint32_t>(i),
-      m_vulkanDevice->graphicsQueueIndex(),
-      m_vulkanDevice->memoryProperties(),
-      UNIFORM_RING_SIZE,
-      props.limits.minUniformBufferOffsetAlignment,
-      VERTEX_RING_SIZE,
-      m_vulkanDevice->vertexBufferAlignment(),
-      STAGING_RING_SIZE,
-      props.limits.optimalBufferCopyOffsetAlignment,
-      modelSet);
+	m_frames[i] = std::make_unique<VulkanFrame>(
+	  m_vulkanDevice->device(),
+	  static_cast<uint32_t>(i),
+	  m_vulkanDevice->graphicsQueueIndex(),
+	  m_vulkanDevice->memoryProperties(),
+	  UNIFORM_RING_SIZE,
+	  props.limits.minUniformBufferOffsetAlignment,
+	  VERTEX_RING_SIZE,
+	  m_vulkanDevice->vertexBufferAlignment(),
+	  STAGING_RING_SIZE,
+	  props.limits.optimalBufferCopyOffsetAlignment,
+	  modelSet);
 
-    // Newly created frames haven't been submitted yet; completedSerial is whatever we last observed.
-    m_availableFrames.push_back(AvailableFrame{ m_frames[i].get(), m_completedSerial });
+	// Newly created frames haven't been submitted yet; completedSerial is whatever we last observed.
+	m_availableFrames.push_back(AvailableFrame{ m_frames[i].get(), m_completedSerial });
   }
 }
 
@@ -127,8 +136,9 @@ void VulkanRenderer::createRenderTargets() {
 }
 
 void VulkanRenderer::createRenderingSession() {
+  Assertion(m_textureManager != nullptr, "createRenderingSession requires a valid texture manager");
   m_renderingSession = std::make_unique<VulkanRenderingSession>(
-    *m_vulkanDevice, *m_renderTargets);
+	*m_vulkanDevice, *m_renderTargets, *m_textureManager);
 }
 
 void VulkanRenderer::createUploadCommandPool() {
@@ -152,13 +162,13 @@ void VulkanRenderer::createSubmitTimelineSemaphore() {
 uint64_t VulkanRenderer::queryCompletedSerial() const
 {
   if (!m_submitTimeline) {
-    return m_completedSerial;
+	return m_completedSerial;
   }
 
 #if defined(VULKAN_HPP_NO_EXCEPTIONS)
   auto rv = m_vulkanDevice->device().getSemaphoreCounterValue(m_submitTimeline.get());
   if (rv.result != vk::Result::eSuccess) {
-    return m_completedSerial;
+	return m_completedSerial;
   }
   return rv.value;
 #else
@@ -169,7 +179,7 @@ uint64_t VulkanRenderer::queryCompletedSerial() const
 void VulkanRenderer::maybeRunVulkanStress()
 {
   if (!Cmdline_vk_stress) {
-    return;
+	return;
   }
 
   Assertion(m_bufferManager != nullptr, "Vulkan stress mode requires an initialized buffer manager");
@@ -180,31 +190,31 @@ void VulkanRenderer::maybeRunVulkanStress()
   constexpr size_t kMinUpdateSize = 256;
 
   if (m_stressScratch.empty()) {
-    m_stressScratch.resize(kScratchSize, 0xA5);
+	m_stressScratch.resize(kScratchSize, 0xA5);
   }
   if (m_stressBuffers.empty()) {
-    m_stressBuffers.reserve(kBufferCount);
-    for (size_t i = 0; i < kBufferCount; ++i) {
-      const BufferType type = (i % 3 == 0) ? BufferType::Vertex
-                             : (i % 3 == 1) ? BufferType::Index
-                                            : BufferType::Uniform;
-      m_stressBuffers.push_back(m_bufferManager->createBuffer(type, BufferUsageHint::Dynamic));
-    }
+	m_stressBuffers.reserve(kBufferCount);
+	for (size_t i = 0; i < kBufferCount; ++i) {
+	  const BufferType type = (i % 3 == 0) ? BufferType::Vertex
+							 : (i % 3 == 1) ? BufferType::Index
+											: BufferType::Uniform;
+	  m_stressBuffers.push_back(m_bufferManager->createBuffer(type, BufferUsageHint::Dynamic));
+	}
   }
 
   // Bounded churn: resize/update a subset each frame, periodically delete to exercise deferred releases.
   const size_t count = m_stressBuffers.size();
   const size_t maxUpdate = std::max(kMinUpdateSize + 1, m_stressScratch.size());
   for (size_t op = 0; op < kOpsPerFrame; ++op) {
-    const size_t idx = (static_cast<size_t>(m_frameCounter) * 131u + op * 17u) % count;
-    const size_t size = kMinUpdateSize +
-                        ((static_cast<size_t>(m_frameCounter) * 4099u + idx * 97u) % (maxUpdate - kMinUpdateSize));
-    m_bufferManager->updateBufferData(m_stressBuffers[idx], size, m_stressScratch.data());
+	const size_t idx = (static_cast<size_t>(m_frameCounter) * 131u + op * 17u) % count;
+	const size_t size = kMinUpdateSize +
+						((static_cast<size_t>(m_frameCounter) * 4099u + idx * 97u) % (maxUpdate - kMinUpdateSize));
+	m_bufferManager->updateBufferData(m_stressBuffers[idx], size, m_stressScratch.data());
   }
 
   if ((m_frameCounter % 4u) == 0u) {
-    const size_t idx = (static_cast<size_t>(m_frameCounter) / 4u) % count;
-    m_bufferManager->deleteBuffer(m_stressBuffers[idx]);
+	const size_t idx = (static_cast<size_t>(m_frameCounter) / 4u) % count;
+	m_bufferManager->deleteBuffer(m_stressBuffers[idx]);
   }
 }
 
@@ -212,24 +222,24 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
   auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
 
   if (result.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      // Swapchain recreation failed - cannot recover
-      return std::numeric_limits<uint32_t>::max();
-    }
-    // Recreate render targets that depend on swapchain size
-    m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+	const auto extent = m_vulkanDevice->swapchainExtent();
+	if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+	  // Swapchain recreation failed - cannot recover
+	  return std::numeric_limits<uint32_t>::max();
+	}
+	// Recreate render targets that depend on swapchain size
+	m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
 
-    // Retry acquire after successful recreation (fixes C5: crash on resize)
-    result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-    if (!result.success) {
-      return std::numeric_limits<uint32_t>::max();
-    }
-    return result.imageIndex;
+	// Retry acquire after successful recreation (fixes C5: crash on resize)
+	result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
+	if (!result.success) {
+	  return std::numeric_limits<uint32_t>::max();
+	}
+	return result.imageIndex;
   }
 
   if (!result.success) {
-    return std::numeric_limits<uint32_t>::max();
+	return std::numeric_limits<uint32_t>::max();
   }
 
   return result.imageIndex;
@@ -239,34 +249,30 @@ uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame& frame) {
   auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
 
   if (result.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      throw std::runtime_error("acquireImageOrThrow: swapchain recreation failed");
-    }
-    // Recreate render targets that depend on swapchain size
-    m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+	const auto extent = m_vulkanDevice->swapchainExtent();
+	if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+	  throw std::runtime_error("acquireImageOrThrow: swapchain recreation failed");
+	}
+	// Recreate render targets that depend on swapchain size
+	m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
 
-    // Retry acquire after successful recreation
-    result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-    if (!result.success) {
-      throw std::runtime_error("acquireImageOrThrow: acquire failed after swapchain recreation");
-    }
-    return result.imageIndex;
+	// Retry acquire after successful recreation
+	result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
+	if (!result.success) {
+	  throw std::runtime_error("acquireImageOrThrow: acquire failed after swapchain recreation");
+	}
+	return result.imageIndex;
   }
 
   if (!result.success) {
-    throw std::runtime_error("acquireImageOrThrow: acquire failed");
+	throw std::runtime_error("acquireImageOrThrow: acquire failed");
   }
 
   return result.imageIndex;
 }
 
 void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
-    "New frame started while deferred boundary state was not idle");
-  m_deferredBoundaryState = DeferredBoundaryState::Idle;
-  Assertion(m_renderingSession && !m_renderingSession->renderingActive(),
-    "beginFrame called while rendering is still active (RenderScope not destroyed)");
+  Assertion(m_renderingSession != nullptr, "beginFrame requires an active rendering session");
 
   // Reset per-frame uniform bindings
   frame.resetPerFrameBindings();
@@ -280,10 +286,13 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   // Collect serial-gated deferred releases opportunistically at a known safe point.
   m_completedSerial = std::max(m_completedSerial, queryCompletedSerial());
   if (m_bufferManager) {
-    m_bufferManager->collect(m_completedSerial);
+	m_bufferManager->collect(m_completedSerial);
   }
   if (m_textureManager) {
-    m_textureManager->collect(m_completedSerial);
+	m_textureManager->collect(m_completedSerial);
+  }
+  if (m_movieManager) {
+	m_movieManager->collect(m_completedSerial);
   }
 
   // Upload any pending textures before rendering begins (no render pass active yet).
@@ -293,6 +302,9 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   // Resources retired during this frame's recording may still be referenced by the upcoming submission.
   m_textureManager->setSafeRetireSerial(m_submitSerial + 1);
   m_textureManager->setCurrentFrameIndex(m_frameCounter);
+  if (m_movieManager) {
+	m_movieManager->setSafeRetireSerial(m_submitSerial + 1);
+  }
 
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
   m_bufferManager->setSafeRetireSerial(m_submitSerial + 1);
@@ -331,7 +343,7 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   vk::Fence fence = frame.inflightFence();
   auto resetResult = m_vulkanDevice->device().resetFences(1, &fence);
   if (resetResult != vk::Result::eSuccess) {
-    throw std::runtime_error("Failed to reset fence for Vulkan frame submission");
+	throw std::runtime_error("Failed to reset fence for Vulkan frame submission");
   }
 
   vk::SemaphoreSubmitInfo waitSemaphore;
@@ -357,10 +369,10 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   const uint64_t submitSerial = ++m_submitSerial;
   signalSemaphores[1].value = submitSerial;
   if (m_textureManager) {
-    m_textureManager->setSafeRetireSerial(m_submitSerial);
+	m_textureManager->setSafeRetireSerial(m_submitSerial);
   }
   if (m_bufferManager) {
-    m_bufferManager->setSafeRetireSerial(m_submitSerial);
+	m_bufferManager->setSafeRetireSerial(m_submitSerial);
   }
   const uint64_t timelineValue = submitSerial;
 
@@ -374,10 +386,10 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   auto presentResult = m_vulkanDevice->present(frame.renderFinished(), imageIndex);
 
   if (presentResult.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
-    }
+	const auto extent = m_vulkanDevice->swapchainExtent();
+	if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+	  m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+	}
   }
 
   graphics::vulkan::SubmitInfo info{};
@@ -424,9 +436,9 @@ void VulkanRenderer::recycleOneInFlight()
   const uint64_t completed = queryCompletedSerial();
   m_completedSerial = std::max(m_completedSerial, completed);
   Assertion(m_completedSerial >= inflight.submit.serial,
-    "Completed serial (%llu) must be >= recycled submission serial (%llu)",
-    static_cast<unsigned long long>(m_completedSerial),
-    static_cast<unsigned long long>(inflight.submit.serial));
+	"Completed serial (%llu) must be >= recycled submission serial (%llu)",
+	static_cast<unsigned long long>(m_completedSerial),
+	static_cast<unsigned long long>(inflight.submit.serial));
   prepareFrameForReuse(f, m_completedSerial);
 
   m_availableFrames.push_back(AvailableFrame{ &f, m_completedSerial });
@@ -435,7 +447,7 @@ void VulkanRenderer::recycleOneInFlight()
 VulkanRenderer::AvailableFrame VulkanRenderer::acquireAvailableFrame()
 {
   while (m_availableFrames.empty()) {
-    recycleOneInFlight();
+	recycleOneInFlight();
   }
 
   AvailableFrame af = m_availableFrames.front();
@@ -467,15 +479,100 @@ graphics::vulkan::RecordingFrame VulkanRenderer::advanceFrame(graphics::vulkan::
   return beginRecording();
 }
 
-VulkanRenderingSession::RenderScope VulkanRenderer::ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec) {
-  return m_renderingSession->beginRendering(rec.cmd(), rec.imageIndex);
+RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
+{
+  Assertion(&ctx.renderer == this,
+	"ensureRenderingStarted called with FrameCtx from a different VulkanRenderer instance");
+  return ensureRenderingStartedRecording(ctx.m_recording);
+}
+
+void VulkanRenderer::applySetupFrameDynamicState(const FrameCtx& ctx,
+  const vk::Viewport& viewport,
+  const vk::Rect2D& scissor,
+  float lineWidth)
+{
+  Assertion(&ctx.renderer == this,
+	"applySetupFrameDynamicState called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  Assertion(cmd, "applySetupFrameDynamicState called with null command buffer");
+
+  cmd.setViewport(0, 1, &viewport);
+  cmd.setScissor(0, 1, &scissor);
+  cmd.setLineWidth(lineWidth);
+}
+
+void VulkanRenderer::pushDebugGroup(const FrameCtx& ctx, const char* name)
+{
+  Assertion(name != nullptr, "pushDebugGroup called with null name");
+  Assertion(&ctx.renderer == this,
+	"pushDebugGroup called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+
+  vk::DebugUtilsLabelEXT label{};
+  label.pLabelName = name;
+  // Default color (white with alpha)
+  label.color[0] = 1.0f;
+  label.color[1] = 1.0f;
+  label.color[2] = 1.0f;
+  label.color[3] = 1.0f;
+
+  cmd.beginDebugUtilsLabelEXT(label);
+}
+
+void VulkanRenderer::popDebugGroup(const FrameCtx& ctx)
+{
+  Assertion(&ctx.renderer == this,
+	"popDebugGroup called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+  cmd.endDebugUtilsLabelEXT();
+}
+
+RenderCtx VulkanRenderer::ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec)
+{
+  auto info = m_renderingSession->ensureRendering(rec.cmd(), rec.imageIndex);
+  return RenderCtx{ rec.cmd(), info };
 }
 
 void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
 {
-  m_renderingSession->beginDeferredPass(clearNonColorBufs);
+  vk::CommandBuffer cmd = rec.cmd();
+  Assertion(cmd, "beginDeferredLighting called with null command buffer");
+
+  // Preserve the current clip scissor across the internal fullscreen copy pass. Model draw paths
+  // don't currently set scissor themselves.
+  auto clip = getClipScissorFromScreen(gr_screen);
+  clip = clampClipScissorToFramebuffer(clip, gr_screen.max_w, gr_screen.max_h);
+  vk::Rect2D restoreScissor{};
+  restoreScissor.offset = vk::Offset2D{clip.x, clip.y};
+  restoreScissor.extent = vk::Extent2D{clip.width, clip.height};
+
+  const bool canCaptureSwapchain =
+	(m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) != vk::ImageUsageFlags{};
+
+  bool preserveEmissive = false;
+  if (canCaptureSwapchain) {
+	// End any active swapchain rendering and snapshot the current swapchain image.
+	m_renderingSession->captureSwapchainColorToSceneCopy(cmd, rec.imageIndex);
+
+	// Copy the captured scene color into the emissive G-buffer attachment (OpenGL parity).
+	m_renderingSession->requestGBufferEmissiveTarget();
+	const auto emissiveRender = ensureRenderingStartedRecording(rec);
+	recordPreDeferredSceneColorCopy(emissiveRender, rec.imageIndex);
+
+	// Restore scissor for subsequent geometry draws.
+	cmd.setScissor(0, 1, &restoreScissor);
+	preserveEmissive = true;
+  }
+
+  m_renderingSession->beginDeferredPass(clearNonColorBufs, preserveEmissive);
   // Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
-  auto scope = m_renderingSession->beginRendering(rec.cmd(), rec.imageIndex);
+  (void)ensureRenderingStartedRecording(rec);
 }
 
 void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
@@ -488,40 +585,57 @@ void VulkanRenderer::setPendingRenderTargetSwapchain()
   m_renderingSession->requestSwapchainTarget();
 }
 
-void VulkanRenderer::deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
+DeferredGeometryCtx VulkanRenderer::deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
 {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
-    "deferredLightingBegin called while deferred boundary state was not idle");
-  
   beginDeferredLighting(rec, clearNonColorBufs);
-  m_deferredBoundaryState = DeferredBoundaryState::InGeometry;
+  return DeferredGeometryCtx{ m_frameCounter };
 }
 
-void VulkanRenderer::deferredLightingEnd(graphics::vulkan::RecordingFrame& rec)
+DeferredLightingCtx VulkanRenderer::deferredLightingEnd(graphics::vulkan::RecordingFrame& rec, DeferredGeometryCtx&& geometry)
 {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::InGeometry,
-    "deferredLightingEnd called while not in geometry state");
+  Assertion(geometry.frameIndex == m_frameCounter,
+	"deferredLightingEnd called with mismatched frameIndex (got %u, expected %u)",
+	geometry.frameIndex,
+	m_frameCounter);
   vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingEnd called with null command buffer");
 
   endDeferredGeometry(cmd);
-  m_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
+  return DeferredLightingCtx{ m_frameCounter };
 }
 
-void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, const vk::Rect2D& restoreScissor)
+void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& rec,
+  DeferredLightingCtx&& lighting,
+  const vk::Rect2D& restoreScissor)
 {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::AwaitFinish,
-    "deferredLightingFinish called while not awaiting finish");
+  Assertion(lighting.frameIndex == m_frameCounter,
+	"deferredLightingFinish called with mismatched frameIndex (got %u, expected %u)",
+	lighting.frameIndex,
+	m_frameCounter);
 
   bindDeferredGlobalDescriptors();
-  recordDeferredLighting(rec);
+  VulkanFrame& frame = rec.ref();
+  vk::Buffer uniformBuffer = frame.uniformBuffer().buffer();
+
+  // Build lights from engine state (boundary: conditionals live here only).
+  std::vector<DeferredLight> lights = buildDeferredLights(
+	frame,
+	uniformBuffer,
+	gr_view_matrix,
+	gr_projection_matrix,
+	getMinUniformBufferAlignment());
+
+  if (!lights.empty()) {
+	// Activate swapchain rendering without depth (target set by endDeferredGeometry).
+	auto render = ensureRenderingStartedRecording(rec);
+	recordDeferredLighting(render, uniformBuffer, lights);
+  }
 
   vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingFinish called with null command buffer");
   cmd.setScissor(0, 1, &restoreScissor);
 
   setPendingRenderTargetSwapchain();
-  m_deferredBoundaryState = DeferredBoundaryState::Idle;
 }
 
 void VulkanRenderer::bindDeferredGlobalDescriptors() {
@@ -534,30 +648,30 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
 
   // G-buffer 0..2
   for (uint32_t i = 0; i < 3; ++i) {
-    vk::DescriptorImageInfo info{};
-    info.sampler = m_renderTargets->gbufferSampler();
-    info.imageView = m_renderTargets->gbufferView(i);
-    info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    
+	vk::DescriptorImageInfo info{};
+	info.sampler = m_renderTargets->gbufferSampler();
+	info.imageView = m_renderTargets->gbufferView(i);
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	
 
-    
-    infos.push_back(info);
+	
+	infos.push_back(info);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
-    write.dstBinding = i;
-    write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    write.descriptorCount = 1;
-    write.pImageInfo = &infos.back();
-    writes.push_back(write);
+	vk::WriteDescriptorSet write{};
+	write.dstSet = m_globalDescriptorSet;
+	write.dstBinding = i;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.descriptorCount = 1;
+	write.pImageInfo = &infos.back();
+	writes.push_back(write);
   }
 
   // Depth (binding 3) - uses nearest-filter sampler (linear often unsupported for depth)
-    vk::DescriptorImageInfo depthInfo{};
-    depthInfo.sampler = m_renderTargets->depthSampler();
-    depthInfo.imageView = m_renderTargets->depthSampledView();
-    depthInfo.imageLayout = m_renderTargets->depthReadLayout();
-    infos.push_back(depthInfo);
+	vk::DescriptorImageInfo depthInfo{};
+	depthInfo.sampler = m_renderTargets->depthSampler();
+	depthInfo.imageView = m_renderTargets->depthSampledView();
+	depthInfo.imageLayout = m_renderTargets->depthReadLayout();
+	infos.push_back(depthInfo);
 
   vk::WriteDescriptorSet depthWrite{};
   depthWrite.dstSet = m_globalDescriptorSet;
@@ -569,47 +683,126 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
 
   // Specular (binding 4): G-buffer attachment 3
   {
-    vk::DescriptorImageInfo info{};
-    info.sampler = m_renderTargets->gbufferSampler();
-    info.imageView = m_renderTargets->gbufferView(3);
-    info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    
+	vk::DescriptorImageInfo info{};
+	info.sampler = m_renderTargets->gbufferSampler();
+	info.imageView = m_renderTargets->gbufferView(3);
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	
 
-    
-    infos.push_back(info);
+	
+	infos.push_back(info);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
-    write.dstBinding = 4;
-    write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    write.descriptorCount = 1;
-    write.pImageInfo = &infos.back();
-    writes.push_back(write);
+	vk::WriteDescriptorSet write{};
+	write.dstSet = m_globalDescriptorSet;
+	write.dstBinding = 4;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.descriptorCount = 1;
+	write.pImageInfo = &infos.back();
+	writes.push_back(write);
   }
 
   // Emissive (binding 5): G-buffer attachment 4
   {
-    vk::DescriptorImageInfo info{};
-    info.sampler = m_renderTargets->gbufferSampler();
-    info.imageView = m_renderTargets->gbufferView(4);
-    info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    
+	vk::DescriptorImageInfo info{};
+	info.sampler = m_renderTargets->gbufferSampler();
+	info.imageView = m_renderTargets->gbufferView(4);
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	
 
-    
-    infos.push_back(info);
+	
+	infos.push_back(info);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
-    write.dstBinding = 5;
-    write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    write.descriptorCount = 1;
-    write.pImageInfo = &infos.back();
-    writes.push_back(write);
+	vk::WriteDescriptorSet write{};
+	write.dstSet = m_globalDescriptorSet;
+	write.dstBinding = 5;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.descriptorCount = 1;
+	write.pImageInfo = &infos.back();
+	writes.push_back(write);
   }
 
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
   
 
+}
+
+void VulkanRenderer::recordPreDeferredSceneColorCopy(const RenderCtx& render, uint32_t imageIndex)
+{
+  vk::CommandBuffer cmd = render.cmd;
+  Assertion(cmd, "recordPreDeferredSceneColorCopy called with null command buffer");
+  Assertion(m_renderTargets != nullptr, "recordPreDeferredSceneColorCopy requires render targets");
+  Assertion(m_bufferManager != nullptr, "recordPreDeferredSceneColorCopy requires buffer manager");
+  Assertion(m_shaderManager != nullptr, "recordPreDeferredSceneColorCopy requires shader manager");
+  Assertion(m_pipelineManager != nullptr, "recordPreDeferredSceneColorCopy requires pipeline manager");
+
+  const auto extent = m_vulkanDevice->swapchainExtent();
+
+  // Fullscreen draw state: independent of current clip/scissor.
+  vk::Viewport viewport{};
+  viewport.x = 0.f;
+  viewport.y = static_cast<float>(extent.height);
+  viewport.width = static_cast<float>(extent.width);
+  viewport.height = -static_cast<float>(extent.height);
+  viewport.minDepth = 0.f;
+  viewport.maxDepth = 1.f;
+  cmd.setViewport(0, 1, &viewport);
+
+  vk::Rect2D scissor{{0, 0}, extent};
+  cmd.setScissor(0, 1, &scissor);
+
+  cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+  cmd.setCullMode(vk::CullModeFlagBits::eNone);
+  cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
+  cmd.setDepthTestEnable(VK_FALSE);
+  cmd.setDepthWriteEnable(VK_FALSE);
+  cmd.setDepthCompareOp(vk::CompareOp::eAlways);
+  cmd.setStencilTestEnable(VK_FALSE);
+
+  ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_COPY);
+
+  static const vertex_layout copyLayout = []() {
+	vertex_layout layout{};
+	layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);
+	return layout;
+  }();
+
+  PipelineKey key{};
+  key.type = shader_type::SDR_TYPE_COPY;
+  key.variant_flags = 0;
+  key.color_format = static_cast<VkFormat>(render.targetInfo.colorFormat);
+  key.depth_format = static_cast<VkFormat>(render.targetInfo.depthFormat);
+  key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
+  key.color_attachment_count = render.targetInfo.colorAttachmentCount;
+  key.blend_mode = ALPHA_BLEND_NONE;
+  key.layout_hash = copyLayout.hash();
+
+  vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, copyLayout);
+  cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+
+  // Push the scene-color snapshot as the per-draw texture (binding 2).
+  vk::DescriptorImageInfo sceneInfo{};
+  sceneInfo.sampler = m_renderTargets->sceneColorSampler();
+  sceneInfo.imageView = m_renderTargets->sceneColorView(imageIndex);
+  sceneInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+  vk::WriteDescriptorSet write{};
+  write.dstBinding = 2;
+  write.descriptorCount = 1;
+  write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  write.pImageInfo = &sceneInfo;
+
+  std::array<vk::WriteDescriptorSet, 1> writes{write};
+  cmd.pushDescriptorSetKHR(
+	vk::PipelineBindPoint::eGraphics,
+	m_descriptorLayouts->pipelineLayout(),
+	0,
+	writes);
+
+  // Fullscreen triangle (same vertex buffer as deferred ambient).
+  vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
+  vk::DeviceSize offset = 0;
+  cmd.bindVertexBuffers(0, 1, &fullscreenVB, &offset);
+  cmd.draw(3, 1, 0, 0);
 }
 
 vk::Buffer VulkanRenderer::getBuffer(gr_buffer_handle handle) const
@@ -621,7 +814,7 @@ vk::Buffer VulkanRenderer::getBuffer(gr_buffer_handle handle) const
 vk::Buffer VulkanRenderer::queryModelVertexHeapBuffer() const
 {
   Assertion(m_modelVertexHeapHandle.isValid(),
-    "queryModelVertexHeapBuffer called without a valid model vertex heap handle");
+	"queryModelVertexHeapBuffer called without a valid model vertex heap handle");
   return getBuffer(m_modelVertexHeapHandle);
 }
 
@@ -676,7 +869,110 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
   Assertion(baseFrame >= 0, "Invalid bitmapHandle %d in getTextureDescriptor", bitmapHandle);
 
   Assertion(m_textureBindings != nullptr, "getTextureDescriptor called before texture bindings initialization");
-  return m_textureBindings->descriptor(TextureId(baseFrame), m_frameCounter, samplerKey);
+  const auto id = TextureId::tryFromBaseFrame(baseFrame);
+  Assertion(id.has_value(), "Invalid base frame %d in getTextureDescriptor", baseFrame);
+  return m_textureBindings->descriptor(*id, m_frameCounter, samplerKey);
+}
+
+void VulkanRenderer::setViewport(const FrameCtx& ctx, const vk::Viewport& viewport)
+{
+  Assertion(&ctx.renderer == this, "setViewport called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+  cmd.setViewport(0, 1, &viewport);
+}
+
+void VulkanRenderer::setScissor(const FrameCtx& ctx, const vk::Rect2D& scissor)
+{
+  Assertion(&ctx.renderer == this, "setScissor called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+  cmd.setScissor(0, 1, &scissor);
+}
+
+bool VulkanRenderer::createBitmapRenderTarget(int handle, int* width, int* height, int* bpp, int* mm_lvl, int flags)
+{
+  Assertion(m_textureManager != nullptr, "createBitmapRenderTarget called before texture manager initialization");
+  if (!width || !height || !bpp || !mm_lvl) {
+	return false;
+  }
+  if (handle < 0) {
+	return false;
+  }
+
+  uint32_t w = static_cast<uint32_t>(*width);
+  uint32_t h = static_cast<uint32_t>(*height);
+
+  // Cubemap faces must be square. Mirror OpenGL behavior: clamp to max dimension.
+  if ((flags & BMP_FLAG_CUBEMAP) && (w != h)) {
+	const uint32_t mx = (w > h) ? w : h;
+	w = mx;
+	h = mx;
+  }
+
+  // Hard clamp to device limits (fail-fast clamping, no silent overflow).
+  const auto& limits = m_vulkanDevice->properties().limits;
+  const uint32_t maxDim = (flags & BMP_FLAG_CUBEMAP) ? limits.maxImageDimensionCube : limits.maxImageDimension2D;
+  if (w > maxDim) {
+	w = maxDim;
+  }
+  if (h > maxDim) {
+	h = maxDim;
+  }
+
+  uint32_t mipLevels = 1;
+  if (!m_textureManager->createRenderTarget(handle, w, h, flags, &mipLevels)) {
+	return false;
+  }
+
+  *width = static_cast<int>(w);
+  *height = static_cast<int>(h);
+  // OpenGL parity: report 24bpp even though the underlying image is RGBA8.
+  *bpp = 24;
+  *mm_lvl = static_cast<int>(mipLevels);
+  return true;
+}
+
+bool VulkanRenderer::setBitmapRenderTarget(const FrameCtx& ctx, int handle, int face)
+{
+  Assertion(&ctx.renderer == this, "setBitmapRenderTarget called with FrameCtx from a different VulkanRenderer instance");
+  Assertion(m_renderingSession != nullptr, "setBitmapRenderTarget called before rendering session initialization");
+  Assertion(m_textureManager != nullptr, "setBitmapRenderTarget called before texture manager initialization");
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return false;
+  }
+
+  // bmpman updates gr_screen.rendering_to_texture *after* the graphics API callback returns, so this still reflects
+  // the previous target at this point.
+  const int prevTarget = gr_screen.rendering_to_texture;
+
+  // Switching targets requires ending any active dynamic rendering scope.
+  if (handle < 0) {
+	m_renderingSession->requestSwapchainTarget();
+  } else {
+	if (!m_textureManager->hasRenderTarget(handle)) {
+	  return false;
+	}
+	m_renderingSession->requestBitmapTarget(handle, face);
+  }
+
+  // Leaving a bitmap render target: transition to shader-read and generate mipmaps if requested.
+  // (Skip when switching faces on the same cubemap.)
+  if (prevTarget >= 0 && prevTarget != handle) {
+	if (m_textureManager->renderTargetMipLevels(prevTarget) > 1) {
+	  m_textureManager->generateRenderTargetMipmaps(cmd, prevTarget);
+	} else {
+	  m_textureManager->transitionRenderTargetToShaderRead(cmd, prevTarget);
+	}
+  }
+
+  return true;
 }
 
 vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey)
@@ -694,17 +990,22 @@ vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const Vulkan
 uint32_t VulkanRenderer::getBindlessTextureIndex(int bitmapHandle)
 {
   if (bitmapHandle < 0) {
-    return MODEL_OFFSET_ABSENT;
+	return kBindlessTextureSlotFallback;
   }
 
   Assertion(m_textureBindings != nullptr, "getBindlessTextureIndex called before texture bindings initialization");
 
   const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
   if (baseFrame < 0) {
-    return MODEL_OFFSET_ABSENT;
+	return kBindlessTextureSlotFallback;
   }
 
-  return m_textureBindings->bindlessIndex(TextureId(baseFrame));
+  const auto id = TextureId::tryFromBaseFrame(baseFrame);
+  if (!id.has_value()) {
+	return kBindlessTextureSlotFallback;
+  }
+
+  return m_textureBindings->bindlessIndex(*id);
 }
 
 void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
@@ -713,40 +1014,40 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
   size_t size) {
   const auto alignment = getMinUniformOffsetAlignment();
   Assertion(offset <= std::numeric_limits<uint32_t>::max(),
-    "Model uniform offset %zu exceeds uint32_t range", offset);
+	"Model uniform offset %zu exceeds uint32_t range", offset);
   const auto dynOffset = static_cast<uint32_t>(offset);
 
   Assertion(alignment > 0, "minUniformBufferOffsetAlignment must be non-zero");
   Assertion((dynOffset % alignment) == 0,
-    "Model uniform offset %u is not aligned to %zu", dynOffset, alignment);
+	"Model uniform offset %u is not aligned to %zu", dynOffset, alignment);
   Assertion(size >= sizeof(model_uniform_data),
-    "Model uniform size %zu is smaller than sizeof(model_uniform_data) %zu",
-    size, sizeof(model_uniform_data));
+	"Model uniform size %zu is smaller than sizeof(model_uniform_data) %zu",
+	size, sizeof(model_uniform_data));
 
   Assertion(frame.modelDescriptorSet(), "Model descriptor set must be allocated before binding uniform buffer");
   Assertion(handle.isValid(), "Invalid model uniform buffer handle");
   Assertion(m_bufferManager != nullptr, "setModelUniformBinding requires buffer manager");
 
   vk::Buffer vkBuffer = m_bufferManager->ensureBuffer(
-    handle, static_cast<vk::DeviceSize>(offset + sizeof(model_uniform_data)));
+	handle, static_cast<vk::DeviceSize>(offset + sizeof(model_uniform_data)));
   Assertion(vkBuffer, "Failed to resolve Vulkan buffer for handle %d", handle.value());
 
   // Check if buffer handle changed
   if (frame.modelUniformBinding.bufferHandle != handle) {
-    vk::DescriptorBufferInfo info{};
-    info.buffer = vkBuffer;
-    info.offset = 0;
-    info.range = sizeof(model_uniform_data);
+	vk::DescriptorBufferInfo info{};
+	info.buffer = vkBuffer;
+	info.offset = 0;
+	info.range = sizeof(model_uniform_data);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = frame.modelDescriptorSet();
-    write.dstBinding = 2;
-    write.dstArrayElement = 0;
-    write.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &info;
+	vk::WriteDescriptorSet write{};
+	write.dstSet = frame.modelDescriptorSet();
+	write.dstBinding = 2;
+	write.dstArrayElement = 0;
+	write.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
+	write.descriptorCount = 1;
+	write.pBufferInfo = &info;
 
-    m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
+	m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
   }
 
   frame.modelUniformBinding = DynamicUniformBinding{ handle, dynOffset };
@@ -763,60 +1064,130 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
 
   const auto alignment = getMinUniformOffsetAlignment();
   Assertion(offset <= std::numeric_limits<uint32_t>::max(),
-    "Scene uniform offset %zu exceeds uint32_t range", offset);
+	"Scene uniform offset %zu exceeds uint32_t range", offset);
   const auto dynOffset = static_cast<uint32_t>(offset);
 
   Assertion(alignment > 0, "minUniformBufferOffsetAlignment must be non-zero");
   Assertion((dynOffset % alignment) == 0,
-    "Scene uniform offset %u is not aligned to %zu", dynOffset, alignment);
+	"Scene uniform offset %u is not aligned to %zu", dynOffset, alignment);
 
   frame.sceneUniformBinding = DynamicUniformBinding{ handle, dynOffset };
 }
 
-void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
-  vk::Buffer vertexBuffer,
-  const std::vector<std::pair<uint32_t, int>>& textures,
-  VulkanFrame& frame,
-  vk::CommandBuffer cmd) {
-  std::vector<vk::WriteDescriptorSet> writes;
-  writes.reserve(textures.size() + 1);
+void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex,
+  vk::DescriptorSet set,
+				vk::Buffer vertexHeapBuffer,
+				vk::Buffer transformBuffer,
+				const std::vector<std::pair<uint32_t, int>>& textures) {
+	std::vector<vk::WriteDescriptorSet> writes;
+	writes.reserve(3);
 
-  // Binding 0: Vertex heap SSBO (required for per-draw descriptor sets)
-  // Look up buffer lazily - it may not exist at registration time
-  vk::Buffer modelVertexHeapBuffer = queryModelVertexHeapBuffer();
-  Assertion(static_cast<VkBuffer>(modelVertexHeapBuffer) != VK_NULL_HANDLE,
-    "Model vertex heap buffer not available (handle=%d)", m_modelVertexHeapHandle.value());
+	// Binding 0: Vertex heap SSBO
+	Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
+		"updateModelDescriptors called with null vertexHeapBuffer");
 
-  vk::DescriptorBufferInfo heapInfo{};
-  heapInfo.buffer = modelVertexHeapBuffer;
-  heapInfo.offset = 0;
-  heapInfo.range = VK_WHOLE_SIZE;
+	vk::DescriptorBufferInfo heapInfo{};
+	heapInfo.buffer = vertexHeapBuffer;
+	heapInfo.offset = 0;
+	heapInfo.range = VK_WHOLE_SIZE;
 
   vk::WriteDescriptorSet heapWrite{};
   heapWrite.dstSet = set;
   heapWrite.dstBinding = 0;
   heapWrite.dstArrayElement = 0;
   heapWrite.descriptorCount = 1;
-  heapWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
-  heapWrite.pBufferInfo = &heapInfo;
-  writes.push_back(heapWrite);
+	heapWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
+	heapWrite.pBufferInfo = &heapInfo;
+	writes.push_back(heapWrite);
 
-  // Binding 1: Textures
-  std::vector<vk::DescriptorImageInfo> imageInfos;
-  imageInfos.reserve(textures.size());
+	// Binding 3: Batched transforms (dynamic SSBO)
+	Assertion(static_cast<VkBuffer>(transformBuffer) != VK_NULL_HANDLE,
+		"updateModelDescriptors called with null transformBuffer");
+
+	vk::DescriptorBufferInfo transformInfo{};
+	transformInfo.buffer = transformBuffer;
+	transformInfo.offset = 0;
+	transformInfo.range = VK_WHOLE_SIZE;
+
+	vk::WriteDescriptorSet transformWrite{};
+	transformWrite.dstSet = set;
+	transformWrite.dstBinding = 3;
+	transformWrite.dstArrayElement = 0;
+	transformWrite.descriptorCount = 1;
+	transformWrite.descriptorType = vk::DescriptorType::eStorageBufferDynamic;
+	transformWrite.pBufferInfo = &transformInfo;
+	writes.push_back(transformWrite);
+
+  // Binding 1: Bindless textures
+  // Correctness rule: every slot must always point at a valid descriptor (fallback until resident).
+  VulkanTextureManager::SamplerKey samplerKey{};
+  samplerKey.address = vk::SamplerAddressMode::eRepeat;
+  samplerKey.filter = vk::Filter::eLinear;
+
+  Assertion(m_textureManager != nullptr, "updateModelDescriptors called before texture manager initialization");
+  const int fallbackHandle = m_textureManager->getFallbackTextureHandle();
+  Assertion(fallbackHandle != -1, "Fallback texture handle must be initialized");
+  const vk::DescriptorImageInfo fallbackInfo = m_textureManager->getTextureDescriptorInfo(fallbackHandle, samplerKey);
+  Assertion(fallbackInfo.imageView, "Fallback texture must have a valid imageView");
+
+  std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> desiredInfos{};
+  desiredInfos.fill(fallbackInfo);
+
   for (const auto& [arrayIndex, handle] : textures) {
-    VulkanTextureManager::SamplerKey samplerKey{};
-    samplerKey.address = vk::SamplerAddressMode::eRepeat;
-    samplerKey.filter = vk::Filter::eLinear;
+	Assertion(arrayIndex < kMaxBindlessTextures,
+	  "updateModelDescriptors: slot index %u out of range (max %u)", arrayIndex, kMaxBindlessTextures);
+	vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
+	Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
+	desiredInfos[arrayIndex] = info;
+  }
 
-    (void)frame;
-    (void)cmd;
-    Assertion(m_textureManager != nullptr, "updateModelDescriptors called before texture manager initialization");
-    vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
-    Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
-    imageInfos.push_back(info);
-    writes.push_back({set, 1, arrayIndex, 1, vk::DescriptorType::eCombinedImageSampler,
-      &imageInfos.back(), nullptr, nullptr});
+  auto sameInfo = [](const vk::DescriptorImageInfo& a, const vk::DescriptorImageInfo& b) {
+	return a.sampler == b.sampler && a.imageView == b.imageView && a.imageLayout == b.imageLayout;
+  };
+
+  Assertion(frameIndex < m_modelBindlessCache.size(),
+	"updateModelDescriptors called with invalid frameIndex %u (cache size %zu)",
+	frameIndex,
+	m_modelBindlessCache.size());
+  auto& cache = m_modelBindlessCache[frameIndex];
+
+  if (!cache.initialized) {
+	vk::WriteDescriptorSet texturesWrite{};
+	texturesWrite.dstSet = set;
+	texturesWrite.dstBinding = 1;
+	texturesWrite.dstArrayElement = 0;
+	texturesWrite.descriptorCount = kMaxBindlessTextures;
+	texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	texturesWrite.pImageInfo = desiredInfos.data();
+	writes.push_back(texturesWrite);
+
+	cache.infos = desiredInfos;
+	cache.initialized = true;
+  } else {
+	// Update only the slots that changed since last sync.
+	uint32_t i = 0;
+	while (i < kMaxBindlessTextures) {
+	  if (sameInfo(cache.infos[i], desiredInfos[i])) {
+		++i;
+		continue;
+	  }
+
+	  const uint32_t start = i;
+	  while (i < kMaxBindlessTextures && !sameInfo(cache.infos[i], desiredInfos[i])) {
+		cache.infos[i] = desiredInfos[i];
+		++i;
+	  }
+	  const uint32_t count = i - start;
+
+	  vk::WriteDescriptorSet texturesWrite{};
+	  texturesWrite.dstSet = set;
+	  texturesWrite.dstBinding = 1;
+	  texturesWrite.dstArrayElement = start;
+	  texturesWrite.descriptorCount = count;
+	  texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	  texturesWrite.pImageInfo = desiredInfos.data() + start;
+	  writes.push_back(texturesWrite);
+	}
   }
 
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
@@ -825,117 +1196,128 @@ void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
 void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frameIndex, vk::Buffer vertexHeapBuffer) {
   // Precondition: vertexHeapBuffer is valid (caller checked)
   Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
-    "beginModelDescriptorSync called with null vertexHeapBuffer");
+	"beginModelDescriptorSync called with null vertexHeapBuffer");
   Assertion(m_bufferManager != nullptr, "beginModelDescriptorSync requires buffer manager");
 
   // frameIndex MUST be ring index [0, FramesInFlight)
   Assertion(frameIndex < kFramesInFlight,
-    "Invalid frame index %u (must be 0..%u)", frameIndex, kFramesInFlight - 1);
+	"Invalid frame index %u (must be 0..%u)", frameIndex, kFramesInFlight - 1);
 
   // Descriptor set must be allocated at frame construction (not lazily)
   Assertion(frame.modelDescriptorSet(), "Model descriptor set must be allocated at frame construction");
 
-  // Binding 0: Write vertex heap descriptor (once per frame)
-  writeVertexHeapDescriptor(frame, vertexHeapBuffer);
+  Assertion(m_textureManager != nullptr, "beginModelDescriptorSync requires texture manager");
 
-  // Binding 1: Write all texture descriptors for RESIDENT textures
-  // Note: We write all resident textures every frame. In the future, this could be optimized
-  // to track dirty slots, but for now we keep it simple and write everything.
-    uint32_t descriptorCount = 0;
-    for (auto& [handle, record] : m_textureManager->allTextures()) {
-      if (record.state != VulkanTextureManager::TextureState::Resident) {
-        continue;
-      }
+  // Binding 0: Vertex heap SSBO; Binding 1: bindless textures; Binding 3: batched transform buffer (dynamic SSBO).
+  // We batch the writes to avoid issuing one vkUpdateDescriptorSets call per texture.
+  std::vector<std::pair<uint32_t, int>> textures;
+  textures.reserve(kMaxBindlessTextures);
+  m_textureManager->appendResidentBindlessDescriptors(textures);
 
-      auto& state = record.bindingState;
-      if (state.arrayIndex == MODEL_OFFSET_ABSENT) {
-        continue;
-      }
-      writeTextureDescriptor(frame.modelDescriptorSet(), state.arrayIndex, handle);
-      descriptorCount++;
-    }
-}
-
-void VulkanRenderer::writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer) {
-  // Precondition: vertexHeapBuffer is valid (caller checked)
-  Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
-    "writeVertexHeapDescriptor called with null vertexHeapBuffer");
-
-  vk::DescriptorBufferInfo info;
-  info.buffer = vertexHeapBuffer;
-  info.offset = 0;
-  info.range = VK_WHOLE_SIZE;
-
-  vk::WriteDescriptorSet write;
-  write.dstSet = frame.modelDescriptorSet();
-  write.dstBinding = 0;
-  write.dstArrayElement = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = vk::DescriptorType::eStorageBuffer;
-  write.pBufferInfo = &info;
-
-  m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
-}
-
-void VulkanRenderer::writeTextureDescriptor(vk::DescriptorSet set,
-  uint32_t arrayIndex,
-  int textureHandle) {
-  Assertion(arrayIndex < kMaxBindlessTextures,
-    "Texture array index %u out of bounds", arrayIndex);
-
-  VulkanTextureManager::SamplerKey samplerKey{};
-  samplerKey.address = vk::SamplerAddressMode::eRepeat;
-  samplerKey.filter = vk::Filter::eLinear;
-
-  vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(
-    textureHandle, samplerKey);
-
-  Assertion(info.imageView, "Texture %d must be resident when writing descriptor", textureHandle);
-
-  vk::WriteDescriptorSet write;
-  write.dstSet = set;
-  write.dstBinding = 1;
-  write.dstArrayElement = arrayIndex;
-  write.descriptorCount = 1;
-  write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-  write.pImageInfo = &info;
-
-  m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
-}
-
-void VulkanRenderer::writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex) {
-  Assertion(arrayIndex < kMaxBindlessTextures,
-    "Fallback slot %u out of bounds", arrayIndex);
-
-  // Use the fallback texture (black 1x1, initialized at startup)
-  int fallbackHandle = m_textureManager->getFallbackTextureHandle();
-  Assertion(fallbackHandle != -1, "Fallback texture must be initialized");
-
-  VulkanTextureManager::SamplerKey samplerKey{};
-  samplerKey.address = vk::SamplerAddressMode::eRepeat;
-  samplerKey.filter = vk::Filter::eNearest;
-
-  vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(
-    fallbackHandle, samplerKey);
-
-  Assertion(info.imageView, "Fallback texture must be resident");
-
-  vk::WriteDescriptorSet write;
-  write.dstSet = set;
-  write.dstBinding = 1;
-  write.dstArrayElement = arrayIndex; // THE ORIGINAL SLOT, not 0
-  write.descriptorCount = 1;
-  write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-  write.pImageInfo = &info;
-
-  m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
+  updateModelDescriptors(frameIndex,
+	frame.modelDescriptorSet(),
+	vertexHeapBuffer,
+	frame.vertexBuffer().buffer(),
+	textures);
 }
 
 int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {
   if (m_textureManager && bitmapHandle >= 0) {
-    return m_textureManager->preloadTexture(bitmapHandle, isAABitmap) ? 1 : 0;
+	return m_textureManager->preloadTexture(bitmapHandle, isAABitmap) ? 1 : 0;
   }
   return 0;
+}
+
+void VulkanRenderer::updateTexture(const FrameCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height)
+{
+  if (!m_textureManager || !m_textureUploader) {
+	return;
+  }
+  if (bitmapHandle < 0 || data == nullptr || width <= 0 || height <= 0) {
+	return;
+  }
+
+  // Transfer operations are invalid inside dynamic rendering.
+  if (m_renderingSession) {
+	m_renderingSession->suspendRendering();
+  }
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+
+  UploadCtx uploadCtx{ ctx.m_recording.ref(), cmd, m_frameCounter };
+  (void)m_textureUploader->updateTexture(uploadCtx, bitmapHandle, bpp, data, width, height);
+}
+
+void VulkanRenderer::releaseBitmap(int bitmapHandle)
+{
+  if (m_textureManager && bitmapHandle >= 0) {
+	m_textureManager->releaseBitmap(bitmapHandle);
+  }
+}
+
+MovieTextureHandle VulkanRenderer::createMovieTexture(uint32_t width,
+  uint32_t height,
+  MovieColorSpace colorspace,
+  MovieColorRange range)
+{
+  if (!m_movieManager || !m_movieManager->isAvailable()) {
+	return MovieTextureHandle::Invalid;
+  }
+  return m_movieManager->createMovieTexture(width, height, colorspace, range);
+}
+
+void VulkanRenderer::uploadMovieTexture(const FrameCtx& ctx,
+  MovieTextureHandle handle,
+  const ubyte* y,
+  int yStride,
+  const ubyte* u,
+  int uStride,
+  const ubyte* v,
+  int vStride)
+{
+  if (!m_movieManager || !m_movieManager->isAvailable() || !gr_is_valid(handle)) {
+	return;
+  }
+
+  if (m_renderingSession) {
+	m_renderingSession->suspendRendering();
+  }
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+
+  UploadCtx uploadCtx{ ctx.m_recording.ref(), cmd, m_frameCounter };
+  m_movieManager->uploadMovieFrame(uploadCtx, handle, y, yStride, u, uStride, v, vStride);
+}
+
+void VulkanRenderer::drawMovieTexture(const FrameCtx& ctx,
+  MovieTextureHandle handle,
+  float x1,
+  float y1,
+  float x2,
+  float y2,
+  float alpha)
+{
+  if (!m_movieManager || !m_movieManager->isAvailable() || !gr_is_valid(handle)) {
+	return;
+  }
+
+  auto renderCtx = ensureRenderingStarted(ctx);
+  incrementPrimDraw();
+  m_movieManager->drawMovieTexture(renderCtx, handle, x1, y1, x2, y2, alpha);
+}
+
+void VulkanRenderer::releaseMovieTexture(MovieTextureHandle handle)
+{
+  if (!m_movieManager || !gr_is_valid(handle)) {
+	return;
+  }
+  m_movieManager->releaseMovieTexture(handle);
 }
 
 void VulkanRenderer::immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder) {
@@ -966,7 +1348,7 @@ void VulkanRenderer::immediateSubmit(const std::function<void(vk::CommandBuffer)
 
 void VulkanRenderer::shutdown() {
   if (!m_vulkanDevice) {
-    return; // Already shut down or never initialized
+	return; // Already shut down or never initialized
   }
 
   m_vulkanDevice->device().waitIdle();
@@ -984,16 +1366,16 @@ void VulkanRenderer::setClearColor(int r, int g, int b) {
 int VulkanRenderer::setCullMode(int cull) {
   switch (cull) {
   case 0:
-    m_renderingSession->setCullMode(vk::CullModeFlagBits::eNone);
-    break;
+	m_renderingSession->setCullMode(vk::CullModeFlagBits::eNone);
+	break;
   case 1:
-    m_renderingSession->setCullMode(vk::CullModeFlagBits::eBack);
-    break;
+	m_renderingSession->setCullMode(vk::CullModeFlagBits::eBack);
+	break;
   case 2:
-    m_renderingSession->setCullMode(vk::CullModeFlagBits::eFront);
-    break;
+	m_renderingSession->setCullMode(vk::CullModeFlagBits::eFront);
+	break;
   default:
-    return 0;
+	return 0;
   }
   return 1;
 }
@@ -1001,27 +1383,27 @@ int VulkanRenderer::setCullMode(int cull) {
 int VulkanRenderer::setZbufferMode(int mode) {
   switch (mode) {
   case 0: // ZBUFFER_TYPE_NONE
-    m_renderingSession->setDepthTest(false);
-    m_renderingSession->setDepthWrite(false);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_NONE;
-    break;
+	m_renderingSession->setDepthTest(false);
+	m_renderingSession->setDepthWrite(false);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_NONE;
+	break;
   case 1: // ZBUFFER_TYPE_READ
-    m_renderingSession->setDepthTest(true);
-    m_renderingSession->setDepthWrite(false);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_READ;
-    break;
+	m_renderingSession->setDepthTest(true);
+	m_renderingSession->setDepthWrite(false);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_READ;
+	break;
   case 2: // ZBUFFER_TYPE_WRITE
-    m_renderingSession->setDepthTest(false);
-    m_renderingSession->setDepthWrite(true);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_WRITE;
-    break;
+	m_renderingSession->setDepthTest(false);
+	m_renderingSession->setDepthWrite(true);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_WRITE;
+	break;
   case 3: // ZBUFFER_TYPE_FULL
-    m_renderingSession->setDepthTest(true);
-    m_renderingSession->setDepthWrite(true);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;
-    break;
+	m_renderingSession->setDepthTest(true);
+	m_renderingSession->setDepthWrite(true);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;
+	break;
   default:
-    return 0;
+	return 0;
   }
   return 1;
 }
@@ -1037,19 +1419,19 @@ void VulkanRenderer::requestClear() {
 
 void VulkanRenderer::zbufferClear(int mode) {
   if (mode) {
-    // Enable zbuffering + clear
-    gr_zbuffering = 1;
-    gr_zbuffering_mode = GR_ZBUFF_FULL;
-    gr_global_zbuffering = 1;
-    m_renderingSession->setDepthTest(true);
-    m_renderingSession->setDepthWrite(true);
-    m_renderingSession->requestDepthClear();
+	// Enable zbuffering + clear
+	gr_zbuffering = 1;
+	gr_zbuffering_mode = GR_ZBUFF_FULL;
+	gr_global_zbuffering = 1;
+	m_renderingSession->setDepthTest(true);
+	m_renderingSession->setDepthWrite(true);
+	m_renderingSession->requestDepthClear();
   } else {
-    // Disable zbuffering
-    gr_zbuffering = 0;
-    gr_zbuffering_mode = GR_ZBUFF_NONE;
-    gr_global_zbuffering = 0;
-    m_renderingSession->setDepthTest(false);
+	// Disable zbuffering
+	gr_zbuffering = 0;
+	gr_zbuffering_mode = GR_ZBUFF_NONE;
+	gr_global_zbuffering = 0;
+	m_renderingSession->setDepthTest(false);
   }
 }
 
@@ -1057,12 +1439,12 @@ void VulkanRenderer::createDeferredLightingResources() {
   // Fullscreen triangle (covers entire screen with 3 vertices, no clipping)
   // Positions are in clip space: vertex shader passes through directly
   struct FullscreenVertex {
-    float x, y, z;
+	float x, y, z;
   };
   static const FullscreenVertex fullscreenVerts[] = {
-    {-1.0f, -1.0f, 0.0f},
-    { 3.0f, -1.0f, 0.0f},
-    {-1.0f,  3.0f, 0.0f}
+	{-1.0f, -1.0f, 0.0f},
+	{ 3.0f, -1.0f, 0.0f},
+	{-1.0f,  3.0f, 0.0f}
   };
 
   m_fullscreenMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1076,25 +1458,25 @@ void VulkanRenderer::createDeferredLightingResources() {
 
   // Octahedron base vertices
   const float oct[] = {
-     0.0f,  1.0f,  0.0f,  // top
-     0.0f, -1.0f,  0.0f,  // bottom
-     1.0f,  0.0f,  0.0f,  // +X
-    -1.0f,  0.0f,  0.0f,  // -X
-     0.0f,  0.0f,  1.0f,  // +Z
-     0.0f,  0.0f, -1.0f   // -Z
+	 0.0f,  1.0f,  0.0f,  // top
+	 0.0f, -1.0f,  0.0f,  // bottom
+	 1.0f,  0.0f,  0.0f,  // +X
+	-1.0f,  0.0f,  0.0f,  // -X
+	 0.0f,  0.0f,  1.0f,  // +Z
+	 0.0f,  0.0f, -1.0f   // -Z
   };
 
   // Octahedron faces (8 triangles)
   const uint32_t octFaces[] = {
-    0, 4, 2,  0, 2, 5,  0, 5, 3,  0, 3, 4,  // top half
-    1, 2, 4,  1, 5, 2,  1, 3, 5,  1, 4, 3   // bottom half
+	0, 4, 2,  0, 2, 5,  0, 5, 3,  0, 3, 4,  // top half
+	1, 2, 4,  1, 5, 2,  1, 3, 5,  1, 4, 3   // bottom half
   };
 
   for (int i = 0; i < 18; i++) {
-    sphereVerts.push_back(oct[i]);
+	sphereVerts.push_back(oct[i]);
   }
   for (int i = 0; i < 24; i++) {
-    sphereIndices.push_back(octFaces[i]);
+	sphereIndices.push_back(octFaces[i]);
   }
 
   m_sphereMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1113,13 +1495,13 @@ void VulkanRenderer::createDeferredLightingResources() {
 
   // Generate ring vertices at z=0 and z=-1
   for (int ring = 0; ring < 2; ++ring) {
-    float z = (ring == 0) ? 0.0f : -1.0f;
-    for (int i = 0; i < segments; ++i) {
-      float angle = twoPi * i / segments;
-      cylVerts.push_back(cosf(angle));  // x
-      cylVerts.push_back(sinf(angle));  // y
-      cylVerts.push_back(z);            // z
-    }
+	float z = (ring == 0) ? 0.0f : -1.0f;
+	for (int i = 0; i < segments; ++i) {
+	  float angle = twoPi * i / segments;
+	  cylVerts.push_back(cosf(angle));  // x
+	  cylVerts.push_back(sinf(angle));  // y
+	  cylVerts.push_back(z);            // z
+	}
   }
 
   // Center vertices for caps
@@ -1135,33 +1517,33 @@ void VulkanRenderer::createDeferredLightingResources() {
 
   // Side faces (quads as two triangles)
   for (int i = 0; i < segments; ++i) {
-    uint32_t i0 = i;
-    uint32_t i1 = (i + 1) % segments;
-    uint32_t i2 = i + segments;
-    uint32_t i3 = ((i + 1) % segments) + segments;
+	uint32_t i0 = i;
+	uint32_t i1 = (i + 1) % segments;
+	uint32_t i2 = i + segments;
+	uint32_t i3 = ((i + 1) % segments) + segments;
 
-    // Two triangles per quad
-    cylIndices.push_back(i0);
-    cylIndices.push_back(i2);
-    cylIndices.push_back(i1);
+	// Two triangles per quad
+	cylIndices.push_back(i0);
+	cylIndices.push_back(i2);
+	cylIndices.push_back(i1);
 
-    cylIndices.push_back(i1);
-    cylIndices.push_back(i2);
-    cylIndices.push_back(i3);
+	cylIndices.push_back(i1);
+	cylIndices.push_back(i2);
+	cylIndices.push_back(i3);
   }
 
   // Top cap (z=0)
   for (int i = 0; i < segments; ++i) {
-    cylIndices.push_back(capTop);
-    cylIndices.push_back((i + 1) % segments);
-    cylIndices.push_back(i);
+	cylIndices.push_back(capTop);
+	cylIndices.push_back((i + 1) % segments);
+	cylIndices.push_back(i);
   }
 
   // Bottom cap (z=-1)
   for (int i = 0; i < segments; ++i) {
-    cylIndices.push_back(capBot);
-    cylIndices.push_back(i + segments);
-    cylIndices.push_back(((i + 1) % segments) + segments);
+	cylIndices.push_back(capBot);
+	cylIndices.push_back(i + segments);
+	cylIndices.push_back(((i + 1) % segments) + segments);
   }
 
   m_cylinderMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1171,69 +1553,59 @@ void VulkanRenderer::createDeferredLightingResources() {
   m_cylinderMesh.indexCount = static_cast<uint32_t>(cylIndices.size());
 }
 
-void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& rec) {
-  vk::CommandBuffer cmd = rec.cmd();
-  vk::Buffer uniformBuffer = rec.ref().uniformBuffer().buffer();
-
-  // Build lights from engine state
-  std::vector<DeferredLight> lights = buildDeferredLights(
-    rec.ref(),
-    uniformBuffer,
-    gr_view_matrix,
-    gr_projection_matrix,
-    getMinUniformBufferAlignment());
-    
-
-
-    if (lights.empty()) {
-      return;
-    }
-
-    // Activate swapchain rendering without depth (target set by endDeferredGeometry)
-    // ensureRenderingStarted starts the render pass if not already active
-  auto renderScope = ensureRenderingStarted(rec);
+void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
+  vk::Buffer uniformBuffer,
+  const std::vector<DeferredLight>& lights)
+{
+  vk::CommandBuffer cmd = render.cmd;
+  Assertion(cmd, "recordDeferredLighting called with null command buffer");
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {
-    const auto extent = m_vulkanDevice->swapchainExtent();
+	const auto extent = m_vulkanDevice->swapchainExtent();
 
-    vk::Viewport viewport{};
-    viewport.x = 0.f;
-    viewport.y = static_cast<float>(extent.height);
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = -static_cast<float>(extent.height);
-    viewport.minDepth = 0.f;
-    viewport.maxDepth = 1.f;
-    cmd.setViewport(0, 1, &viewport);
+	vk::Viewport viewport{};
+	viewport.x = 0.f;
+	viewport.y = static_cast<float>(extent.height);
+	viewport.width = static_cast<float>(extent.width);
+	viewport.height = -static_cast<float>(extent.height);
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+	cmd.setViewport(0, 1, &viewport);
 
-    vk::Rect2D scissor{{0, 0}, extent};
-    cmd.setScissor(0, 1, &scissor);
-    
+	vk::Rect2D scissor{{0, 0}, extent};
+	cmd.setScissor(0, 1, &scissor);
+	
 
 
-    cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
-    cmd.setCullMode(vk::CullModeFlagBits::eNone);
-    cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
-    cmd.setDepthTestEnable(VK_FALSE);
-    cmd.setDepthWriteEnable(VK_FALSE);
-    cmd.setDepthCompareOp(vk::CompareOp::eAlways);
-    cmd.setStencilTestEnable(VK_FALSE);
+	cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+	cmd.setCullMode(vk::CullModeFlagBits::eNone);
+	cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
+	cmd.setDepthTestEnable(VK_FALSE);
+	cmd.setDepthWriteEnable(VK_FALSE);
+	cmd.setDepthCompareOp(vk::CompareOp::eAlways);
+	cmd.setStencilTestEnable(VK_FALSE);
   }
 
   // Get pipeline and layout for deferred shader
-  // TODO: These should be cached, for now we create them on demand
+  // Pipelines are cached by VulkanPipelineManager; we still build the key per frame since the render target contract can vary.
   ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_DEFERRED_LIGHTING);
 
-  vertex_layout deferredLayout{};
-  deferredLayout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);  // Position only for volume meshes
+  static const vertex_layout deferredLayout = []() {
+	vertex_layout layout{};
+	layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0); // Position only for volume meshes
+	return layout;
+  }();
 
   // Create pipeline key for deferred lighting
+  const auto& rt = render.targetInfo;
   PipelineKey key{};
   key.type = shader_type::SDR_TYPE_DEFERRED_LIGHTING;
   key.variant_flags = 0;
-  key.color_format = static_cast<VkFormat>(m_vulkanDevice->swapchainFormat());
-  key.depth_format = VK_FORMAT_UNDEFINED;  // No depth attachment
-  key.color_attachment_count = 1;
+  key.color_format = static_cast<VkFormat>(rt.colorFormat);
+  key.depth_format = static_cast<VkFormat>(rt.depthFormat);
+  key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
+  key.color_attachment_count = rt.colorAttachmentCount;
   key.blend_mode = ALPHA_BLEND_ADDITIVE;
   key.layout_hash = deferredLayout.hash();
 
@@ -1256,10 +1628,10 @@ void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& re
   // Bind global (set=1) deferred descriptor set using the *deferred* pipeline layout.
   // Binding via the standard pipeline layout is not descriptor-set compatible because set 0 differs.
   cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                         ctx.layout,
-                         1, 1,
-                         &m_globalDescriptorSet,
-                         0, nullptr);
+						 ctx.layout,
+						 1, 1,
+						 &m_globalDescriptorSet,
+						 0, nullptr);
   
 
 
@@ -1272,18 +1644,18 @@ void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& re
 
   // Record each light
   for (const auto& light : lights) {
-    std::visit([&](const auto& l) {
-      using T = std::decay_t<decltype(l)>;
-      if constexpr (std::is_same_v<T, FullscreenLight>) {
-        l.record(ctx, fullscreenVB);
-      } else if constexpr (std::is_same_v<T, SphereLight>) {
-        l.record(ctx, sphereVB, sphereIB, m_sphereMesh.indexCount);
-      } else if constexpr (std::is_same_v<T, CylinderLight>) {
-        l.record(ctx, cylinderVB, cylinderIB, m_cylinderMesh.indexCount);
-      }
-    }, light);
+	std::visit([&](const auto& l) {
+	  using T = std::decay_t<decltype(l)>;
+	  if constexpr (std::is_same_v<T, FullscreenLight>) {
+		l.record(ctx, fullscreenVB);
+	  } else if constexpr (std::is_same_v<T, SphereLight>) {
+		l.record(ctx, sphereVB, sphereIB, m_sphereMesh.indexCount);
+	  } else if constexpr (std::is_same_v<T, CylinderLight>) {
+		l.record(ctx, cylinderVB, cylinderIB, m_cylinderMesh.indexCount);
+	  }
+	}, light);
   }
-  // Note: render pass ends via RAII when target changes or frame ends
+  // Note: render pass ends at explicit session boundaries (target changes/frame end).
 }
 
 } // namespace vulkan

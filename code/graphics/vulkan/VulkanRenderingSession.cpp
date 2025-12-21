@@ -5,6 +5,7 @@
 #include <chrono>
 #include <atomic>
 #include <string>
+#include <sstream>
 
 namespace graphics {
 namespace vulkan {
@@ -279,8 +280,6 @@ void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd
     stencilAttachment.clearValue.depthStencil.stencil = 0;
     renderingInfo.pStencilAttachment = &stencilAttachment;
   }
-
-
 
   cmd.beginRendering(renderingInfo);
 
