@@ -19,10 +19,6 @@ bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceDescriptorIn
 		return false;
 	}
 
-	if (!features.descriptorBindingPartiallyBound) {
-		return false;
-	}
-
 	// REMOVED: descriptorBindingSampledImageUpdateAfterBind (no longer used)
 	// REMOVED: descriptorBindingVariableDescriptorCount (no longer used)
 
@@ -36,7 +32,6 @@ bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceVulkan12Feat
 	vk::PhysicalDeviceDescriptorIndexingFeatures idx{};
 	idx.shaderSampledImageArrayNonUniformIndexing = features12.shaderSampledImageArrayNonUniformIndexing;
 	idx.runtimeDescriptorArray = features12.runtimeDescriptorArray;
-	idx.descriptorBindingPartiallyBound = features12.descriptorBindingPartiallyBound;
 	return ValidateModelDescriptorIndexingSupport(idx);
 }
 

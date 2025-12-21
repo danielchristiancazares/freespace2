@@ -172,8 +172,8 @@ TEST_F(VulkanShaderManagerModelTest, Scenario_ModelRequiresDescriptorIndexingFea
 	vk::PhysicalDeviceDescriptorIndexingFeatures feats{};
 	feats.shaderSampledImageArrayNonUniformIndexing = VK_FALSE; // required
 	feats.runtimeDescriptorArray = VK_FALSE; // required
-	feats.descriptorBindingVariableDescriptorCount = VK_FALSE; // required
-	feats.descriptorBindingSampledImageUpdateAfterBind = VK_FALSE; // required
+	feats.descriptorBindingVariableDescriptorCount = VK_FALSE; // no longer required
+	feats.descriptorBindingSampledImageUpdateAfterBind = VK_FALSE; // no longer required
 
 	EXPECT_FALSE(graphics::vulkan::ValidateModelDescriptorIndexingSupport(feats));
 }
@@ -195,7 +195,6 @@ TEST(DeviceFeatureValidation, AcceptsVulkan12FeaturesWithAllRequired)
 	vk::PhysicalDeviceVulkan12Features features12{};
 	features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 	features12.runtimeDescriptorArray = VK_TRUE;
-	features12.descriptorBindingPartiallyBound = VK_TRUE;
 
 	// This overload is called by isDeviceUnsuitable during device selection
 	EXPECT_TRUE(graphics::vulkan::ValidateModelDescriptorIndexingSupport(features12));
@@ -207,7 +206,6 @@ TEST(DeviceFeatureValidation, RejectsVulkan12FeaturesWhenAnyMissing)
 	vk::PhysicalDeviceVulkan12Features baseline{};
 	baseline.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 	baseline.runtimeDescriptorArray = VK_TRUE;
-	baseline.descriptorBindingPartiallyBound = VK_TRUE;
 	ASSERT_TRUE(graphics::vulkan::ValidateModelDescriptorIndexingSupport(baseline));
 
 	// Test each required feature individually
@@ -222,11 +220,5 @@ TEST(DeviceFeatureValidation, RejectsVulkan12FeaturesWhenAnyMissing)
 		f.runtimeDescriptorArray = VK_FALSE;
 		EXPECT_FALSE(graphics::vulkan::ValidateModelDescriptorIndexingSupport(f))
 			<< "Should reject when runtimeDescriptorArray is missing";
-	}
-	{
-		auto f = baseline;
-		f.descriptorBindingPartiallyBound = VK_FALSE;
-		EXPECT_FALSE(graphics::vulkan::ValidateModelDescriptorIndexingSupport(f))
-			<< "Should reject when descriptorBindingPartiallyBound is missing";
 	}
 }
