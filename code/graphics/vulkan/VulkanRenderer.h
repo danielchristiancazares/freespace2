@@ -64,6 +64,7 @@ class VulkanRenderer {
 		vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
 			const VulkanTextureManager::SamplerKey& samplerKey);
 		vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
+		// Returns a valid bindless slot index. Invalid handles return slot 0 (fallback).
 		uint32_t getBindlessTextureIndex(int bitmapHandle);
 		void setModelUniformBinding(VulkanFrame& frame,
 			gr_buffer_handle handle,

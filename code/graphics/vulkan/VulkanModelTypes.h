@@ -5,8 +5,8 @@
 namespace graphics {
 namespace vulkan {
 
-// Sentinel value indicating an absent vertex attribute offset or texture index.
-// Must match OFFSET_ABSENT in model.vert and model.frag shaders.
+// Sentinel value indicating an absent vertex attribute offset.
+// Must match OFFSET_ABSENT in the model.vert shader.
 constexpr uint32_t MODEL_OFFSET_ABSENT = 0xFFFFFFFFu;
 
 // Push constant block for model rendering with vertex pulling and bindless textures.
@@ -25,7 +25,7 @@ struct ModelPushConstants {
 	uint32_t boneIndicesOffset; // Bone indices (ivec4), or MODEL_OFFSET_ABSENT
 	uint32_t boneWeightsOffset; // Bone weights (vec4), or MODEL_OFFSET_ABSENT
 
-	// Material texture indices (into bindless texture array, or MODEL_OFFSET_ABSENT)
+	// Material texture indices (into bindless texture array). Always valid.
 	uint32_t baseMapIndex;
 	uint32_t glowMapIndex;
 	uint32_t normalMapIndex;

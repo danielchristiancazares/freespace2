@@ -70,11 +70,12 @@ No state enum. No `std::variant`. Transitions are moves between containers.
 
 ### 2.4 Bindless slot semantics: slot always points at something valid (DONE)
 
-- Slot 0 reserved for fallback.
+- Slot 0 reserved for fallback; slots 1..3 reserved for well-known defaults (base=white, normal=flat, spec=dielectric).
 - `getBindlessSlotIndex()` returns a valid slot index (returns 0 on pressure/unavailable).
 - Non-resident slots sample fallback until upload completes.
 - Model bindless descriptor array is written with fallback first, then patched with resident textures.
 - The model bindless binding does not use `vk::DescriptorBindingFlagBits::ePartiallyBound` (all descriptors are written).
+- Model material texture indices are always valid (no \"absent texture\" sentinel routing).
 
 ### 2.5 Eviction/deletion policy is serial-safe by construction (DONE baseline)
 

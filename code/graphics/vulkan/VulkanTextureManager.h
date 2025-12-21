@@ -155,6 +155,8 @@ class VulkanTextureManager {
 
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
+		int getDefaultNormalTextureHandle() const { return m_defaultNormalTextureHandle; }
+		int getDefaultSpecTextureHandle() const { return m_defaultSpecTextureHandle; }
 
 		// Populate (slot, baseFrameHandle) pairs for bindless descriptor updates.
 		void appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, int>>& out) const;
@@ -173,6 +175,10 @@ class VulkanTextureManager {
 	static constexpr int kFallbackTextureHandle = -1000;
 	// Synthetic handle for default white texture (won't collide with bmpman handles which are >= 0)
 	static constexpr int kDefaultTextureHandle = -1001;
+	// Synthetic handle for default flat normal texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kDefaultNormalTextureHandle = -1002;
+	// Synthetic handle for default dielectric specular texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kDefaultSpecTextureHandle = -1003;
 
   private:
 		friend class VulkanTextureUploader;
@@ -214,15 +220,20 @@ class VulkanTextureManager {
 		void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
 		void createFallbackTexture();
 		void createDefaultTexture();
-	bool isUploadQueued(int baseFrame) const;
+		void createDefaultNormalTexture();
+		void createDefaultSpecTexture();
+		bool isUploadQueued(int baseFrame) const;
 
-		// Pool of bindless texture slots (excluding 0, reserved for fallback)
+		// Pool of bindless texture slots (excluding reserved default slots; see VulkanConstants.h)
 		std::vector<uint32_t> m_freeBindlessSlots;
 
-			// Fallback "black" texture for missing/unavailable textures (initialized at startup)
-			int m_fallbackTextureHandle = -1;
-	// Default "white" texture for untextured draws (initialized at startup)
-	int m_defaultTextureHandle = -1;
+		// Fallback "black" texture for missing/unavailable textures (initialized at startup)
+		int m_fallbackTextureHandle = -1;
+		// Default "white" texture for untextured draws (initialized at startup)
+		int m_defaultTextureHandle = -1;
+		// Default textures for model shader when no map is provided
+		int m_defaultNormalTextureHandle = -1;
+		int m_defaultSpecTextureHandle = -1;
 
 		DeferredReleaseQueue m_deferredReleases;
 

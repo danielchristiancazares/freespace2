@@ -97,5 +97,6 @@ The `ActivePass` RAII guard's existence already proves rendering is active; the 
 
 `VulkanModelTypes.h` defines `MODEL_OFFSET_ABSENT = 0xFFFFFFFFu`.
 
-Used at domain boundaries (asset genuinely has no texture map). Acceptable per philosophy (boundary-only sentinel), but could be
-replaced with `std::optional<uint32_t>` at API boundaries.
+Used only for absent vertex attribute offsets. Model material texture indices are now always valid: the engine reserves
+well-known bindless slots for default textures (base=white, normal=flat, spec=dielectric), so shaders no longer need an
+\"absent texture\" sentinel for model materials.

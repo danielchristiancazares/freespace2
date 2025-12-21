@@ -57,6 +57,19 @@ uint32_t bytesPerPixel(const bitmap& bmp)
   }
 }
 
+inline bool isBuiltinTextureHandle(int handle)
+{
+  return handle == VulkanTextureManager::kFallbackTextureHandle ||
+    handle == VulkanTextureManager::kDefaultTextureHandle ||
+    handle == VulkanTextureManager::kDefaultNormalTextureHandle ||
+    handle == VulkanTextureManager::kDefaultSpecTextureHandle;
+}
+
+inline bool isDynamicBindlessSlot(uint32_t slot)
+{
+  return slot >= kBindlessFirstDynamicTextureSlot && slot < kMaxBindlessTextures;
+}
+
 } // namespace
 
 VulkanTextureManager::VulkanTextureManager(vk::Device device,
@@ -70,13 +83,21 @@ VulkanTextureManager::VulkanTextureManager(vk::Device device,
 {
   createDefaultSampler();
 
-  m_freeBindlessSlots.reserve(kMaxBindlessTextures - 1);
-  for (uint32_t slot = kMaxBindlessTextures; slot-- > 1;) {
-    m_freeBindlessSlots.push_back(slot);
-  }
-
   createFallbackTexture();
   createDefaultTexture();
+  createDefaultNormalTexture();
+  createDefaultSpecTexture();
+
+  // Fixed bindless slots for built-in textures.
+  m_bindlessSlots.insert_or_assign(kFallbackTextureHandle, kBindlessTextureSlotFallback);
+  m_bindlessSlots.insert_or_assign(kDefaultTextureHandle, kBindlessTextureSlotDefaultBase);
+  m_bindlessSlots.insert_or_assign(kDefaultNormalTextureHandle, kBindlessTextureSlotDefaultNormal);
+  m_bindlessSlots.insert_or_assign(kDefaultSpecTextureHandle, kBindlessTextureSlotDefaultSpec);
+
+  m_freeBindlessSlots.reserve(kMaxBindlessTextures - kBindlessFirstDynamicTextureSlot);
+  for (uint32_t slot = kMaxBindlessTextures; slot-- > kBindlessFirstDynamicTextureSlot;) {
+    m_freeBindlessSlots.push_back(slot);
+  }
 }
 
 uint32_t VulkanTextureManager::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const
@@ -534,6 +555,22 @@ void VulkanTextureManager::createDefaultTexture()
   m_defaultTextureHandle = kDefaultTextureHandle;
 }
 
+void VulkanTextureManager::createDefaultNormalTexture()
+{
+  // Flat tangent-space normal: (0.5, 0.5, 1.0) in [0,1] -> (0,0,1) after remap.
+  const uint8_t flatNormal[4] = {128, 128, 255, 255};
+  createSolidTexture(kDefaultNormalTextureHandle, flatNormal);
+  m_defaultNormalTextureHandle = kDefaultNormalTextureHandle;
+}
+
+void VulkanTextureManager::createDefaultSpecTexture()
+{
+  // Default dielectric F0 (~0.04). Alpha is currently unused by the deferred lighting stage.
+  const uint8_t dielectricF0[4] = {10, 10, 10, 0};
+  createSolidTexture(kDefaultSpecTextureHandle, dielectricF0);
+  m_defaultSpecTextureHandle = kDefaultSpecTextureHandle;
+}
+
 void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex)
 {
   processPendingRetirements();
@@ -559,7 +596,7 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
     if (slotIt != m_bindlessSlots.end()) {
       const uint32_t slot = slotIt->second;
       m_bindlessSlots.erase(slotIt);
-      if (slot != 0) {
+      if (isDynamicBindlessSlot(slot)) {
         m_freeBindlessSlots.push_back(slot);
       }
     }
@@ -813,7 +850,7 @@ void VulkanTextureManager::processPendingRetirements()
   }
 
   for (const int handle : m_pendingRetirements) {
-    if (handle == kFallbackTextureHandle || handle == kDefaultTextureHandle) {
+    if (isBuiltinTextureHandle(handle)) {
       continue;
     }
 
@@ -831,7 +868,7 @@ void VulkanTextureManager::processPendingRetirements()
     if (slotIt != m_bindlessSlots.end()) {
       const uint32_t slot = slotIt->second;
       m_bindlessSlots.erase(slotIt);
-      if (slot != 0) {
+      if (isDynamicBindlessSlot(slot)) {
         m_freeBindlessSlots.push_back(slot);
       }
     }
@@ -871,7 +908,7 @@ bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowRe
   auto reclaimNonResidentSlot = [&]() -> bool {
     for (auto it = m_bindlessSlots.begin(); it != m_bindlessSlots.end(); ++it) {
       const int handle = it->first;
-      if (handle == kFallbackTextureHandle || handle == kDefaultTextureHandle) {
+      if (isBuiltinTextureHandle(handle)) {
         continue;
       }
       if (m_residentTextures.find(handle) != m_residentTextures.end()) {
@@ -881,7 +918,7 @@ bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowRe
       const uint32_t slot = it->second;
       m_pendingBindlessSlots.erase(handle);
       m_bindlessSlots.erase(it);
-      if (slot != 0) {
+      if (isDynamicBindlessSlot(slot)) {
         m_freeBindlessSlots.push_back(slot);
       }
       return true;
@@ -905,7 +942,7 @@ bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowRe
 
     for (const auto& [handle, slot] : m_bindlessSlots) {
       (void)slot;
-      if (handle == kFallbackTextureHandle || handle == kDefaultTextureHandle) {
+      if (isBuiltinTextureHandle(handle)) {
         continue;
       }
 
@@ -965,7 +1002,7 @@ void VulkanTextureManager::deleteTexture(int bitmapHandle)
     return;
   }
   // Never delete the synthetic default/fallback textures.
-  if (base == kFallbackTextureHandle || base == kDefaultTextureHandle) {
+  if (isBuiltinTextureHandle(base)) {
     return;
   }
 
@@ -1050,7 +1087,7 @@ void VulkanTextureManager::markTextureUsedBaseFrame(int baseFrame, uint32_t curr
 void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial)
 {
   // Never retire the synthetic default/fallback textures.
-  if (textureHandle == kFallbackTextureHandle || textureHandle == kDefaultTextureHandle) {
+  if (isBuiltinTextureHandle(textureHandle)) {
     return;
   }
 
@@ -1060,7 +1097,7 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
   if (slotIt != m_bindlessSlots.end()) {
     const uint32_t slot = slotIt->second;
     m_bindlessSlots.erase(slotIt);
-    if (slot != 0) {
+    if (isDynamicBindlessSlot(slot)) {
       m_freeBindlessSlots.push_back(slot);
     }
   }

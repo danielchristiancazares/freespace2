@@ -93,7 +93,34 @@ void main()
 	// Transform normal to view-space for deferred lighting
 	mat3 normalMatrix = transpose(inverse(mat3(uModel.modelViewMatrix)));
 	vPosition = viewPos.xyz;
-	vNormal = normalize(normalMatrix * normal);
+	vec3 viewNormal = normalMatrix * normal;
+	float nLenSq = dot(viewNormal, viewNormal);
+	if (nLenSq > 0.0) {
+		viewNormal *= inversesqrt(nLenSq);
+	} else {
+		viewNormal = vec3(0.0, 0.0, 1.0);
+	}
+
+	// Tangent is provided in object space; transform to view space and orthonormalize against the view normal.
+	vec3 viewTangent = mat3(uModel.modelViewMatrix) * tangent.xyz;
+	float tLenSq = dot(viewTangent, viewTangent);
+	if (tLenSq > 0.0) {
+		viewTangent *= inversesqrt(tLenSq);
+		viewTangent = viewTangent - viewNormal * dot(viewTangent, viewNormal);
+		float orthoLenSq = dot(viewTangent, viewTangent);
+		if (orthoLenSq > 0.0) {
+			viewTangent *= inversesqrt(orthoLenSq);
+		} else {
+			// Degenerate tangent (parallel to normal): pick an arbitrary perpendicular axis.
+			vec3 up = (abs(viewNormal.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+			viewTangent = normalize(cross(up, viewNormal));
+		}
+	} else {
+		vec3 up = (abs(viewNormal.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+		viewTangent = normalize(cross(up, viewNormal));
+	}
+
+	vNormal = viewNormal;
 	vTexCoord = texCoord;
-	vTangent = tangent;
+	vTangent = vec4(viewTangent, tangent.w);
 }

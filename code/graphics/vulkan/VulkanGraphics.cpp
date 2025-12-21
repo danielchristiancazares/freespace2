@@ -649,17 +649,22 @@ void gr_vulkan_render_model(model_material* material_info,
 
   // Build push constants - texture indices
   auto& renderer = ctxBase.renderer;
-  auto toIndex = [&renderer](int h) -> uint32_t { return renderer.getBindlessTextureIndex(h); };
+  auto toIndexOr = [&renderer](int h, uint32_t fallbackSlot) -> uint32_t {
+    if (h < 0) {
+      return fallbackSlot;
+    }
+    return renderer.getBindlessTextureIndex(h);
+  };
 
   int baseTex   = material_info->get_texture_map(TM_BASE_TYPE);
   int glowTex   = material_info->get_texture_map(TM_GLOW_TYPE);
   int normalTex = material_info->get_texture_map(TM_NORMAL_TYPE);
   int specTex   = material_info->get_texture_map(TM_SPECULAR_TYPE);
 
-  pcs.baseMapIndex   = toIndex(baseTex);
-  pcs.glowMapIndex   = toIndex(glowTex);
-  pcs.normalMapIndex = toIndex(normalTex);
-  pcs.specMapIndex   = toIndex(specTex);
+  pcs.baseMapIndex   = toIndexOr(baseTex, kBindlessTextureSlotDefaultBase);
+  pcs.glowMapIndex   = toIndexOr(glowTex, kBindlessTextureSlotFallback);
+  pcs.normalMapIndex = toIndexOr(normalTex, kBindlessTextureSlotDefaultNormal);
+  pcs.specMapIndex   = toIndexOr(specTex, kBindlessTextureSlotDefaultSpec);
   pcs.matrixIndex    = 0;  // Unused
   pcs.flags          = material_info->get_shader_flags();
 

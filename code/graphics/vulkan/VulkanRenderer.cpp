@@ -696,19 +696,19 @@ vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const Vulkan
 uint32_t VulkanRenderer::getBindlessTextureIndex(int bitmapHandle)
 {
   if (bitmapHandle < 0) {
-    return MODEL_OFFSET_ABSENT;
+    return kBindlessTextureSlotFallback;
   }
 
   Assertion(m_textureBindings != nullptr, "getBindlessTextureIndex called before texture bindings initialization");
 
   const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
   if (baseFrame < 0) {
-    return MODEL_OFFSET_ABSENT;
+    return kBindlessTextureSlotFallback;
   }
 
   const auto id = TextureId::tryFromBaseFrame(baseFrame);
   if (!id.has_value()) {
-    return MODEL_OFFSET_ABSENT;
+    return kBindlessTextureSlotFallback;
   }
 
   return m_textureBindings->bindlessIndex(*id);
