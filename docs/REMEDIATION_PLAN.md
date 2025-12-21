@@ -12,8 +12,10 @@ correctness and making invalid states non-representable via typestate, RAII, and
 - `VulkanRenderer::getTextureDescriptor()` no longer flushes uploads while dynamic rendering may be active; on miss it
   queues the upload and returns a fallback descriptor.
 - Frame reuse now tracks a real `m_completedSerial` and runs `prepareFrameForReuse()` exactly once per recycled frame.
-- Hard-coded “agent log” file IO was removed from Vulkan hot paths.
+- Hard-coded "agent log" file IO was removed from Vulkan hot paths.
 - Texture eviction/deletion was changed to defer destruction (serial-gated) instead of immediate RAII teardown.
+- Resource retirement during `beginFrame()` is now guarded against the *upcoming* submit serial (prevents premature destruction before the frame completes).
+- Bindless slot eviction only considers textures whose `lastUsedSerial <= completedSerial` (no eviction of in-flight textures).
 
 ## 0) Target Invariants (Non-Negotiable)
 

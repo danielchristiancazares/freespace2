@@ -879,7 +879,8 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
   }
 
   if (m_freeBindlessSlots.empty()) {
-    // No slots available - evict least recently used texture to free a slot
+    // No slots available - evict least recently used texture to free a slot.
+    // Safety rule: only evict textures whose last use has completed on the GPU.
     uint32_t oldestFrame = UINT32_MAX;
     int oldestHandle = -1;
     uint32_t oldestSlot = MODEL_OFFSET_ABSENT;
@@ -888,7 +889,9 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
       if (handle == kFallbackTextureHandle || handle == kDefaultTextureHandle) {
         continue; // Never evict fallback texture
       }
-      if (other.state == TextureState::Resident && other.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
+      if (other.state == TextureState::Resident &&
+          other.bindingState.arrayIndex != MODEL_OFFSET_ABSENT &&
+          other.lastUsedSerial <= m_completedSerial) {
         if (other.lastUsedFrame < oldestFrame) {
           oldestFrame = other.lastUsedFrame;
           oldestHandle = handle;
@@ -901,7 +904,7 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
       // Evict the oldest texture and reuse its slot.
       retireTexture(oldestHandle, m_safeRetireSerial);
     } else {
-      // No slots available and nothing to evict; leave as absent so model shader will skip sampling.
+      // No slots available and nothing safe to evict; leave as absent so model shader will skip sampling.
       return;
     }
   }
@@ -930,13 +933,28 @@ uint32_t VulkanTextureManager::getBindlessSlotIndex(int textureHandle)
     return MODEL_OFFSET_ABSENT;
   }
 
-  record.lastUsedFrame = m_currentFrameIndex;
-
   if (record.bindingState.arrayIndex == MODEL_OFFSET_ABSENT) {
     onTextureResident(textureHandle);
   }
 
+  if (record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
+    record.lastUsedFrame = m_currentFrameIndex;
+    record.lastUsedSerial = m_safeRetireSerial;
+  }
+
   return record.bindingState.arrayIndex;
+}
+
+void VulkanTextureManager::markTextureUsedBaseFrame(int baseFrame, uint32_t currentFrameIndex)
+{
+  auto it = m_textures.find(baseFrame);
+  if (it == m_textures.end()) {
+    return;
+  }
+
+  auto& record = it->second;
+  record.lastUsedFrame = currentFrameIndex;
+  record.lastUsedSerial = m_safeRetireSerial;
 }
 
 void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial)
@@ -971,6 +989,7 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
 
 void VulkanTextureManager::collect(uint64_t completedSerial)
 {
+  m_completedSerial = std::max(m_completedSerial, completedSerial);
   m_deferredReleases.collect(completedSerial);
 }
 

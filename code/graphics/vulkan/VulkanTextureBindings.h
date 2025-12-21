@@ -26,7 +26,9 @@ public:
 		}
 
 		auto info = m_textures.getTextureDescriptorInfo(id.value, samplerKey);
-		if (!info.imageView) {
+		if (info.imageView) {
+			m_textures.markTextureUsedBaseFrame(id.value, currentFrameIndex);
+		} else {
 			m_textures.queueTextureUploadBaseFrame(id.value, currentFrameIndex, samplerKey);
 			info = m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
 		}

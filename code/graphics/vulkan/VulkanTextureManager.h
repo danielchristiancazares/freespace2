@@ -113,6 +113,7 @@ class VulkanTextureManager {
 		VulkanTexture gpu;
 		TextureState state = TextureState::Missing;
 		uint32_t lastUsedFrame = 0;
+		uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
 		TextureBindingState bindingState;
 	};
 
@@ -147,6 +148,9 @@ class VulkanTextureManager {
 		void onTextureResident(int textureHandle);
 		void retireTexture(int textureHandle, uint64_t retireSerial);
 		uint32_t getBindlessSlotIndex(int textureHandle);
+
+		// Mark a texture as used by the upcoming submission (bindless or descriptor bind).
+		void markTextureUsedBaseFrame(int baseFrame, uint32_t currentFrameIndex);
 
 		void collect(uint64_t completedSerial);
 
@@ -211,6 +215,7 @@ class VulkanTextureManager {
 		uint64_t m_safeRetireSerial = 0;
 
 		uint32_t m_currentFrameIndex = 0;
+		uint64_t m_completedSerial = 0;
 	};
 
 } // namespace vulkan
