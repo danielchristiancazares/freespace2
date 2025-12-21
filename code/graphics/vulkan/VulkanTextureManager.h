@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -99,23 +100,22 @@ class VulkanTextureManager {
 		vk::Queue transferQueue,
 		uint32_t transferQueueIndex);
 
-	enum class TextureState {
-		Missing,
-		Queued,
-		Resident,
-		Failed,
+	enum class UnavailableReason {
+		InvalidHandle,
+		InvalidArray,
+		BmpLockFailed,
+		TooLargeForStaging,
+		UnsupportedFormat,
 	};
 
-		struct TextureBindingState {
-			uint32_t arrayIndex = MODEL_OFFSET_ABSENT;
-		};
-
-	struct TextureRecord {
+	struct ResidentTexture {
 		VulkanTexture gpu;
-		TextureState state = TextureState::Missing;
 		uint32_t lastUsedFrame = 0;
 		uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
-		TextureBindingState bindingState;
+	};
+
+	struct UnavailableTexture {
+		UnavailableReason reason = UnavailableReason::InvalidHandle;
 	};
 
 	struct SamplerKey {
@@ -143,6 +143,9 @@ class VulkanTextureManager {
 		void cleanup();
 
 		// Descriptor binding management
+		// Returns a stable bindless slot index for this texture handle.
+		// - If the handle is missing/unavailable/not-yet-resident, the slot's descriptor points at fallback.
+		// - If no slot can be assigned safely, returns slot 0 (fallback).
 		uint32_t getBindlessSlotIndex(int textureHandle);
 
 		// Mark a texture as used by the upcoming submission (bindless or descriptor bind).
@@ -152,9 +155,11 @@ class VulkanTextureManager {
 
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
+		int getDefaultNormalTextureHandle() const { return m_defaultNormalTextureHandle; }
+		int getDefaultSpecTextureHandle() const { return m_defaultSpecTextureHandle; }
 
-		// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
-		std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
+		// Populate (slot, baseFrameHandle) pairs for bindless descriptor updates.
+		void appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, int>>& out) const;
 
 		// Serial at/after which it is safe to destroy newly-retired resources.
 		// During frame recording this should be the serial of the upcoming submit; after submit it should match the last submitted serial.
@@ -170,6 +175,10 @@ class VulkanTextureManager {
 	static constexpr int kFallbackTextureHandle = -1000;
 	// Synthetic handle for default white texture (won't collide with bmpman handles which are >= 0)
 	static constexpr int kDefaultTextureHandle = -1001;
+	// Synthetic handle for default flat normal texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kDefaultNormalTextureHandle = -1002;
+	// Synthetic handle for default dielectric specular texture (won't collide with bmpman handles which are >= 0)
+	static constexpr int kDefaultSpecTextureHandle = -1003;
 
   private:
 		friend class VulkanTextureUploader;
@@ -177,6 +186,9 @@ class VulkanTextureManager {
 		// Flush pending uploads (upload phase only; records GPU work).
 		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 
+		void processPendingRetirements();
+		void retryPendingBindlessSlots();
+		bool tryAssignBindlessSlot(int textureHandle, bool allowResidentEvict);
 		void onTextureResident(int textureHandle);
 		void retireTexture(int textureHandle, uint64_t retireSerial);
 
@@ -187,7 +199,16 @@ class VulkanTextureManager {
 
 	vk::UniqueSampler m_defaultSampler;
 
-	std::unordered_map<int, TextureRecord> m_textures; // keyed by base frame
+	// State as location:
+	// - presence in m_residentTextures => resident
+	// - presence in m_pendingUploads   => queued for upload
+	// - presence in m_unavailable      => permanently unavailable (non-retriable under current algorithm)
+	// - presence in m_bindlessSlots    => has a bindless slot assigned
+	std::unordered_map<int, ResidentTexture> m_residentTextures; // keyed by base frame (or synthetic handles)
+	std::unordered_map<int, UnavailableTexture> m_unavailableTextures; // keyed by base frame
+	std::unordered_map<int, uint32_t> m_bindlessSlots; // keyed by base frame
+	std::unordered_set<int> m_pendingBindlessSlots; // textures waiting for a bindless slot assignment (retry each frame start)
+	std::unordered_set<int> m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)
 	std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
 	std::vector<int> m_pendingUploads; // base frame handles queued for upload
 
@@ -199,15 +220,20 @@ class VulkanTextureManager {
 		void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
 		void createFallbackTexture();
 		void createDefaultTexture();
-	bool isUploadQueued(int baseFrame) const;
+		void createDefaultNormalTexture();
+		void createDefaultSpecTexture();
+		bool isUploadQueued(int baseFrame) const;
 
-		// Pool of bindless texture slots (excluding 0, reserved for fallback)
+		// Pool of bindless texture slots (excluding reserved default slots; see VulkanConstants.h)
 		std::vector<uint32_t> m_freeBindlessSlots;
 
-			// Fallback "black" texture for missing/unavailable textures (initialized at startup)
-			int m_fallbackTextureHandle = -1;
-	// Default "white" texture for untextured draws (initialized at startup)
-	int m_defaultTextureHandle = -1;
+		// Fallback "black" texture for missing/unavailable textures (initialized at startup)
+		int m_fallbackTextureHandle = -1;
+		// Default "white" texture for untextured draws (initialized at startup)
+		int m_defaultTextureHandle = -1;
+		// Default textures for model shader when no map is provided
+		int m_defaultNormalTextureHandle = -1;
+		int m_defaultSpecTextureHandle = -1;
 
 		DeferredReleaseQueue m_deferredReleases;
 
