@@ -317,7 +317,7 @@ void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completed
 
   Assertion(m_textureManager != nullptr, "m_textureManager must be initialized");
   m_textureManager->markUploadsCompleted(frame.frameIndex());
-  m_textureManager->processPendingDestructions(completedSerial);
+  m_textureManager->collect(completedSerial);
 
   frame.reset();
 }
@@ -771,15 +771,6 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
       writeTextureDescriptor(frame.modelDescriptorSet(), state.arrayIndex, handle);
       descriptorCount++;
     }
-
-  // Write fallback descriptor into retired slots
-  // This ensures any stale references sample black instead of destroyed image
-  for (uint32_t slot : m_textureManager->getRetiredSlots()) {
-    writeFallbackDescriptor(frame.modelDescriptorSet(), slot);
-  }
-
-  // Clear retired slots once all frames have been updated
-  m_textureManager->clearRetiredSlotsIfAllFramesUpdated(frameIndex);
 }
 
 void VulkanRenderer::writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer) {

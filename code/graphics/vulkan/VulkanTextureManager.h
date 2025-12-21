@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VulkanConstants.h"
+#include "VulkanDeferredRelease.h"
 #include "VulkanFrame.h"
 #include "VulkanModelTypes.h"
 
@@ -140,19 +141,18 @@ class VulkanTextureManager {
 	// Delete texture for a bitmap handle (base frame)
 	void deleteTexture(int bitmapHandle);
 
-	// Cleanup all resources
-	void cleanup();
+		// Cleanup all resources
+		void cleanup();
 
 		// Descriptor binding management
 		void onTextureResident(int textureHandle);
-			void retireTexture(int textureHandle, uint64_t retireSerial);
-			uint32_t getBindlessSlotIndex(int textureHandle);
+		void retireTexture(int textureHandle, uint64_t retireSerial);
+		uint32_t getBindlessSlotIndex(int textureHandle);
 
-		const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
-		void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
+		void collect(uint64_t completedSerial);
+
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
-		void processPendingDestructions(uint64_t completedSerial);
 		const std::vector<int>& getNewlyResidentTextures() const { return m_newlyResidentTextures; }
 		void clearNewlyResidentTextures() { m_newlyResidentTextures.clear(); }
 
@@ -203,25 +203,18 @@ class VulkanTextureManager {
 		bool& uploadQueued);
 	bool isUploadQueued(int baseFrame) const;
 
-		// Slots that need fallback descriptor written (original slot indices)
-		std::vector<uint32_t> m_retiredSlots;
-
 		// Pool of bindless texture slots (excluding 0, reserved for fallback)
 		std::vector<uint32_t> m_freeBindlessSlots;
 
-		// Counter for tracking when all frames have processed retired slots
-		uint32_t m_retiredSlotsFrameCounter = 0;
-
-	// Fallback "black" texture for retired slots (initialized at startup)
-	int m_fallbackTextureHandle = -1;
+			// Fallback "black" texture for missing/unavailable textures (initialized at startup)
+			int m_fallbackTextureHandle = -1;
 	// Default "white" texture for untextured draws (initialized at startup)
 	int m_defaultTextureHandle = -1;
 	
-	// Textures that became Resident in markUploadsCompleted and need descriptor write
-	std::vector<int> m_newlyResidentTextures;
+		// Textures that became Resident in markUploadsCompleted and need descriptor write
+		std::vector<int> m_newlyResidentTextures;
 
-		// Pending destructions: {textureHandle, retireSerial}
-		std::vector<std::pair<int, uint64_t>> m_pendingDestructions;
+		DeferredReleaseQueue m_deferredReleases;
 
 		// Serial at/after which it is safe to destroy newly-retired resources.
 		uint64_t m_safeRetireSerial = 0;

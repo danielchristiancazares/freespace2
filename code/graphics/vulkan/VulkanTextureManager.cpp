@@ -868,39 +868,27 @@ bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool /*isAABitmap*/)
 void VulkanTextureManager::deleteTexture(int bitmapHandle)
 {
   int base = bm_get_base_frame(bitmapHandle, nullptr);
-  auto it = m_textures.find(base);
-  if (it != m_textures.end()) {
-    // Never delete the synthetic default/fallback textures.
-    if (base == kFallbackTextureHandle || base == kDefaultTextureHandle) {
-      return;
-    }
-
-    auto& record = it->second;
-    if (record.state == TextureState::Retired) {
-      return;
-    }
-
-    // Free the bindless slot immediately; the GPU image/view will be destroyed later.
-    uint32_t slot = record.bindingState.arrayIndex;
-    if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
-      m_freeBindlessSlots.push_back(slot);
-    }
-    record.bindingState.arrayIndex = MODEL_OFFSET_ABSENT;
-
-    record.state = TextureState::Retired;
-    // Be conservative: if called during a frame, ensure we wait at least one more submit.
-    m_pendingDestructions.push_back({base, m_safeRetireSerial + 1});
+  // Never delete the synthetic default/fallback textures.
+  if (base == kFallbackTextureHandle || base == kDefaultTextureHandle) {
+    return;
   }
+
+  auto it = m_textures.find(base);
+  if (it == m_textures.end()) {
+    return;
+  }
+
+  // Be conservative: if called during a frame, ensure we wait at least one more submit.
+  retireTexture(base, m_safeRetireSerial + 1);
 }
 
 void VulkanTextureManager::cleanup()
 {
+  m_deferredReleases.clear();
   m_textures.clear();
   m_samplerCache.clear();
   m_defaultSampler.reset();
   m_pendingUploads.clear();
-  m_retiredSlots.clear();
-  m_pendingDestructions.clear();
 }
 
 void VulkanTextureManager::onTextureResident(int textureHandle)
@@ -940,17 +928,7 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
     
     if (oldestHandle >= 0 && oldestSlot != MODEL_OFFSET_ABSENT) {
       // Evict the oldest texture and reuse its slot.
-      // Keep the old VkImage/VkImageView alive until the GPU has drained in-flight frames.
-      auto oldIt = m_textures.find(oldestHandle);
-      if (oldIt != m_textures.end()) {
-        auto& oldRecord = oldIt->second;
-        oldRecord.state = TextureState::Retired;
-        oldRecord.bindingState.arrayIndex = MODEL_OFFSET_ABSENT;
-        m_pendingDestructions.push_back({oldestHandle, m_safeRetireSerial});
-      }
-
-      // Return the slot to free pool for immediate reuse.
-      m_freeBindlessSlots.push_back(oldestSlot);
+      retireTexture(oldestHandle, m_safeRetireSerial);
     } else {
       // No slots available and nothing to evict; leave as absent so model shader will skip sampling.
       return;
@@ -997,58 +975,32 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
 
   auto& record = it->second;
 
-  // DO NOT change arrayIndex - that's the slot we need to overwrite with fallback
   const uint32_t slot = record.bindingState.arrayIndex;
 
-  // Mark as retired (no longer usable for new draws)
+  if (record.state == TextureState::Retired) {
+    return;
+  }
+
+  // Free the slot for reuse. The old VkImage/VkImageView stay alive until collect(retireSerial).
+  if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
+    m_freeBindlessSlots.push_back(slot);
+  }
+
+  record.bindingState.arrayIndex = MODEL_OFFSET_ABSENT;
   record.state = TextureState::Retired;
 
-  // Track this slot for fallback descriptor writes
-  // The renderer will write fallback descriptors to these slots at frame start
-  m_retiredSlots.push_back(slot);
-
-  // Queue actual VkImage/VkImageView destruction for after GPU completes the serial
-  m_pendingDestructions.push_back({textureHandle, retireSerial});
+  m_deferredReleases.enqueue(retireSerial, [this, handle = textureHandle]() mutable {
+    auto texIt = m_textures.find(handle);
+    if (texIt != m_textures.end()) {
+      // VkImageView/VkImage destroyed automatically via unique handles.
+      m_textures.erase(texIt);
+    }
+  });
 }
 
-void VulkanTextureManager::clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex)
+void VulkanTextureManager::collect(uint64_t completedSerial)
 {
-  // Only clear when we've cycled through all frames
-  // This ensures every frame's descriptor set has had fallback written
-  if (!m_retiredSlots.empty()) {
-    m_retiredSlotsFrameCounter++;
-    if (m_retiredSlotsFrameCounter >= kFramesInFlight) {
-      // Return retired slots to the free pool so they can be reused
-      for (uint32_t slot : m_retiredSlots) {
-        if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
-          m_freeBindlessSlots.push_back(slot);
-        }
-      }
-      m_retiredSlots.clear();
-      m_retiredSlotsFrameCounter = 0;
-    }
-  }
-}
-
-void VulkanTextureManager::processPendingDestructions(uint64_t completedSerial)
-{
-  auto it = m_pendingDestructions.begin();
-  while (it != m_pendingDestructions.end()) {
-    if (completedSerial >= it->second) {
-      // Safe to destroy - GPU has completed the serial that retired this texture
-      int handle = it->first;
-
-      auto texIt = m_textures.find(handle);
-      if (texIt != m_textures.end()) {
-        // VkImageView and VkImage destroyed automatically via unique handles
-        m_textures.erase(texIt);
-      }
-
-      it = m_pendingDestructions.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  m_deferredReleases.collect(completedSerial);
 }
 
 vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textureHandle,
