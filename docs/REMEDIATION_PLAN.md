@@ -1,207 +1,189 @@
 # Vulkan Remediation Plan (Bulletproof Refactor)
 
-Date: 2025-12-21
+Date: 2025-12-22
 
-Scope: Remediate issues identified in `docs/QA_REVIEW.md` for `code/graphics/vulkan/`, prioritizing
-correctness and making invalid states non-representable via typestate, RAII, and type-driven design.
+Scope: Remediate issues identified in `docs/QA_REVIEW.md` for `code/graphics/vulkan/`, prioritizing correctness and making
+invalid states non-representable via typestate, RAII, and type-driven design.
 
 ---
-
-## Current State (Local Changes As Of 2025-12-21)
-
-- `VulkanRenderer::getTextureDescriptor()` no longer flushes uploads while dynamic rendering may be active; on miss it
-  queues the upload and returns a fallback descriptor.
-- Frame reuse now tracks a real `m_completedSerial` and runs `prepareFrameForReuse()` exactly once per recycled frame.
-- Hard-coded "agent log" file IO was removed from Vulkan hot paths.
-- Texture eviction/deletion was changed to defer destruction (serial-gated) instead of immediate RAII teardown.
-- Resource retirement during `beginFrame()` is now guarded against the *upcoming* submit serial (prevents premature destruction before the frame completes).
-- Bindless slot eviction only considers textures whose `lastUsedSerial <= completedSerial` (no eviction of in-flight textures).
-- Cache eviction now drops cache state immediately and moves GPU handles into the deferred release queue (no long-lived `Retired` records blocking re-requests).
 
 ## 0) Target Invariants (Non-Negotiable)
 
-1) No “descriptor request” API may record GPU work (no barriers/copies/allocations). It may only:
+1) No "descriptor request" API may record GPU work (no barriers/copies/allocations). It may only:
    - return an already-valid descriptor (possibly fallback), and/or
    - queue work for a later, explicitly safe phase.
-2) No Vulkan resource (`VkImage`, `VkImageView`, `VkBuffer`, etc.) may be destroyed while any in-flight submission
-   may still reference it (push descriptors included).
-3) “Upload allowed” vs “rendering active” must be enforced by types/ownership, not comments.
-4) Frame lifecycle exposes one monotonic “GPU completed” signal used for *all* deferred destruction.
+2) No Vulkan resource (`VkImage`, `VkImageView`, `VkBuffer`, etc.) may be destroyed while any in-flight submission may still
+   reference it (push descriptors included).
+3) "Upload allowed" vs "rendering active" must be enforced by types/ownership, not comments.
+4) Frame lifecycle exposes one monotonic "GPU completed" signal used for all deferred destruction.
 
 ---
 
-## 1) Foundation: Frame/Timeline + Deferred Destruction (Prerequisite)
+## 1) Foundation: Frame/Timeline + Deferred Destruction (DONE)
 
-### 1.1 One source of truth for GPU completion
+### 1.1 One source of truth for GPU completion (DONE)
 
-Add `VulkanSubmitTimeline` (owned by `VulkanRenderer`):
-- `uint64_t nextSerial()` increments per submit.
-- `uint64_t completedSerial()` monotonically increases.
-- Update `completedSerial()` from either:
-  - **Preferred:** a global timeline semaphore (signal per submit, query counter each frame), or
-  - **Fallback:** fence-ordered completion (only if frames are strictly recycled FIFO).
+- A monotonic `m_completedSerial` is tracked from FIFO fence waits.
+- `m_completedSerial` is passed to `VulkanTextureManager::collect()` and `VulkanBufferManager::collect()`.
 
-Deliverable:
-- A single `completedSerial` value is available at frame begin/recycle and is meaningful (not always `0`).
+Note: the current completion signal relies on FIFO frame recycling. If the renderer ever moves away from that assumption,
+prefer a global timeline semaphore as the source of truth.
 
-### 1.2 Defer destruction by serial (RAII-safe)
+### 1.2 Defer destruction by serial (RAII-safe) (DONE)
 
-Add `DeferredReleaseQueue`:
-- `enqueue(retireSerial, MoveOnlyResource)` (or type-erased callable).
-- `collect(completedSerial)` destroys anything whose `retireSerial <= completedSerial`.
+- `DeferredReleaseQueue` implemented (`code/graphics/vulkan/VulkanDeferredRelease.h`).
+- Managers enqueue moved RAII handles with a `retireSerial` and destroy them after `collect(completedSerial)`.
 
-Migrate to it:
-- `VulkanTextureManager` (or replacement) image/view destruction.
-- `VulkanBufferManager` “retired buffers” (replace `FRAMES_BEFORE_DELETE` with serial-based safety).
+### 1.3 Fix frame reuse: exactly one reset path (DONE)
 
-### 1.3 Fix frame reuse: exactly one reset path
-
-Refactor `VulkanRenderer` frame lifecycle so:
-- Frame “reuse prep” (reset, buffer manager `onFrameEnd`, texture GC) happens exactly once per recycle.
-- `AvailableFrame.completedSerial` is populated based on a real completion point, not a stub.
-
-Acceptance for section 1:
-- Serial-based destruction is wired end-to-end and used by at least one subsystem.
+- Frame "reuse prep" happens exactly once per recycle.
+- `completedSerial` is populated from a real completion point, not a stub value.
 
 ---
 
-## 2) Texture System Rewrite (Make “Flush While Rendering” Impossible)
+## 2) Texture System Rewrite (DONE For Current Architecture)
 
-### 2.1 Split into three components
+### 2.1 Split into components (DONE)
 
-Replace the current “all-in-one” texture manager with:
+- `VulkanTextureBindings`: draw-path API, no command buffer access, returns fallback on miss.
+- `VulkanTextureUploader`: upload-phase API, requires `UploadCtx` token.
+- `VulkanTextureManager`: internal state; upload flush is not callable from draw code.
 
-1) **TextureCache** (pure state, no command buffer)
-   - Maps `TextureId` (base frame) -> `TextureRecord`.
-   - Owns persistent GPU objects via RAII handles (prefer `std::shared_ptr<GpuTexture>`).
-   - Implements slot assignment policy (bindless) and eviction decisions.
+### 2.2 State as Location (DONE)
 
-2) **TextureUploader** (records GPU work; upload phase only)
-   - Consumes queued requests + staging allocator.
-   - Produces `GpuTexture` objects + a list of “dirty slots” needing descriptor writes.
+Per `docs/DESIGN_PHILOSOPHY.md`, texture state is container membership:
 
-3) **TextureBindings** (what draw code uses)
-   - `bind2D(TextureId, SamplerKey, RenderCtx)` returns a descriptor (fallback if needed) and a keepalive token.
-   - `bindlessIndex(TextureId, RenderCtx)` returns a stable slot index and queues upload if needed.
+- `m_residentTextures`: `unordered_map<int, ResidentTexture>` - presence = resident
+- `m_pendingUploads`: `vector<int>` - presence = queued
+- `m_unavailableTextures`: `unordered_map<int, UnavailableTexture>` - presence = permanently unavailable (domain-real)
+- `m_bindlessSlots`: `unordered_map<int, uint32_t>` - presence = has slot assigned
+- `m_pendingBindlessSlots`: `unordered_set<int>` - retry slot assignment at frame start
+- `m_pendingRetirements`: `unordered_set<int>` - defer slot reuse to upload phase (frame-start safe point)
 
-Key rule:
-- Bindings never flush uploads; they only queue work.
+No state enum. No `std::variant`. Transitions are moves between containers.
 
-### 2.2 Typestate makes invalid states non-representable
+### 2.3 Enforce upload-only-before-rendering via typed contexts (DONE)
 
-Replace `TextureState` + nullable members with:
-`std::variant<Missing, Queued, Resident, Failed, Retiring>`, where:
-- `Resident` contains `std::shared_ptr<GpuTexture>` (never null).
-- `Retiring` contains GPU object + `retireSerial`.
+- `UploadCtx` implemented: private constructor, `friend class VulkanRenderer`.
+- Upload recording requires `UploadCtx`; upload during rendering becomes a compile-time error.
+- Upload flush remains centralized to `VulkanRenderer::beginFrame()` (explicit safe point before any rendering begins).
 
-This prevents “Resident but no imageView”, etc.
+### 2.4 Bindless slot semantics: slot always points at something valid (DONE)
 
-### 2.3 Enforce upload-only-before-rendering via typed contexts
+- Slot 0 reserved for fallback; slots 1..3 reserved for well-known defaults (base=white, normal=flat, spec=dielectric).
+- `getBindlessSlotIndex()` returns a valid slot index (returns 0 on pressure/unavailable).
+- Non-resident slots sample fallback until upload completes.
+- Model bindless descriptor array is written with fallback first, then patched with resident textures.
+- The model bindless binding does not use `vk::DescriptorBindingFlagBits::ePartiallyBound` (all descriptors are written).
+- Model material texture indices are always valid (no \"absent texture\" sentinel routing).
 
-Introduce phase-typed contexts:
-- `UploadCtx` (command buffer recording, dynamic rendering not started)
-- `RenderCtx` (dynamic rendering active)
+### 2.5 Eviction/deletion policy is serial-safe by construction (DONE baseline)
 
-Only `UploadCtx` can call:
-- `TextureUploader::recordUploads(UploadCtx&)`
-- `TextureBindings::flushDirtyBindlessDescriptors(UploadCtx&)`
-
-Only `RenderCtx` is passed into draw calls.
-
-Result:
-- “Flush while rendering” becomes a compile-time error.
-
-### 2.4 Bindless slot semantics: slot always points at something valid
-
-Change bindless handling so:
-- Slot 0 is reserved fallback (black).
-- A texture gets a stable slot on first request (even if not resident yet).
-- Until resident, its slot descriptor points at fallback/default.
-- When upload completes, the slot is marked dirty and updated at frame start (upload phase).
-
-This fixes model path issues where only an index is requested (no upload occurs).
-
-### 2.5 RAII lifetime for push descriptors: per-frame keepalive
-
-Add a `FrameKeepAlive` container to `VulkanFrame`:
-- `std::vector<std::shared_ptr<void>> keepAlive;` (or a typed wrapper).
-
-Every bound texture returns a keepalive token stored in the current frame.
-- Cache eviction drops cache references, but in-flight frames keep the GPU object alive.
-
-### 2.6 Eviction policy becomes serial-safe by construction
-
-Track `lastUsedSerial` per texture.
-Evict only if `lastUsedSerial <= completedSerial`. If no safe eviction exists:
-- Do not evict; use fallback for that request and try later.
-
-Acceptance for section 2:
-- No path in draw code can record texture uploads mid-pass.
-- Texture destruction/eviction can’t free resources referenced by in-flight frames.
+- `lastUsedSerial` tracked per texture.
+- Eviction only if `lastUsedSerial <= completedSerial`.
+- Resident eviction and slot reuse only at upload phase (frame-start safe point).
+- Mid-frame: only reclaim non-resident slot mappings (safe because those slots already point to fallback that frame).
+- `deleteTexture()` defers retirement to upload phase (`m_pendingRetirements`) to prevent mid-frame slot reuse.
 
 ---
 
-## 3) Rendering Session Lifetime (Stability + Simpler Rules)
+## 3) Rendering Session Lifetime (DONE)
 
-Refactor `VulkanRenderingSession` so the active dynamic-rendering pass lifetime is owned by the frame/session
-(not by “temporary scope” returned from helper calls).
+`VulkanRenderingSession` now owns the active dynamic-rendering pass lifetime (not per-draw).
 
-Options:
-- Store `std::optional<ActivePass>` on `VulkanFrame` and manage it explicitly at boundaries, or
-- Make `VulkanRenderingSession` own it and end it on target switches/endFrame.
+- Dynamic rendering is started via an idempotent `ensureRendering()` API.
+- Frame/target boundaries end any active pass internally (no caller-managed RAII scope required).
 
 Acceptance:
-- It’s always clear (and enforceable) whether rendering is active.
+- It's always clear (and enforceable) whether rendering is active.
 
 ---
 
-## 4) Remove Footguns / Cleanups
+## 4) Typestate Enforcement (PARTIAL)
 
-1) Remove or gate all hard-coded “agent log” file IO in hot paths:
-   - `code/graphics/vulkan/VulkanGraphics.cpp`
-   - `code/graphics/vulkan/VulkanRenderer.cpp`
-   - `code/graphics/vulkan/VulkanTextureManager.cpp`
-2) Validation callback must log useful messages (warnings/errors) via `vkprintf`:
-   - `code/graphics/vulkan/VulkanDevice.cpp`
-3) Fix `VulkanFrame::reset()` so it compiles in both exception/no-exception Vulkan-Hpp modes:
-   - `code/graphics/vulkan/VulkanFrame.cpp`
-4) Remove or implement dead `VulkanShaderReflection.cpp` (currently header duplicate).
+### 4.1 `RenderCtx` token (DONE)
 
----
+Introduce `RenderCtx` (proves rendering is active):
+- Only constructible by `VulkanRenderer` after starting/ensuring dynamic rendering.
+- Returned from `VulkanRenderer::ensureRenderingStarted(frameCtx)` and consumed by draw code as proof of phase.
+- Draw code cannot access the raw command buffer without `RenderCtx`:
+  `VulkanFrame::commandBuffer()` is private, `RecordingFrame::cmd()` is private, and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
+- Recording-only work that does not require an active render pass is routed through `VulkanRenderer` methods that require `FrameCtx`
+  (e.g., setup-frame dynamic state, debug labels).
 
-## 5) Concrete Execution Milestones (Breaking Allowed)
+### 4.2 Migrate draw APIs (PARTIAL)
 
-### Milestone 1: Make current code “safe-ish” and unblock refactor
-- Remove lazy flush from `VulkanRenderer::getTextureDescriptor()` (never record uploads there).
-- Add `VulkanSubmitTimeline` + `DeferredReleaseQueue`.
-- Fix frame reuse so `completedSerial` is real; remove double reuse-prep.
+- Thread `RenderCtx&` through internal draw helpers so "rendering active" is required by signature rather than being fetched
+  internally (model draw helper updated; deferred lighting recording updated; continue expanding this pattern).
 
-### Milestone 2: Introduce new texture components (fallback-first)
-- Add `TextureId` + new `TextureCache/TextureUploader/TextureBindings` skeleton.
-- Primitive path: always return a valid descriptor (fallback on miss) and queue upload.
-- Model path: request stable bindless slot (queues upload) instead of returning `MODEL_OFFSET_ABSENT` silently.
+### 4.3 Deferred lighting call order tokens
 
-### Milestone 3: Bulletproof lifetime + eviction
-- Add per-frame keepalive, wire it through both primitive and model binding code.
-- Use serial-based retirement for textures; remove immediate erases.
-- Implement safe eviction (`lastUsedSerial <= completedSerial`).
-
-### Milestone 4: Typestate enforcement
-- Introduce `UploadCtx`/`RenderCtx` and migrate APIs so invalid call order cannot compile.
-- Add asserts as backstop (debug builds).
-
-### Milestone 5: Rendering session simplification + perf cleanup
-- Move to frame-owned pass lifetime.
-- Descriptor updates become “dirty slot only” instead of rewriting all slots every frame.
+- Deferred lighting begin/end/finish uses move-only typestate tokens (`DeferredGeometryCtx` -> `DeferredLightingCtx`) instead of a
+  `DeferredBoundaryState` enum.
 
 ---
 
-## 6) Verification Strategy
+## 5) Performance Cleanup (DONE)
 
-- Add unit tests for:
-  - slot assignment + safe eviction logic
-  - typestate compilation boundaries (where applicable)
-- Add “validation hard-fail” option for debug:
-  - Debug utils callback logs and can assert on `ERROR` severity.
-- Add runtime assertion backstops:
-  - Upload recording asserts “rendering not active” even if typestate should prevent it.
+### 5.1 Frame-owned pass lifetime (DONE)
+
+- Per-draw `RenderScope` RAII removed; pass lifetime is session-owned and ends at target switches/frame end.
+
+### 5.2 Dirty-slot-only descriptor updates (DONE)
+
+- Model bindless descriptors are initialized once (full fallback fill) and then updated incrementally by dirty slot ranges.
+
+---
+
+## 6) Cleanups (DONE / LOW)
+
+1) Hard-coded debug file IO removed from Vulkan hot paths.
+2) Validation callback logs include message id/name and object/label context, with duplicate suppression (via `vkprintf`).
+3) `VulkanFrame::reset()` handles both exceptions-enabled and `VULKAN_HPP_NO_EXCEPTIONS` builds.
+4) Removed dead `VulkanShaderReflection.cpp` TU (it duplicated the header and provided no definitions).
+5) Removed `MODEL_OFFSET_ABSENT` sentinel; model vertex attribute presence is explicit via a `vertexAttribMask` push constant.
+6) `BufferUsageHint::Static` buffers are device-local; device-local updates are staged via a dedicated transfer command pool.
+
+---
+
+## 7) Deferred Lighting Baseline Correctness (DONE, OpenGL Parity)
+
+- Ambient deferred-light pass initializes background pixels (prevents undefined swapchain content when `PositionBuffer` is clear).
+- Deferred begin snapshots the current swapchain color into a per-swapchain-image scene buffer (requires `TRANSFER_SRC` swapchain usage),
+  then copies that into the emissive G-buffer attachment via a fullscreen pass (`SDR_TYPE_COPY`).
+- Deferred geometry clears the non-emissive G-buffer attachments on entry, and *loads* emissive (so pre-deferred backgrounds survive).
+
+---
+
+## 8) Bitmap Render Targets + Dynamic State Bridging (DONE)
+
+The Vulkan backend must honor the engine's render-to-texture API (`bm_make_render_target` / `bm_set_render_target`) and
+engine-driven viewport/scissor changes (HTL target monitor, cockpit displays, envmap RTT, etc).
+
+- Implemented bmpman RTT API in Vulkan:
+  - `VulkanTextureManager::createRenderTarget()` creates a GPU-backed image + sample/attachment views.
+  - `VulkanRenderingSession` gained a `BitmapTarget` state to render into those images via dynamic rendering.
+  - Unbind transitions the render target to shader-read and generates mipmaps when requested.
+  - Render-target views are destroyed via the same serial-gated deferred release mechanism as other GPU resources.
+- Vulkan now honors engine dynamic state:
+  - Implemented `gf_set_viewport`.
+  - `gf_set_clip` / `gf_reset_clip` now apply dynamic scissor updates (so clip changes affect model draws).
+  - `VulkanRenderingSession::applyDynamicState()` no longer overwrites viewport at pass begin (viewport is owned by engine calls).
+- bmpman handle reuse is safe:
+  - Implemented `gf_bm_free_data(slot, release=true)` to immediately drop Vulkan-side mappings when bmpman releases a bitmap handle.
+  - `VulkanTextureManager::createRenderTarget()` retires any stale mapping for a reused handle rather than failing.
+- Vulkan scissor is spec-valid:
+  - Clip-derived scissor rectangles are clamped to the framebuffer extent so Vulkan never records a negative scissor offset
+    (engine paths like HUD jitter can temporarily produce negative clip origins).
+
+---
+
+## Milestone Summary
+
+| Milestone | Description | Status |
+|-----------|-------------|--------|
+| 1 | Foundation: serial tracking, deferred destruction, frame reuse | DONE |
+| 2 | Texture system: state-as-location, fallback-first, phase safety | DONE (UploadCtx) |
+| 3 | Bulletproof lifetime: serial-safe eviction, deferred retirement | DONE (baseline) |
+| 4 | Typestate enforcement: RenderCtx, compile-time phase checking | PARTIAL |
+| 5 | Performance: frame-owned passes, dirty-slot descriptors | DONE |

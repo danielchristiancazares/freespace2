@@ -106,7 +106,9 @@ void VulkanTextureManager::createDefaultSampler()
   samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
   samplerInfo.mipLodBias = 0.0f;
   samplerInfo.minLod = 0.0f;
-  samplerInfo.maxLod = 0.0f;
+  // Allow sampling all mip levels present in the bound image view.
+  // (maxLod=0 would clamp sampling to base mip even when mipmaps exist.)
+  samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
   m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
 }
@@ -278,7 +280,7 @@ vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key)
   samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
   samplerInfo.mipLodBias = 0.0f;
   samplerInfo.minLod = 0.0f;
-  samplerInfo.maxLod = 0.0f;
+  samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
   auto sampler = m_device.createSamplerUnique(samplerInfo);
   vk::Sampler handle = sampler.get();
