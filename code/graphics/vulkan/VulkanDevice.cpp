@@ -1,5 +1,6 @@
 #include "VulkanDevice.h"
 #include "VulkanModelValidation.h"
+#include "VulkanDebug.h"
 
 #include "globalincs/version.h"
 #include "graphics/2d.h"
@@ -33,11 +34,25 @@ const char* EngineName = "FreeSpaceOpen";
 const gameversion::version MinVulkanVersion(1, 4, 0, 0);
 
 VkBool32 VKAPI_PTR debugReportCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-	VkDebugUtilsMessageTypeFlagsEXT messageTypes,
-	const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-	void* /*pUserData*/) {
-	return VK_FALSE;
-}
+		VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+		void* /*pUserData*/) {
+		// Keep validation visible during Vulkan work; do not spam in non-debug builds.
+		const char* severity = "UNKNOWN";
+		if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+			severity = "ERROR";
+		} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+			severity = "WARN";
+		} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+			severity = "INFO";
+		} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
+			severity = "VERBOSE";
+		}
+
+		const char* msg = (pCallbackData && pCallbackData->pMessage) ? pCallbackData->pMessage : "<null>";
+		vkprintf("Validation [%s] (types=0x%x): %s\n", severity, static_cast<unsigned>(messageTypes), msg);
+		return VK_FALSE;
+	}
 #endif
 
 const SCP_vector<const char*> RequiredDeviceExtensions = {
@@ -915,7 +930,7 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
 
 	try {
 		m_swapchain = m_device->createSwapchainKHRUnique(createInfo);
-	} catch (const vk::SystemError& e) {
+	} catch (const vk::SystemError&) {
 		m_swapchain = std::move(oldSwapchain);
 		return false;
 	}
