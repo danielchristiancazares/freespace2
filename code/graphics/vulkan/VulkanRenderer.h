@@ -74,10 +74,8 @@ class VulkanRenderer {
 		size_t offset,
 		size_t size);
 	void updateModelDescriptors(vk::DescriptorSet set,
-		vk::Buffer vertexBuffer,
-		const std::vector<std::pair<uint32_t, int>>& textures,
-		VulkanFrame& frame,
-		vk::CommandBuffer cmd);
+			vk::Buffer vertexHeapBuffer,
+			const std::vector<std::pair<uint32_t, int>>& textures);
 
 	// Frame sync for model descriptors - called at frame start after fence wait
 	// vertexHeapBuffer must be valid (caller is responsible for checking)
@@ -184,12 +182,7 @@ class VulkanRenderer {
 		uint64_t queryCompletedSerial() const;
 		void maybeRunVulkanStress();
 
-		// Descriptor sync helpers
-		void writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer);
-		void writeTextureDescriptor(vk::DescriptorSet set, uint32_t arrayIndex, int textureHandle);
-		void writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex);
-
-	void prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial);
+		void prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial);
 
 	// Device layer - owns instance, surface, physical device, logical device, swapchain
 	std::unique_ptr<VulkanDevice> m_vulkanDevice;

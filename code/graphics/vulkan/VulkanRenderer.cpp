@@ -774,21 +774,17 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
 }
 
 void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
-  vk::Buffer vertexBuffer,
-  const std::vector<std::pair<uint32_t, int>>& textures,
-  VulkanFrame& frame,
-  vk::CommandBuffer cmd) {
+  vk::Buffer vertexHeapBuffer,
+  const std::vector<std::pair<uint32_t, int>>& textures) {
   std::vector<vk::WriteDescriptorSet> writes;
   writes.reserve(textures.size() + 1);
 
-  // Binding 0: Vertex heap SSBO (required for per-draw descriptor sets)
-  // Look up buffer lazily - it may not exist at registration time
-  vk::Buffer modelVertexHeapBuffer = queryModelVertexHeapBuffer();
-  Assertion(static_cast<VkBuffer>(modelVertexHeapBuffer) != VK_NULL_HANDLE,
-    "Model vertex heap buffer not available (handle=%d)", m_modelVertexHeapHandle.value());
+  // Binding 0: Vertex heap SSBO
+  Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
+    "updateModelDescriptors called with null vertexHeapBuffer");
 
   vk::DescriptorBufferInfo heapInfo{};
-  heapInfo.buffer = modelVertexHeapBuffer;
+  heapInfo.buffer = vertexHeapBuffer;
   heapInfo.offset = 0;
   heapInfo.range = VK_WHOLE_SIZE;
 
@@ -809,8 +805,6 @@ void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
     samplerKey.address = vk::SamplerAddressMode::eRepeat;
     samplerKey.filter = vk::Filter::eLinear;
 
-    (void)frame;
-    (void)cmd;
     Assertion(m_textureManager != nullptr, "updateModelDescriptors called before texture manager initialization");
     vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
     Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
@@ -835,100 +829,26 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
   // Descriptor set must be allocated at frame construction (not lazily)
   Assertion(frame.modelDescriptorSet(), "Model descriptor set must be allocated at frame construction");
 
-  // Binding 0: Write vertex heap descriptor (once per frame)
-  writeVertexHeapDescriptor(frame, vertexHeapBuffer);
+  Assertion(m_textureManager != nullptr, "beginModelDescriptorSync requires texture manager");
 
-  // Binding 1: Write all texture descriptors for RESIDENT textures
-  // Note: We write all resident textures every frame. In the future, this could be optimized
-  // to track dirty slots, but for now we keep it simple and write everything.
-    uint32_t descriptorCount = 0;
-    for (auto& [handle, record] : m_textureManager->allTextures()) {
-      if (record.state != VulkanTextureManager::TextureState::Resident) {
-        continue;
-      }
-
-      auto& state = record.bindingState;
-      if (state.arrayIndex == MODEL_OFFSET_ABSENT) {
-        continue;
-      }
-      writeTextureDescriptor(frame.modelDescriptorSet(), state.arrayIndex, handle);
-      descriptorCount++;
+  // Binding 0: Vertex heap SSBO; Binding 1: bindless textures (only for textures with assigned slots).
+  // We batch the writes to avoid issuing one vkUpdateDescriptorSets call per texture.
+  std::vector<std::pair<uint32_t, int>> textures;
+  textures.reserve(m_textureManager->allTextures().size());
+  for (auto& [handle, record] : m_textureManager->allTextures()) {
+    if (record.state != VulkanTextureManager::TextureState::Resident) {
+      continue;
     }
-}
 
-void VulkanRenderer::writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer) {
-  // Precondition: vertexHeapBuffer is valid (caller checked)
-  Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
-    "writeVertexHeapDescriptor called with null vertexHeapBuffer");
+    const uint32_t slot = record.bindingState.arrayIndex;
+    if (slot == MODEL_OFFSET_ABSENT) {
+      continue;
+    }
 
-  vk::DescriptorBufferInfo info;
-  info.buffer = vertexHeapBuffer;
-  info.offset = 0;
-  info.range = VK_WHOLE_SIZE;
+    textures.emplace_back(slot, handle);
+  }
 
-  vk::WriteDescriptorSet write;
-  write.dstSet = frame.modelDescriptorSet();
-  write.dstBinding = 0;
-  write.dstArrayElement = 0;
-  write.descriptorCount = 1;
-  write.descriptorType = vk::DescriptorType::eStorageBuffer;
-  write.pBufferInfo = &info;
-
-  m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
-}
-
-void VulkanRenderer::writeTextureDescriptor(vk::DescriptorSet set,
-  uint32_t arrayIndex,
-  int textureHandle) {
-  Assertion(arrayIndex < kMaxBindlessTextures,
-    "Texture array index %u out of bounds", arrayIndex);
-
-  VulkanTextureManager::SamplerKey samplerKey{};
-  samplerKey.address = vk::SamplerAddressMode::eRepeat;
-  samplerKey.filter = vk::Filter::eLinear;
-
-  vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(
-    textureHandle, samplerKey);
-
-  Assertion(info.imageView, "Texture %d must be resident when writing descriptor", textureHandle);
-
-  vk::WriteDescriptorSet write;
-  write.dstSet = set;
-  write.dstBinding = 1;
-  write.dstArrayElement = arrayIndex;
-  write.descriptorCount = 1;
-  write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-  write.pImageInfo = &info;
-
-  m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
-}
-
-void VulkanRenderer::writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex) {
-  Assertion(arrayIndex < kMaxBindlessTextures,
-    "Fallback slot %u out of bounds", arrayIndex);
-
-  // Use the fallback texture (black 1x1, initialized at startup)
-  int fallbackHandle = m_textureManager->getFallbackTextureHandle();
-  Assertion(fallbackHandle != -1, "Fallback texture must be initialized");
-
-  VulkanTextureManager::SamplerKey samplerKey{};
-  samplerKey.address = vk::SamplerAddressMode::eRepeat;
-  samplerKey.filter = vk::Filter::eNearest;
-
-  vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(
-    fallbackHandle, samplerKey);
-
-  Assertion(info.imageView, "Fallback texture must be resident");
-
-  vk::WriteDescriptorSet write;
-  write.dstSet = set;
-  write.dstBinding = 1;
-  write.dstArrayElement = arrayIndex; // THE ORIGINAL SLOT, not 0
-  write.descriptorCount = 1;
-  write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-  write.pImageInfo = &info;
-
-  m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
+  updateModelDescriptors(frame.modelDescriptorSet(), vertexHeapBuffer, textures);
 }
 
 int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {
