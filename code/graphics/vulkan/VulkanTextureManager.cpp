@@ -531,58 +531,6 @@ void VulkanTextureManager::createDefaultTexture()
   m_defaultTextureHandle = kDefaultTextureHandle;
 }
 
-VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident(int bitmapHandle,
-  uint32_t currentFrameIndex,
-  const SamplerKey& samplerKey,
-  bool& uploadQueued)
-{
-  uploadQueued = false;
-
-  int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
-  if (baseFrame < 0) {
-    return nullptr;
-  }
-
-  auto it = m_textures.find(baseFrame);
-  if (it == m_textures.end()) {
-    it = m_textures.emplace(baseFrame, TextureRecord{}).first;
-  }
-  auto& record = it->second;
-
-  // If a previous upload for this record is queued, just update usage/sampler.
-  if (record.state == TextureState::Queued) {
-    record.lastUsedFrame = currentFrameIndex;
-    record.gpu.sampler = getOrCreateSampler(samplerKey);
-    return &record;
-  }
-
-  if (record.state == TextureState::Resident) {
-    record.lastUsedFrame = currentFrameIndex;
-    record.gpu.sampler = getOrCreateSampler(samplerKey);
-    return &record;
-  }
-
-  if (record.state == TextureState::Retired) {
-    // This record still owns GPU resources pending safe destruction. Do not reuse it for new uploads.
-    return &record;
-  }
-
-  if (record.state == TextureState::Failed) {
-    return &record;
-  }
-
-  // Missing: queue an upload to be flushed before rendering begins.
-  record.lastUsedFrame = currentFrameIndex;
-  record.gpu.sampler = getOrCreateSampler(samplerKey);
-
-  if (!isUploadQueued(baseFrame)) {
-    m_pendingUploads.push_back(baseFrame);
-  }
-  record.state = TextureState::Queued;
-  uploadQueued = true;
-  return &record;
-}
-
 void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex)
 {
   if (m_pendingUploads.empty()) {
@@ -879,7 +827,8 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
   }
 
   if (m_freeBindlessSlots.empty()) {
-    // No slots available - evict least recently used texture to free a slot
+    // No slots available - evict least recently used texture to free a slot.
+    // Safety rule: only evict textures whose last use has completed on the GPU.
     uint32_t oldestFrame = UINT32_MAX;
     int oldestHandle = -1;
     uint32_t oldestSlot = MODEL_OFFSET_ABSENT;
@@ -888,7 +837,9 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
       if (handle == kFallbackTextureHandle || handle == kDefaultTextureHandle) {
         continue; // Never evict fallback texture
       }
-      if (other.state == TextureState::Resident && other.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
+      if (other.state == TextureState::Resident &&
+          other.bindingState.arrayIndex != MODEL_OFFSET_ABSENT &&
+          other.lastUsedSerial <= m_completedSerial) {
         if (other.lastUsedFrame < oldestFrame) {
           oldestFrame = other.lastUsedFrame;
           oldestHandle = handle;
@@ -901,7 +852,7 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
       // Evict the oldest texture and reuse its slot.
       retireTexture(oldestHandle, m_safeRetireSerial);
     } else {
-      // No slots available and nothing to evict; leave as absent so model shader will skip sampling.
+      // No slots available and nothing safe to evict; leave as absent so model shader will skip sampling.
       return;
     }
   }
@@ -930,13 +881,28 @@ uint32_t VulkanTextureManager::getBindlessSlotIndex(int textureHandle)
     return MODEL_OFFSET_ABSENT;
   }
 
-  record.lastUsedFrame = m_currentFrameIndex;
-
   if (record.bindingState.arrayIndex == MODEL_OFFSET_ABSENT) {
     onTextureResident(textureHandle);
   }
 
+  if (record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
+    record.lastUsedFrame = m_currentFrameIndex;
+    record.lastUsedSerial = m_safeRetireSerial;
+  }
+
   return record.bindingState.arrayIndex;
+}
+
+void VulkanTextureManager::markTextureUsedBaseFrame(int baseFrame, uint32_t currentFrameIndex)
+{
+  auto it = m_textures.find(baseFrame);
+  if (it == m_textures.end()) {
+    return;
+  }
+
+  auto& record = it->second;
+  record.lastUsedFrame = currentFrameIndex;
+  record.lastUsedSerial = m_safeRetireSerial;
 }
 
 void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial)
@@ -944,33 +910,28 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
   auto it = m_textures.find(textureHandle);
   Assertion(it != m_textures.end(), "retireTexture called for unknown texture handle %d", textureHandle);
 
-  auto& record = it->second;
-
-  const uint32_t slot = record.bindingState.arrayIndex;
-
-  if (record.state == TextureState::Retired) {
+  // Never retire the synthetic default/fallback textures.
+  if (textureHandle == kFallbackTextureHandle || textureHandle == kDefaultTextureHandle) {
     return;
   }
+
+  TextureRecord record = std::move(it->second);
+  m_textures.erase(it); // Drop cache state immediately; in-flight GPU users are protected by deferred release.
+
+  const uint32_t slot = record.bindingState.arrayIndex;
 
   // Free the slot for reuse. The old VkImage/VkImageView stay alive until collect(retireSerial).
   if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
     m_freeBindlessSlots.push_back(slot);
   }
 
-  record.bindingState.arrayIndex = MODEL_OFFSET_ABSENT;
-  record.state = TextureState::Retired;
-
-  m_deferredReleases.enqueue(retireSerial, [this, handle = textureHandle]() mutable {
-    auto texIt = m_textures.find(handle);
-    if (texIt != m_textures.end()) {
-      // VkImageView/VkImage destroyed automatically via unique handles.
-      m_textures.erase(texIt);
-    }
-  });
+  VulkanTexture gpu = std::move(record.gpu);
+  m_deferredReleases.enqueue(retireSerial, [gpu = std::move(gpu)]() mutable {});
 }
 
 void VulkanTextureManager::collect(uint64_t completedSerial)
 {
+  m_completedSerial = std::max(m_completedSerial, completedSerial);
   m_deferredReleases.collect(completedSerial);
 }
 
@@ -1011,8 +972,7 @@ void VulkanTextureManager::queueTextureUploadBaseFrame(int baseFrame, uint32_t c
   }
   auto& record = it->second;
 
-  // Avoid resurrecting retired records; they will be erased once safe.
-  if (record.state == TextureState::Retired || record.state == TextureState::Failed) {
+  if (record.state == TextureState::Failed) {
     return;
   }
 

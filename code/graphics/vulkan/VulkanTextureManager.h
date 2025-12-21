@@ -15,6 +15,8 @@
 namespace graphics {
 namespace vulkan {
 
+class VulkanTextureUploader;
+
 // Helper for block-compressed images (BC1/BC3/BC7). Public for test coverage.
 inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
 {
@@ -102,7 +104,6 @@ class VulkanTextureManager {
 		Queued,
 		Resident,
 		Failed,
-		Retired // Marked for destruction, awaiting frame drainage
 	};
 
 		struct TextureBindingState {
@@ -113,6 +114,7 @@ class VulkanTextureManager {
 		VulkanTexture gpu;
 		TextureState state = TextureState::Missing;
 		uint32_t lastUsedFrame = 0;
+		uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
 		TextureBindingState bindingState;
 	};
 
@@ -125,9 +127,6 @@ class VulkanTextureManager {
 			return filter == other.filter && address == other.address;
 		}
 	};
-
-	// Flush pending uploads (only callable when no rendering is active).
-		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 
 		// Queue texture for upload (CPU-side only; does not record GPU work).
 		void queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
@@ -144,9 +143,10 @@ class VulkanTextureManager {
 		void cleanup();
 
 		// Descriptor binding management
-		void onTextureResident(int textureHandle);
-		void retireTexture(int textureHandle, uint64_t retireSerial);
 		uint32_t getBindlessSlotIndex(int textureHandle);
+
+		// Mark a texture as used by the upcoming submission (bindless or descriptor bind).
+		void markTextureUsedBaseFrame(int baseFrame, uint32_t currentFrameIndex);
 
 		void collect(uint64_t completedSerial);
 
@@ -172,6 +172,14 @@ class VulkanTextureManager {
 	static constexpr int kDefaultTextureHandle = -1001;
 
   private:
+		friend class VulkanTextureUploader;
+
+		// Flush pending uploads (upload phase only; records GPU work).
+		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
+
+		void onTextureResident(int textureHandle);
+		void retireTexture(int textureHandle, uint64_t retireSerial);
+
 	vk::Device m_device;
 	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
 	vk::Queue m_transferQueue;
@@ -191,10 +199,6 @@ class VulkanTextureManager {
 		void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
 		void createFallbackTexture();
 		void createDefaultTexture();
-		TextureRecord* ensureTextureResident(int bitmapHandle,
-			uint32_t currentFrameIndex,
-			const SamplerKey& samplerKey,
-			bool& uploadQueued);
 	bool isUploadQueued(int baseFrame) const;
 
 		// Pool of bindless texture slots (excluding 0, reserved for fallback)
@@ -211,6 +215,7 @@ class VulkanTextureManager {
 		uint64_t m_safeRetireSerial = 0;
 
 		uint32_t m_currentFrameIndex = 0;
+		uint64_t m_completedSerial = 0;
 	};
 
 } // namespace vulkan
