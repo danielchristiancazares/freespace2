@@ -42,6 +42,8 @@ class VulkanBufferManager {
 
 	void cleanup();
 
+	// Serial at/after which it is safe to destroy newly-retired resources.
+	// During frame recording this should be the serial of the upcoming submit; after submit it should match the last submitted serial.
 	void setSafeRetireSerial(uint64_t serial) { m_safeRetireSerial = serial; }
 	void collect(uint64_t completedSerial) { m_deferredReleases.collect(completedSerial); }
 

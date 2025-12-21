@@ -156,8 +156,8 @@ class VulkanTextureManager {
 		// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
 		std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
 
-		// Conservative serial used to defer destruction when evicting/deleting textures.
-		// Updated by the renderer (typically "last submitted serial").
+		// Serial at/after which it is safe to destroy newly-retired resources.
+		// During frame recording this should be the serial of the upcoming submit; after submit it should match the last submitted serial.
 		void setSafeRetireSerial(uint64_t serial) { m_safeRetireSerial = serial; }
 
 		// Current CPU frame counter (monotonic). Used for LRU bookkeeping.
