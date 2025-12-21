@@ -3,6 +3,7 @@
 #include "VulkanGraphics.h"
 #include "VulkanConstants.h"
 #include "VulkanFrameFlow.h"
+#include "VulkanTextureBindings.h"
 #include "graphics/util/uniform_structs.h"
 
 #include "def_files/def_files.h"
@@ -34,6 +35,8 @@ VulkanRenderer::VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsO
   : m_vulkanDevice(std::make_unique<VulkanDevice>(std::move(graphicsOps)))
 {
 }
+
+VulkanRenderer::~VulkanRenderer() = default;
 
 bool VulkanRenderer::initialize() {
   // Initialize the device layer (instance, surface, physical device, logical device, swapchain)
@@ -74,6 +77,8 @@ bool VulkanRenderer::initialize() {
     m_vulkanDevice->memoryProperties(),
     m_vulkanDevice->graphicsQueue(),
     m_vulkanDevice->graphicsQueueIndex());
+  m_textureBindings = std::make_unique<VulkanTextureBindings>(*m_textureManager);
+  m_textureUploader = std::make_unique<VulkanTextureUploader>(*m_textureManager);
 
   createDeferredLightingResources();
 
@@ -291,7 +296,8 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
   m_bufferManager->setSafeRetireSerial(m_submitSerial);
   maybeRunVulkanStress();
-  m_textureManager->flushPendingUploads(frame, cmd, m_frameCounter);
+  Assertion(m_textureUploader != nullptr, "m_textureUploader must be initialized before beginFrame");
+  m_textureUploader->flushPendingUploads(frame, cmd, m_frameCounter);
 
   // Sync model descriptors AFTER upload flush so newly-resident textures are written this frame.
   Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
@@ -675,8 +681,6 @@ void VulkanRenderer::resizeBuffer(gr_buffer_handle handle, size_t size) {
 }
 
 vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
-  VulkanFrame& frame,
-  vk::CommandBuffer cmd,
   const VulkanTextureManager::SamplerKey& samplerKey) {
   Assertion(m_textureManager != nullptr, "getTextureDescriptor called before texture manager initialization");
   Assertion(bitmapHandle >= 0, "getTextureDescriptor called with invalid bitmapHandle %d", bitmapHandle);
@@ -684,20 +688,8 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
   const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
   Assertion(baseFrame >= 0, "Invalid bitmapHandle %d in getTextureDescriptor", bitmapHandle);
 
-  auto info = m_textureManager->getTextureDescriptorInfo(baseFrame, samplerKey);
-
-  // Never flush uploads here: this may be called while dynamic rendering is active.
-  // If the texture is not resident yet, queue it and return a stable fallback descriptor.
-  if (!info.imageView) {
-    m_textureManager->queueTextureUpload(bitmapHandle, frame, cmd, m_frameCounter, samplerKey);
-
-    const int fallbackHandle = m_textureManager->getFallbackTextureHandle();
-    Assertion(fallbackHandle != -1, "Fallback texture handle must be initialized");
-    info = m_textureManager->getTextureDescriptorInfo(fallbackHandle, samplerKey);
-  }
-
-  Assertion(info.imageView, "Texture descriptor must have a valid imageView");
-  return info;
+  Assertion(m_textureBindings != nullptr, "getTextureDescriptor called before texture bindings initialization");
+  return m_textureBindings->descriptor(TextureId(baseFrame), m_frameCounter, samplerKey);
 }
 
 vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey)
@@ -710,6 +702,22 @@ vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const Vulkan
   auto info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
   Assertion(info.imageView, "Default texture must have a valid imageView");
   return info;
+}
+
+uint32_t VulkanRenderer::getBindlessTextureIndex(int bitmapHandle)
+{
+  if (bitmapHandle < 0) {
+    return MODEL_OFFSET_ABSENT;
+  }
+
+  Assertion(m_textureBindings != nullptr, "getBindlessTextureIndex called before texture bindings initialization");
+
+  const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
+  if (baseFrame < 0) {
+    return MODEL_OFFSET_ABSENT;
+  }
+
+  return m_textureBindings->bindlessIndex(TextureId(baseFrame));
 }
 
 void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,

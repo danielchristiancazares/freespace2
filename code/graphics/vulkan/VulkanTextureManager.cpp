@@ -532,14 +532,10 @@ void VulkanTextureManager::createDefaultTexture()
 }
 
 VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident(int bitmapHandle,
-  VulkanFrame& frame,
-  vk::CommandBuffer cmd,
   uint32_t currentFrameIndex,
   const SamplerKey& samplerKey,
-  bool& usedStaging,
   bool& uploadQueued)
 {
-  usedStaging = false;
   uploadQueued = false;
 
   int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
@@ -1023,11 +1019,37 @@ vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textu
   return info;
 }
 
-void VulkanTextureManager::queueTextureUpload(int bitmapHandle, VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
+void VulkanTextureManager::queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
 {
-  bool usedStaging = false;
-  bool uploadQueued = false;
-  ensureTextureResident(bitmapHandle, frame, cmd, currentFrameIndex, samplerKey, usedStaging, uploadQueued);
+  const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
+  if (baseFrame < 0) {
+    return;
+  }
+  queueTextureUploadBaseFrame(baseFrame, currentFrameIndex, samplerKey);
+}
+
+void VulkanTextureManager::queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
+{
+  auto it = m_textures.find(baseFrame);
+  if (it == m_textures.end()) {
+    it = m_textures.emplace(baseFrame, TextureRecord{}).first;
+  }
+  auto& record = it->second;
+
+  // Avoid resurrecting retired records; they will be erased once safe.
+  if (record.state == TextureState::Retired || record.state == TextureState::Failed) {
+    return;
+  }
+
+  record.lastUsedFrame = currentFrameIndex;
+  record.gpu.sampler = getOrCreateSampler(samplerKey);
+
+  if (record.state == TextureState::Missing) {
+    if (!isUploadQueued(baseFrame)) {
+      m_pendingUploads.push_back(baseFrame);
+    }
+    record.state = TextureState::Queued;
+  }
 }
 
 } // namespace vulkan

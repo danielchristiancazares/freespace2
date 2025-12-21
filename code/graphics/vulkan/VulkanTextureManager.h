@@ -129,11 +129,13 @@ class VulkanTextureManager {
 	};
 
 	// Flush pending uploads (only callable when no rendering is active).
-	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
-	void markUploadsCompleted(uint32_t completedFrameIndex);
+		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
+		void markUploadsCompleted(uint32_t completedFrameIndex);
 
-	// Queue texture for async upload (public wrapper for ensureTextureResident)
-	void queueTextureUpload(int bitmapHandle, VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
+		// Queue texture for upload (CPU-side only; does not record GPU work).
+		void queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
+		// Variant for callers that already have a base-frame handle.
+		void queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
 
 	// Preload uploads immediately; returns true on success.
 	bool preloadTexture(int bitmapHandle, bool isAABitmap);
@@ -191,16 +193,13 @@ class VulkanTextureManager {
 
 	vk::Sampler getOrCreateSampler(const SamplerKey& key);
 	bool uploadImmediate(int baseFrame, bool isAABitmap);
-	void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
-	void createFallbackTexture();
-	void createDefaultTexture();
-	TextureRecord* ensureTextureResident(int bitmapHandle,
-		VulkanFrame& frame,
-		vk::CommandBuffer cmd,
-		uint32_t currentFrameIndex,
-		const SamplerKey& samplerKey,
-		bool& usedStaging,
-		bool& uploadQueued);
+		void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
+		void createFallbackTexture();
+		void createDefaultTexture();
+		TextureRecord* ensureTextureResident(int bitmapHandle,
+			uint32_t currentFrameIndex,
+			const SamplerKey& samplerKey,
+			bool& uploadQueued);
 	bool isUploadQueued(int baseFrame) const;
 
 		// Pool of bindless texture slots (excluding 0, reserved for fallback)
