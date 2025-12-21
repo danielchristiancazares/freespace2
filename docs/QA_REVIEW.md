@@ -74,14 +74,16 @@ Impact:
 - Potentially catastrophic perf (sync file IO per draw / per texture event).
 - Not gated behind `FSO_DEBUG`/`Cmdline_graphics_debug_output`.
 
-### Texture upload state machine appears half-implemented
+### Texture upload state machine was inconsistent (fixed)
 
-- `flushPendingUploads()` sets textures `Resident` immediately (`code/graphics/vulkan/VulkanTextureManager.cpp:832`).
-- `markUploadsCompleted()` transitions `Uploading -> Resident` (`code/graphics/vulkan/VulkanTextureManager.cpp:848`),
-  but nothing appears to set `Uploading` (no assignments found in the file).
+Previously, the code mixed a "recorded upload" vs "GPU completed upload" concept:
+- `flushPendingUploads()` moved textures to `Resident` immediately, while `markUploadsCompleted()` attempted to
+  transition `Uploading -> Resident` even though nothing set `Uploading`.
 
-Impact:
-- Confusing invariants; easy for future code to assume the wrong state/phase semantics.
+Current behavior:
+- The unused `Uploading` state and `markUploadsCompleted()` path were removed.
+- Uploads are recorded during `VulkanRenderer::beginFrame()` into the same primary command buffer (before rendering),
+  so a separate "upload completion" state machine is not required for correctness.
 
 ## Medium
 
