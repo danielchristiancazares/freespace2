@@ -265,8 +265,7 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
     "New frame started while deferred boundary state was not idle");
   m_deferredBoundaryState = DeferredBoundaryState::Idle;
-  Assertion(m_renderingSession && !m_renderingSession->renderingActive(),
-    "beginFrame called while rendering is still active (RenderScope not destroyed)");
+  Assertion(m_renderingSession != nullptr, "beginFrame requires an active rendering session");
 
   // Reset per-frame uniform bindings
   frame.resetPerFrameBindings();
@@ -467,15 +466,17 @@ graphics::vulkan::RecordingFrame VulkanRenderer::advanceFrame(graphics::vulkan::
   return beginRecording();
 }
 
-VulkanRenderingSession::RenderScope VulkanRenderer::ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec) {
-  return m_renderingSession->beginRendering(rec.cmd(), rec.imageIndex);
+RenderCtx VulkanRenderer::ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec)
+{
+  auto info = m_renderingSession->ensureRendering(rec.cmd(), rec.imageIndex);
+  return RenderCtx{ rec.cmd(), info };
 }
 
 void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
 {
   m_renderingSession->beginDeferredPass(clearNonColorBufs);
   // Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
-  auto scope = m_renderingSession->beginRendering(rec.cmd(), rec.imageIndex);
+  (void)ensureRenderingStarted(rec);
 }
 
 void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
@@ -1121,9 +1122,8 @@ void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& re
       return;
     }
 
-    // Activate swapchain rendering without depth (target set by endDeferredGeometry)
-    // ensureRenderingStarted starts the render pass if not already active
-  auto renderScope = ensureRenderingStarted(rec);
+  // Activate swapchain rendering without depth (target set by endDeferredGeometry).
+  (void)ensureRenderingStarted(rec);
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {

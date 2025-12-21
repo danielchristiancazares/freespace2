@@ -9,6 +9,7 @@
 #include "VulkanDescriptorLayouts.h"
 #include "VulkanDevice.h"
 #include "VulkanFrame.h"
+#include "VulkanPhaseContexts.h"
 #include "VulkanFrameFlow.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanRenderTargets.h"
@@ -84,7 +85,7 @@ class VulkanRenderer {
 
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
-	VulkanRenderingSession::RenderScope ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec); // Recording-only
+		RenderCtx ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec); // Recording-only
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }

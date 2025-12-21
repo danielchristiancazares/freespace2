@@ -41,7 +41,7 @@ Key contract points:
 - `VulkanRenderer::flip()` — called once per frame to submit the previous frame, advance the frame ring, wait on fences, acquire a swapchain image, and begin recording the next frame.
 - `gr_vulkan_setup_frame()` — called immediately after `flip()`. Configures viewport/scissor for the newly recording frame. Does *not* start rendering (deferred to first draw/clear).
 
-**If nothing renders**, trace: `flip()` → `beginFrame()` → `ensureRenderingStarted()` → `VulkanRenderingSession::beginRendering()`.
+**If nothing renders**, trace: `flip()` → `beginFrame()` → `ensureRenderingStarted()` → `VulkanRenderingSession::ensureRendering()`.
 
 ## Architecture
 
@@ -74,7 +74,7 @@ Coordinates:
 Key methods:
 - `initialize()` / `shutdown()`
 - `flip()` — frame boundary
-- `ensureRenderingStarted(cmd)` — lazy render pass start + dynamic state
+- `ensureRenderingStarted(rec)` — lazy render pass start + dynamic state (returns `RenderCtx`)
 
 Model descriptor sync happens in `beginFrame()` via `beginModelDescriptorSync()` before recording starts.
 
@@ -87,8 +87,8 @@ Responsible for:
   - `requestSwapchainTarget()` — swapchain + depth
   - `beginDeferredPass()` — select G-buffer target
   - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
-- Lazy render pass begin via `beginRendering(cmd, imageIndex)` which returns a `RenderScope{RenderTargetInfo info, ActivePass guard}`. Holding the scope == pass active; destruction ends the pass.
-- Dynamic state application (`applyDynamicState()`) is performed inside `beginRendering()` after selecting the target.
+- Lazy render pass begin via `ensureRendering(cmd, imageIndex)`. The session owns the active pass and ends it automatically at frame/target boundaries.
+- Dynamic state application (`applyDynamicState()`) is performed when a pass begins after selecting the target.
 
 The render target’s “contract” (attachment formats + count) is exposed as `RenderTargetInfo` and is used to key pipelines.
 
@@ -166,7 +166,7 @@ gr_vulkan_setup_frame()
 
 [first draw/clear]
 └── ensureRenderingStarted()
-    └── VulkanRenderingSession::beginRendering() -> RenderScope (RAII ends pass)
+    └── VulkanRenderingSession::ensureRendering() (session-owned pass)
 
 [end of frame: next flip() submits and presents]
 ```
@@ -175,8 +175,8 @@ gr_vulkan_setup_frame()
 
 - **Buffer handles can be valid before `VkBuffer` exists.** Lazy creation happens on first `updateBufferData()`.
 - **Descriptor writes happen at frame start.** Writing descriptors mid-recording fights the design.
-- **Render pass is lazy and scope-owned.** `setup_frame()` doesn't begin rendering; first draw/clear does. The render pass is active only while a `RenderScope` is alive.
-- **Target switches require ending the scope.** Call `RenderScope` destructors (e.g., `std::optional::reset()`) before calling session boundary methods like `requestSwapchainTarget()`.
+- **Render pass is lazy and session-owned.** `setup_frame()` doesn't begin rendering; first draw/clear does. The render pass remains active until a frame/target boundary ends it.
+- **Target switches end the active pass automatically.** Call session boundary methods like `requestSwapchainTarget()` directly; they will end any active pass first.
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
 - **Swapchain resize cascades.** Anything tied to swapchain extent must handle `recreateSwapchain()`.

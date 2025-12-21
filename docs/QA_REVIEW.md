@@ -43,6 +43,12 @@ validation-safety, and "foot-gun" APIs.
 - Unused `Uploading` state and `markUploadsCompleted()` path removed.
 - Texture state is container-based ("state as location"): `m_residentTextures`, `m_pendingUploads`, `m_unavailableTextures`.
 
+### Rendering pass lifetime is boundary-owned (not scope-owned)
+
+- Dynamic rendering is started via an idempotent `VulkanRenderingSession::ensureRendering()` (session owns the active pass).
+- Frame/target boundaries always end any active pass internally (`endActivePass()` is no longer a no-op).
+- Draw paths consume a `RenderCtx` capability token from `VulkanRenderer::ensureRenderingStarted()` as proof that rendering is active.
+
 ## Medium
 
 ### Validation callback logging is basic
@@ -56,15 +62,6 @@ validation-safety, and "foot-gun" APIs.
 ### Swapchain layout transition uses BottomOfPipe as destination stage (sync2 smell)
 
 `transitionSwapchainToPresent()` uses `dstStageMask = eBottomOfPipe` (`code/graphics/vulkan/VulkanRenderingSession.cpp`).
-
-### `VulkanRenderingSession::endActivePass()` is a no-op despite being called at boundaries
-
-`endActivePass()` does nothing and relies on `RenderScope` RAII (`code/graphics/vulkan/VulkanRenderingSession.cpp`).
-
-### Stale documentation
-
-- `code/graphics/vulkan/VulkanTextureBindings.h` comment for `bindlessIndex()` is stale: bindless indices now always return a
-  valid slot (fallback if not resident).
 
 ## Low
 
@@ -86,12 +83,6 @@ validation-safety, and "foot-gun" APIs.
 `VulkanRenderer` uses `enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish }`.
 
 Per `docs/DESIGN_PHILOSOPHY.md`, state enums should be replaced with typestate types or container membership.
-
-### `m_renderingActive` boolean flag
-
-`VulkanRenderingSession` tracks rendering state via a boolean flag.
-
-The `ActivePass` RAII guard's existence already proves rendering is active; the flag is redundant.
 
 ### `MODEL_OFFSET_ABSENT` sentinel
 

@@ -572,8 +572,8 @@ void gr_vulkan_render_model(model_material* material_info,
   ctxBase.renderer.incrementModelDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  const auto& rt = renderScope.info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  const auto& rt = renderCtx.targetInfo;
 
   // Get shader modules for model shader
   ShaderModules modules = ctxBase.renderer.getShaderModules(SDR_TYPE_MODEL);
@@ -746,8 +746,8 @@ void gr_vulkan_render_primitives(material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  const auto& rt = renderScope.info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  const auto& rt = renderCtx.targetInfo;
 
   // Use the shader type requested by the material
   shader_type shaderType = material_info->get_shader_type();
@@ -1077,16 +1077,13 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
 
   // NanoVG requires stencil. If we're currently rendering to a swapchain-without-depth target
   // or a non-swapchain target (deferred G-buffer), switch back to the swapchain target with depth/stencil.
-  std::optional<VulkanRenderingSession::RenderScope> renderScope;
-  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-  auto rt = renderScope->info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto rt = renderCtx.targetInfo;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.depthFormat == vk::Format::eUndefined || rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
-    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
-    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-    rt = renderScope->info;
+    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+    rt = renderCtx.targetInfo;
   }
 
   Assertion(rt.depthFormat != vk::Format::eUndefined, "render_nanovg requires a depth/stencil attachment");
@@ -1210,8 +1207,8 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  const auto& rt = renderScope.info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  const auto& rt = renderCtx.targetInfo;
 
   // Force batched bitmap shader
   shader_type shaderType = SDR_TYPE_BATCHED_BITMAP;
@@ -1398,16 +1395,13 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Ensure we're rendering to swapchain (menus/UI are swapchain-targeted).
-  std::optional<VulkanRenderingSession::RenderScope> renderScope;
-  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-  auto rt = renderScope->info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto rt = renderCtx.targetInfo;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
-    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
-    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-    rt = renderScope->info;
+    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+    rt = renderCtx.targetInfo;
   }
 
   ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_ROCKET_UI);

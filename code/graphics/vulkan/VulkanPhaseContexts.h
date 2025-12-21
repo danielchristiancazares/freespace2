@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vulkan/vulkan.hpp>
 
+#include "VulkanRenderTargetInfo.h"
+
 namespace graphics {
 namespace vulkan {
 
@@ -21,9 +23,19 @@ struct UploadCtx {
 	{
 	}
 
-	friend class VulkanRenderer;
-};
+		friend class VulkanRenderer;
+	};
+
+	// Rendering-phase context: only constructible by VulkanRenderer. Use this to make "draw-only" APIs uncallable
+	// without proof that dynamic rendering is active.
+	struct RenderCtx {
+		vk::CommandBuffer cmd;
+		RenderTargetInfo targetInfo;
+
+	private:
+		RenderCtx(vk::CommandBuffer inCmd, const RenderTargetInfo& inTargetInfo) : cmd(inCmd), targetInfo(inTargetInfo) {}
+		friend class VulkanRenderer;
+	};
 
 } // namespace vulkan
 } // namespace graphics
-

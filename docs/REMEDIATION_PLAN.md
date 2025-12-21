@@ -87,42 +87,38 @@ No state enum. No `std::variant`. Transitions are moves between containers.
 
 ---
 
-## 3) Rendering Session Lifetime (NEXT)
+## 3) Rendering Session Lifetime (DONE)
 
-Refactor `VulkanRenderingSession` so the active dynamic-rendering pass lifetime is owned by the frame/session (not by a
-temporary scope returned from helper calls).
+`VulkanRenderingSession` now owns the active dynamic-rendering pass lifetime (not per-draw).
 
-Options:
-- Store `std::optional<ActivePass>` on `VulkanFrame` and manage it explicitly at boundaries, or
-- Make `VulkanRenderingSession` own it and end it on target switches/endFrame.
+- Dynamic rendering is started via an idempotent `ensureRendering()` API.
+- Frame/target boundaries end any active pass internally (no caller-managed RAII scope required).
 
 Acceptance:
 - It's always clear (and enforceable) whether rendering is active.
 
 ---
 
-## 4) Typestate Enforcement (NEXT)
+## 4) Typestate Enforcement (PARTIAL)
 
 ### 4.1 `RenderCtx` token
 
-Introduce `RenderCtx` (owns `RenderScope`, proves rendering is active):
-- Only constructible when dynamic rendering is started.
-- Passed to draw functions as proof of phase.
-- Prevents upload calls during rendering (compile-time).
+Introduce `RenderCtx` (proves rendering is active):
+- Only constructible by `VulkanRenderer` after starting/ensuring dynamic rendering.
+- Returned from `VulkanRenderer::ensureRenderingStarted()` and consumed by draw code as proof of phase.
 
 ### 4.2 Migrate draw APIs
 
-- `gr_vulkan_render_primitives()` receives `RenderCtx&`.
-- `gr_vulkan_render_model()` receives `RenderCtx&`.
-- Texture binding functions accept `RenderCtx&` for LRU tracking (and to make "draw path" explicit in signatures).
+- Future tightening: thread `RenderCtx&` through internal draw helpers (and eventually backend entry points) so "rendering active"
+  is required by signature rather than being fetched internally.
 
 ---
 
 ## 5) Performance Cleanup (NEXT)
 
-### 5.1 Frame-owned pass lifetime
+### 5.1 Frame-owned pass lifetime (DONE)
 
-Move from per-draw `RenderScope` RAII to frame-owned pass lifetime. End the pass explicitly at target switch or frame end.
+- Per-draw `RenderScope` RAII removed; pass lifetime is session-owned and ends at target switches/frame end.
 
 ### 5.2 Dirty-slot-only descriptor updates
 
@@ -146,5 +142,5 @@ Track which bindless slots changed since last frame and write only dirty slots i
 | 1 | Foundation: serial tracking, deferred destruction, frame reuse | DONE |
 | 2 | Texture system: state-as-location, fallback-first, phase safety | DONE (UploadCtx) |
 | 3 | Bulletproof lifetime: serial-safe eviction, deferred retirement | DONE (baseline) |
-| 4 | Typestate enforcement: RenderCtx, compile-time phase checking | NEXT |
-| 5 | Performance: frame-owned passes, dirty-slot descriptors | NEXT |
+| 4 | Typestate enforcement: RenderCtx, compile-time phase checking | PARTIAL |
+| 5 | Performance: frame-owned passes, dirty-slot descriptors | PARTIAL |
