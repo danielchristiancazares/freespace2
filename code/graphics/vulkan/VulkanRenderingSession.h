@@ -2,10 +2,12 @@
 
 #include "VulkanDevice.h"
 #include "VulkanRenderTargets.h"
+#include "VulkanRenderTargetInfo.h"
 
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace graphics {
@@ -13,56 +15,6 @@ namespace vulkan {
 
 class VulkanRenderingSession {
 public:
-  struct RenderTargetInfo {
-    vk::Format colorFormat = vk::Format::eUndefined;
-    uint32_t colorAttachmentCount = 1;
-    vk::Format depthFormat = vk::Format::eUndefined; // eUndefined => no depth attachment
-  };
-
-  // RAII guard for active render pass - destruction calls endRendering()
-  struct ActivePass {
-    vk::CommandBuffer cmd{};
-    VulkanRenderingSession* session = nullptr;
-    ActivePass(vk::CommandBuffer c, VulkanRenderingSession* s) : cmd(c), session(s) {}
-    ~ActivePass()
-    {
-      if (cmd) {
-        cmd.endRendering();
-      }
-      if (session) {
-        session->m_renderingActive = false;
-      }
-    }
-
-    ActivePass(const ActivePass&) = delete;
-    ActivePass& operator=(const ActivePass&) = delete;
-    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd), session(other.session)
-    {
-      other.cmd = vk::CommandBuffer{};
-      other.session = nullptr;
-    }
-    ActivePass& operator=(ActivePass&& other) noexcept {
-      if (this != &other) {
-        if (cmd) {
-          cmd.endRendering();
-        }
-        if (session) {
-          session->m_renderingActive = false;
-        }
-        cmd = other.cmd;
-        session = other.session;
-        other.cmd = vk::CommandBuffer{};
-        other.session = nullptr;
-      }
-      return *this;
-    }
-  };
-
-  struct RenderScope {
-    RenderTargetInfo info;
-    ActivePass guard;
-  };
-
   VulkanRenderingSession(VulkanDevice& device,
     VulkanRenderTargets& targets);
 
@@ -70,9 +22,10 @@ public:
     void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
     void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
 
-  // Starts dynamic rendering for the *current target*; returns scope that ends the pass on destruction.
-  RenderScope beginRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
-  bool renderingActive() const { return m_renderingActive; }
+  // Starts dynamic rendering for the *current target* if not already active.
+  // Returns the render target contract used for pipeline selection.
+  RenderTargetInfo ensureRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
+  bool renderingActive() const { return m_activePass.has_value(); }
 
   // Boundary-facing state transitions (no "pending", no dual state)
   void requestSwapchainTarget();                  // swapchain + depth
@@ -98,6 +51,36 @@ public:
   void applyDynamicState(vk::CommandBuffer cmd);
 
 private:
+  // RAII guard for active dynamic rendering - destruction records endRendering().
+  struct ActivePass {
+    vk::CommandBuffer cmd{};
+    explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
+    ~ActivePass()
+    {
+      if (cmd) {
+        cmd.endRendering();
+      }
+    }
+
+    ActivePass(const ActivePass&) = delete;
+    ActivePass& operator=(const ActivePass&) = delete;
+    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd)
+    {
+      other.cmd = vk::CommandBuffer{};
+    }
+    ActivePass& operator=(ActivePass&& other) noexcept
+    {
+      if (this != &other) {
+        if (cmd) {
+          cmd.endRendering();
+        }
+        cmd = other.cmd;
+        other.cmd = vk::CommandBuffer{};
+      }
+      return *this;
+    }
+  };
+
   // Base class for render target states - polymorphic by design
   class RenderTargetState {
   public:
@@ -165,6 +148,7 @@ private:
   // Target state - single truth, no pending/active duality
   std::unique_ptr<RenderTargetState> m_target;
   RenderTargetInfo m_activeInfo{};
+  std::optional<ActivePass> m_activePass;
 
   // Clear state
   std::array<float, 4> m_clearColor{0.f, 0.f, 0.f, 1.f};
@@ -179,7 +163,6 @@ private:
     // Swapchain image layout tracking (per swapchain image index)
     std::vector<vk::ImageLayout> m_swapchainLayouts;
 
-    bool m_renderingActive = false;
   };
 
 } // namespace vulkan
