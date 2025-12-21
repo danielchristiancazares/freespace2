@@ -1,6 +1,7 @@
 #pragma once
 
 #include "graphics/2d.h"
+#include "VulkanDeferredRelease.h"
 
 #include <vulkan/vulkan.hpp>
 #include <vector>
@@ -16,12 +17,6 @@ struct VulkanBuffer {
 	vk::DeviceSize size = 0;
 	void* mapped = nullptr; // For host-visible buffers
 	bool isPersistentMapped = false;
-};
-
-struct RetiredBuffer {
-	vk::UniqueBuffer buffer;
-	vk::UniqueDeviceMemory memory;
-	uint32_t retiredAtFrame;
 };
 
 class VulkanBufferManager {
@@ -47,8 +42,8 @@ class VulkanBufferManager {
 
 	void cleanup();
 
-	// Called each frame to process deferred deletions
-	void onFrameEnd();
+	void setSafeRetireSerial(uint64_t serial) { m_safeRetireSerial = serial; }
+	void collect(uint64_t completedSerial) { m_deferredReleases.collect(completedSerial); }
 
   private:
 	vk::Device m_device;
@@ -57,9 +52,8 @@ class VulkanBufferManager {
 	uint32_t m_transferQueueIndex;
 
 	std::vector<VulkanBuffer> m_buffers;
-	std::vector<RetiredBuffer> m_retiredBuffers;
-	uint32_t m_currentFrame = 0;
-	static constexpr uint32_t FRAMES_BEFORE_DELETE = 3;
+	DeferredReleaseQueue m_deferredReleases;
+	uint64_t m_safeRetireSerial = 0;
 
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
 	vk::BufferUsageFlags getVkUsageFlags(BufferType type) const;

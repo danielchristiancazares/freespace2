@@ -152,11 +152,11 @@ flip()
 ├── if recording: endFrame() + submitFrame()
 ├── advance frame index
 ├── VulkanFrame::wait_for_gpu()           # fence wait
-├── managers: onFrameEnd(), markUploadsCompleted()
+├── managers: collect(completedSerial), markUploadsCompleted()
 ├── acquireNextImage()                    # recreate swapchain if needed
-	└── beginFrame()
-	    ├── reset command pool
-	    ├── begin command buffer
+		└── beginFrame()
+		    ├── reset command pool
+		    ├── begin command buffer
 	    ├── beginModelDescriptorSync()        # descriptor writes
 	    ├── flushPendingUploads()             # texture staging
 	    └── VulkanRenderingSession::beginFrame()

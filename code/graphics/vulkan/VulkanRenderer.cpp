@@ -204,10 +204,12 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
   m_textureManager->setSafeRetireSerial(m_submitSerial);
   m_textureManager->setCurrentFrameIndex(m_frameCounter);
+
+  Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
+  m_bufferManager->setSafeRetireSerial(m_submitSerial);
   m_textureManager->flushPendingUploads(frame, cmd, m_frameCounter);
 
   // Sync model descriptors AFTER upload flush so newly-resident textures are written this frame.
-  Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
   Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
 
   // Ensure vertex heap buffer exists and sync descriptors
@@ -264,6 +266,9 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   if (m_textureManager) {
     m_textureManager->setSafeRetireSerial(m_submitSerial);
   }
+  if (m_bufferManager) {
+    m_bufferManager->setSafeRetireSerial(m_submitSerial);
+  }
   const uint64_t timelineValue = frame.nextTimelineValue();
 
 #if defined(VULKAN_HPP_NO_EXCEPTIONS)
@@ -308,7 +313,7 @@ void VulkanRenderer::logFrameCounters() {
 void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial)
 {
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized");
-  m_bufferManager->onFrameEnd();
+  m_bufferManager->collect(completedSerial);
 
   Assertion(m_textureManager != nullptr, "m_textureManager must be initialized");
   m_textureManager->markUploadsCompleted(frame.frameIndex());
