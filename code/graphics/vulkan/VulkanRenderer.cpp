@@ -676,7 +676,9 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
   Assertion(baseFrame >= 0, "Invalid bitmapHandle %d in getTextureDescriptor", bitmapHandle);
 
   Assertion(m_textureBindings != nullptr, "getTextureDescriptor called before texture bindings initialization");
-  return m_textureBindings->descriptor(TextureId(baseFrame), m_frameCounter, samplerKey);
+  const auto id = TextureId::tryFromBaseFrame(baseFrame);
+  Assertion(id.has_value(), "Invalid base frame %d in getTextureDescriptor", baseFrame);
+  return m_textureBindings->descriptor(*id, m_frameCounter, samplerKey);
 }
 
 vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey)
@@ -704,7 +706,12 @@ uint32_t VulkanRenderer::getBindlessTextureIndex(int bitmapHandle)
     return MODEL_OFFSET_ABSENT;
   }
 
-  return m_textureBindings->bindlessIndex(TextureId(baseFrame));
+  const auto id = TextureId::tryFromBaseFrame(baseFrame);
+  if (!id.has_value()) {
+    return MODEL_OFFSET_ABSENT;
+  }
+
+  return m_textureBindings->bindlessIndex(*id);
 }
 
 void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,

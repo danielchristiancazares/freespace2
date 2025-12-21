@@ -22,15 +22,11 @@ public:
 		const int fallbackHandle = m_textures.getFallbackTextureHandle();
 		Assertion(fallbackHandle != -1, "Fallback texture must be initialized");
 
-		if (!id.isValid()) {
-			return m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
-		}
-
-		auto info = m_textures.getTextureDescriptorInfo(id.value, samplerKey);
+		auto info = m_textures.getTextureDescriptorInfo(id.baseFrame(), samplerKey);
 		if (info.imageView) {
-			m_textures.markTextureUsedBaseFrame(id.value, currentFrameIndex);
+			m_textures.markTextureUsedBaseFrame(id.baseFrame(), currentFrameIndex);
 		} else {
-			m_textures.queueTextureUploadBaseFrame(id.value, currentFrameIndex, samplerKey);
+			m_textures.queueTextureUploadBaseFrame(id.baseFrame(), currentFrameIndex, samplerKey);
 			info = m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
 		}
 
@@ -42,10 +38,7 @@ public:
 	// Also queues an upload for missing textures.
 	uint32_t bindlessIndex(TextureId id)
 	{
-		if (!id.isValid()) {
-			return MODEL_OFFSET_ABSENT;
-		}
-		return m_textures.getBindlessSlotIndex(id.value);
+		return m_textures.getBindlessSlotIndex(id.baseFrame());
 	}
 
 private:
