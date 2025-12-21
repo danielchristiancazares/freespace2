@@ -321,8 +321,8 @@ std::vector<DeferredLight> buildDeferredLights(
 
             // Build orientation matrix that aligns local -Z with tube direction
             matrix orient{};
-            vec3d negDir{};
-            vm_vec_negate(&negDir, &tubeDir);
+            vec3d negDir = tubeDir;
+            vm_vec_negate(&negDir);
             vm_vector_2_matrix(&orient, &negDir, nullptr, nullptr);
 
             // Build model matrix with translation at tube start (vec2) and rotation

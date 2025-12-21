@@ -566,6 +566,11 @@ VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident
     return &record;
   }
 
+  if (record.state == TextureState::Retired) {
+    // This record still owns GPU resources pending safe destruction. Do not reuse it for new uploads.
+    return &record;
+  }
+
   if (record.state == TextureState::Failed) {
     return &record;
   }
@@ -587,9 +592,6 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
   if (m_pendingUploads.empty()) {
     return;
   }
-  
-  // Track if any textures became Resident during this flush
-  bool texturesBecameResident = false;
 
   vk::DeviceSize stagingBudget = frame.stagingBuffer().size();
   vk::DeviceSize stagingUsed = 0;
@@ -859,33 +861,34 @@ bool VulkanTextureManager::isUploadQueued(int baseFrame) const
 
 bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool /*isAABitmap*/)
 {
-  return uploadImmediate(bitmapHandle, false);
+  bool result = uploadImmediate(bitmapHandle, false);
+  return result;
 }
 
 void VulkanTextureManager::deleteTexture(int bitmapHandle)
 {
   int base = bm_get_base_frame(bitmapHandle, nullptr);
-  auto it = m_textures.find(base);
-  if (it != m_textures.end()) {
-    // Return the bindless slot to the free pool before erasing the texture
-    const auto& record = it->second;
-    uint32_t slot = record.bindingState.arrayIndex;
-    if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
-      m_freeBindlessSlots.push_back(slot);
-    }
-    
-    m_textures.erase(it);
+  // Never delete the synthetic default/fallback textures.
+  if (base == kFallbackTextureHandle || base == kDefaultTextureHandle) {
+    return;
   }
+
+  auto it = m_textures.find(base);
+  if (it == m_textures.end()) {
+    return;
+  }
+
+  // Be conservative: if called during a frame, ensure we wait at least one more submit.
+  retireTexture(base, m_safeRetireSerial + 1);
 }
 
 void VulkanTextureManager::cleanup()
 {
+  m_deferredReleases.clear();
   m_textures.clear();
   m_samplerCache.clear();
   m_defaultSampler.reset();
   m_pendingUploads.clear();
-  m_retiredSlots.clear();
-  m_pendingDestructions.clear();
 }
 
 void VulkanTextureManager::onTextureResident(int textureHandle)
@@ -910,27 +913,22 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
     int oldestHandle = -1;
     uint32_t oldestSlot = MODEL_OFFSET_ABSENT;
     
-    for (auto& [handle, record] : m_textures) {
-      if (handle == kFallbackTextureHandle) {
+    for (auto& [handle, other] : m_textures) {
+      if (handle == kFallbackTextureHandle || handle == kDefaultTextureHandle) {
         continue; // Never evict fallback texture
       }
-      if (record.state == TextureState::Resident && record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
-        if (record.lastUsedFrame < oldestFrame) {
-          oldestFrame = record.lastUsedFrame;
+      if (other.state == TextureState::Resident && other.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
+        if (other.lastUsedFrame < oldestFrame) {
+          oldestFrame = other.lastUsedFrame;
           oldestHandle = handle;
-          oldestSlot = record.bindingState.arrayIndex;
+          oldestSlot = other.bindingState.arrayIndex;
         }
       }
     }
     
     if (oldestHandle >= 0 && oldestSlot != MODEL_OFFSET_ABSENT) {
-      // Evict the oldest texture and reuse its slot
-      // Since we're immediately reusing the slot and will write a new descriptor,
-      // it's safe to erase the old texture immediately
-      m_textures.erase(oldestHandle);
-      
-      // Return the slot to free pool
-      m_freeBindlessSlots.push_back(oldestSlot);
+      // Evict the oldest texture and reuse its slot.
+      retireTexture(oldestHandle, m_safeRetireSerial);
     } else {
       // No slots available and nothing to evict; leave as absent so model shader will skip sampling.
       return;
@@ -942,16 +940,29 @@ void VulkanTextureManager::onTextureResident(int textureHandle)
   m_freeBindlessSlots.pop_back();
 }
 
-uint32_t VulkanTextureManager::getBindlessSlotIndex(int textureHandle) const
+uint32_t VulkanTextureManager::getBindlessSlotIndex(int textureHandle)
 {
   auto it = m_textures.find(textureHandle);
   if (it == m_textures.end()) {
+    it = m_textures.emplace(textureHandle, TextureRecord{}).first;
+  }
+
+  auto& record = it->second;
+  if (record.state == TextureState::Missing) {
+    if (!isUploadQueued(textureHandle)) {
+      m_pendingUploads.push_back(textureHandle);
+    }
+    record.state = TextureState::Queued;
+  }
+
+  if (record.state != TextureState::Resident) {
     return MODEL_OFFSET_ABSENT;
   }
 
-  const auto& record = it->second;
-  if (record.state != TextureState::Resident) {
-    return MODEL_OFFSET_ABSENT;
+  record.lastUsedFrame = m_currentFrameIndex;
+
+  if (record.bindingState.arrayIndex == MODEL_OFFSET_ABSENT) {
+    onTextureResident(textureHandle);
   }
 
   return record.bindingState.arrayIndex;
@@ -964,58 +975,32 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
 
   auto& record = it->second;
 
-  // DO NOT change arrayIndex - that's the slot we need to overwrite with fallback
   const uint32_t slot = record.bindingState.arrayIndex;
 
-  // Mark as retired (no longer usable for new draws)
+  if (record.state == TextureState::Retired) {
+    return;
+  }
+
+  // Free the slot for reuse. The old VkImage/VkImageView stay alive until collect(retireSerial).
+  if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
+    m_freeBindlessSlots.push_back(slot);
+  }
+
+  record.bindingState.arrayIndex = MODEL_OFFSET_ABSENT;
   record.state = TextureState::Retired;
 
-  // Track this slot for fallback descriptor writes
-  // The renderer will write fallback descriptors to these slots at frame start
-  m_retiredSlots.push_back(slot);
-
-  // Queue actual VkImage/VkImageView destruction for after GPU completes the serial
-  m_pendingDestructions.push_back({textureHandle, retireSerial});
+  m_deferredReleases.enqueue(retireSerial, [this, handle = textureHandle]() mutable {
+    auto texIt = m_textures.find(handle);
+    if (texIt != m_textures.end()) {
+      // VkImageView/VkImage destroyed automatically via unique handles.
+      m_textures.erase(texIt);
+    }
+  });
 }
 
-void VulkanTextureManager::clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex)
+void VulkanTextureManager::collect(uint64_t completedSerial)
 {
-  // Only clear when we've cycled through all frames
-  // This ensures every frame's descriptor set has had fallback written
-  if (!m_retiredSlots.empty()) {
-    m_retiredSlotsFrameCounter++;
-    if (m_retiredSlotsFrameCounter >= kFramesInFlight) {
-      // Return retired slots to the free pool so they can be reused
-      for (uint32_t slot : m_retiredSlots) {
-        if (slot != MODEL_OFFSET_ABSENT && slot != 0) {
-          m_freeBindlessSlots.push_back(slot);
-        }
-      }
-      m_retiredSlots.clear();
-      m_retiredSlotsFrameCounter = 0;
-    }
-  }
-}
-
-void VulkanTextureManager::processPendingDestructions(uint64_t completedSerial)
-{
-  auto it = m_pendingDestructions.begin();
-  while (it != m_pendingDestructions.end()) {
-    if (completedSerial >= it->second) {
-      // Safe to destroy - GPU has completed the serial that retired this texture
-      int handle = it->first;
-
-      auto texIt = m_textures.find(handle);
-      if (texIt != m_textures.end()) {
-        // VkImageView and VkImage destroyed automatically via unique handles
-        m_textures.erase(texIt);
-      }
-
-      it = m_pendingDestructions.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  m_deferredReleases.collect(completedSerial);
 }
 
 vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textureHandle,
@@ -1036,6 +1021,13 @@ vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textu
   info.sampler = getOrCreateSampler(samplerKey);
   info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
   return info;
+}
+
+void VulkanTextureManager::queueTextureUpload(int bitmapHandle, VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex, const SamplerKey& samplerKey)
+{
+  bool usedStaging = false;
+  bool uploadQueued = false;
+  ensureTextureResident(bitmapHandle, frame, cmd, currentFrameIndex, samplerKey, usedStaging, uploadQueued);
 }
 
 } // namespace vulkan

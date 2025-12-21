@@ -89,13 +89,12 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 		buffer.mapped = nullptr;
 	}
 
-	// Retire buffer for deferred deletion (GPU may still be using it)
+	// Retire buffer for deferred deletion (GPU may still be using it).
 	if (buffer.buffer) {
-		RetiredBuffer retired;
-		retired.buffer = std::move(buffer.buffer);
-		retired.memory = std::move(buffer.memory);
-		retired.retiredAtFrame = m_currentFrame;
-		m_retiredBuffers.push_back(std::move(retired));
+		// Be conservative: if deleted during a frame, ensure we wait for at least the next submit to complete.
+		const uint64_t retireSerial = m_safeRetireSerial + 1;
+		m_deferredReleases.enqueue(retireSerial,
+			[buf = std::move(buffer.buffer), mem = std::move(buffer.memory)]() mutable {});
 	}
 
 	// Mark slot as invalid
@@ -212,12 +211,9 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 			buffer.mapped = nullptr;
 		}
 
-		// Move to retired buffers for deferred deletion
-		RetiredBuffer retired;
-		retired.buffer = std::move(buffer.buffer);
-		retired.memory = std::move(buffer.memory);
-		retired.retiredAtFrame = m_currentFrame;
-		m_retiredBuffers.push_back(std::move(retired));
+		const uint64_t retireSerial = m_safeRetireSerial + 1;
+		m_deferredReleases.enqueue(retireSerial,
+			[oldBuf = std::move(buffer.buffer), oldMem = std::move(buffer.memory)]() mutable {});
 	}
 
 	// Create new buffer with the new size
@@ -257,23 +253,6 @@ vk::Buffer VulkanBufferManager::ensureBuffer(gr_buffer_handle handle, vk::Device
 	return buffer.buffer.get();
 }
 
-void VulkanBufferManager::onFrameEnd()
-{
-	// Increment frame counter
-	++m_currentFrame;
-
-	// Clean up retired buffers that are old enough
-	auto it = m_retiredBuffers.begin();
-	while (it != m_retiredBuffers.end()) {
-		if (m_currentFrame - it->retiredAtFrame >= FRAMES_BEFORE_DELETE) {
-			// Buffer will be automatically destroyed via UniqueBuffer/UniqueDeviceMemory
-			it = m_retiredBuffers.erase(it);
-		} else {
-			++it;
-		}
-	}
-}
-
 void VulkanBufferManager::cleanup()
 {
 	// Unmap all mapped buffers
@@ -284,8 +263,8 @@ void VulkanBufferManager::cleanup()
 		}
 	}
 
+	m_deferredReleases.clear();
 	m_buffers.clear();
-	m_retiredBuffers.clear();
 }
 
 } // namespace vulkan

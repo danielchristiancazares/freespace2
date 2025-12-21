@@ -92,11 +92,13 @@ void VulkanRenderingSession::endFrame(vk::CommandBuffer cmd, uint32_t imageIndex
 }
 
 VulkanRenderingSession::RenderScope VulkanRenderingSession::beginRendering(vk::CommandBuffer cmd, uint32_t imageIndex) {
+  Assertion(!m_renderingActive, "beginRendering called while rendering is already active");
+  m_renderingActive = true;
   auto info = m_target->info(m_device, m_targets);
   m_target->begin(*this, cmd, imageIndex);
   m_activeInfo = info;
   applyDynamicState(cmd);
-  return RenderScope{ info, ActivePass(cmd) };
+  return RenderScope{ info, ActivePass(cmd, this) };
 }
 
 void VulkanRenderingSession::requestSwapchainTarget() {
@@ -127,7 +129,9 @@ void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
 }
 
 void VulkanRenderingSession::endActivePass() {
-  // No-op: render scope owns the pass lifetime.
+  // RenderScope owns the pass lifetime. If we hit a boundary while rendering is active,
+  // callers kept a scope alive too long (invalid to begin a new pass / switch targets).
+  Assertion(!m_renderingActive, "Rendering is active at a session boundary (RenderScope not destroyed)");
 }
 
 void VulkanRenderingSession::requestClear() {

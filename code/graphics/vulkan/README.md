@@ -116,7 +116,7 @@ Owns:
 | `VulkanDescriptorLayouts` | Set layouts, pipeline layouts, pool allocation |
 | `VulkanShaderManager` | Shader module cache (type + variant) |
 | `VulkanPipelineManager` | Pipeline cache (`PipelineKey` → pipeline) |
-| `VulkanBufferManager` | Buffer CRUD, deferred deletion (retire → destroy after N frames) |
+| `VulkanBufferManager` | Buffer CRUD, serial-gated deferred deletion (retireSerial → destroy when completedSerial >= retireSerial) |
 | `VulkanTextureManager` | Upload scheduling, residency state machine, sampler cache |
 
 ### Pipelines (`VulkanPipelineManager` + `VulkanLayoutContracts`)
@@ -143,7 +143,7 @@ Caching layers:
 |-----------|-------|
 | Fence | CPU waits for GPU (frame reuse safety) |
 | Binary semaphore | GPU→GPU: image-available, render-finished |
-| Timeline semaphore | Debugging/telemetry (not strictly required for correctness) |
+| Timeline semaphore | Authoritative GPU completion counter for serial-gated deferred releases |
 
 ## Frame Flow
 
@@ -152,11 +152,11 @@ flip()
 ├── if recording: endFrame() + submitFrame()
 ├── advance frame index
 ├── VulkanFrame::wait_for_gpu()           # fence wait
-├── managers: onFrameEnd(), markUploadsCompleted()
+├── managers: collect(completedSerial), markUploadsCompleted()
 ├── acquireNextImage()                    # recreate swapchain if needed
-	└── beginFrame()
-	    ├── reset command pool
-	    ├── begin command buffer
+		└── beginFrame()
+		    ├── reset command pool
+		    ├── begin command buffer
 	    ├── beginModelDescriptorSync()        # descriptor writes
 	    ├── flushPendingUploads()             # texture staging
 	    └── VulkanRenderingSession::beginFrame()
@@ -176,6 +176,7 @@ gr_vulkan_setup_frame()
 - **Buffer handles can be valid before `VkBuffer` exists.** Lazy creation happens on first `updateBufferData()`.
 - **Descriptor writes happen at frame start.** Writing descriptors mid-recording fights the design.
 - **Render pass is lazy and scope-owned.** `setup_frame()` doesn't begin rendering; first draw/clear does. The render pass is active only while a `RenderScope` is alive.
+- **Target switches require ending the scope.** Call `RenderScope` destructors (e.g., `std::optional::reset()`) before calling session boundary methods like `requestSwapchainTarget()`.
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
 - **Swapchain resize cascades.** Anything tied to swapchain extent must handle `recreateSwapchain()`.
