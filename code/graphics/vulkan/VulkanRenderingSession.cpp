@@ -92,14 +92,18 @@ void VulkanRenderingSession::endFrame(vk::CommandBuffer cmd, uint32_t imageIndex
 
 }
 
-VulkanRenderingSession::RenderScope VulkanRenderingSession::beginRendering(vk::CommandBuffer cmd, uint32_t imageIndex) {
-  Assertion(!m_renderingActive, "beginRendering called while rendering is already active");
-  m_renderingActive = true;
+RenderTargetInfo VulkanRenderingSession::ensureRendering(vk::CommandBuffer cmd, uint32_t imageIndex)
+{
+  if (m_activePass.has_value()) {
+    return m_activeInfo;
+  }
+
   auto info = m_target->info(m_device, m_targets);
   m_target->begin(*this, cmd, imageIndex);
   m_activeInfo = info;
   applyDynamicState(cmd);
-  return RenderScope{ info, ActivePass(cmd, this) };
+  m_activePass.emplace(cmd);
+  return info;
 }
 
 void VulkanRenderingSession::requestSwapchainTarget() {
@@ -111,8 +115,6 @@ void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs) {
   endActivePass();
   m_clearOps = clearNonColorBufs ? ClearOps::clearAll() : m_clearOps.withDepthStencilClear();
   m_target = std::make_unique<DeferredGBufferTarget>();
-  
-
 }
 
 void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
@@ -120,19 +122,13 @@ void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
     "endDeferredGeometry called when not in deferred gbuffer target");
 
   endActivePass();
-  
-
-  
   transitionGBufferToShaderRead(cmd);
   m_target = std::make_unique<SwapchainNoDepthTarget>();
-  
-
 }
 
 void VulkanRenderingSession::endActivePass() {
-  // RenderScope owns the pass lifetime. If we hit a boundary while rendering is active,
-  // callers kept a scope alive too long (invalid to begin a new pass / switch targets).
-  Assertion(!m_renderingActive, "Rendering is active at a session boundary (RenderScope not destroyed)");
+  // End dynamic rendering if active. Boundaries always own this responsibility.
+  m_activePass.reset();
 }
 
 void VulkanRenderingSession::requestClear() {
@@ -152,7 +148,7 @@ void VulkanRenderingSession::setClearColor(float r, float g, float b, float a) {
 
 // ---- Target state implementations ----
 
-VulkanRenderingSession::RenderTargetInfo
+RenderTargetInfo
 VulkanRenderingSession::SwapchainWithDepthTarget::info(const VulkanDevice& device, const VulkanRenderTargets& targets) const {
   RenderTargetInfo out{};
   out.colorFormat = device.swapchainFormat();
@@ -165,7 +161,7 @@ void VulkanRenderingSession::SwapchainWithDepthTarget::begin(VulkanRenderingSess
   s.beginSwapchainRenderingInternal(cmd, imageIndex);
 }
 
-VulkanRenderingSession::RenderTargetInfo
+RenderTargetInfo
 VulkanRenderingSession::DeferredGBufferTarget::info(const VulkanDevice& device, const VulkanRenderTargets& targets) const {
   RenderTargetInfo out{};
   out.colorFormat = targets.gbufferFormat();
@@ -178,7 +174,7 @@ void VulkanRenderingSession::DeferredGBufferTarget::begin(VulkanRenderingSession
   s.beginGBufferRenderingInternal(cmd);
 }
 
-VulkanRenderingSession::RenderTargetInfo
+RenderTargetInfo
 VulkanRenderingSession::SwapchainNoDepthTarget::info(const VulkanDevice& device, const VulkanRenderTargets&) const {
   RenderTargetInfo out{};
   out.colorFormat = device.swapchainFormat();

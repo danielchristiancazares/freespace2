@@ -11,6 +11,7 @@
 #include "VulkanFrameFlow.h"
 #include <optional>
 #include <array>
+#include <variant>
 #include <stdexcept>
 
 #include "backends/imgui_impl_sdl.h"
@@ -45,6 +46,7 @@ namespace {
 struct Backend {
   std::unique_ptr<VulkanRenderer> renderer;
   std::optional<graphics::vulkan::RecordingFrame> recording;
+  std::variant<std::monostate, DeferredGeometryCtx, DeferredLightingCtx> deferred;
 
   explicit Backend(std::unique_ptr<os::GraphicsOperations>&& ops)
     : renderer(std::make_unique<VulkanRenderer>(std::move(ops)))
@@ -58,6 +60,8 @@ struct Backend {
     if (!recording) {
       recording = renderer->beginRecording();
     } else {
+      Assertion(std::holds_alternative<std::monostate>(deferred),
+        "flip() called while deferred lighting is active; missing deferred end/finish?");
       recording = renderer->advanceFrame(std::move(*recording));
     }
   }
@@ -80,11 +84,18 @@ VulkanFrame& currentFrame()
   return g_backend->recording->ref();
 }
 
+RecordingFrame& currentRecording()
+{
+  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
+  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
+  return *g_backend->recording;
+}
+
 FrameCtx currentFrameCtx()
 {
   Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
   Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
-  return FrameCtx{ *g_backend->renderer, *g_backend->recording };
+  return FrameCtx{ *g_backend->renderer, currentRecording() };
 }
 
 float clampLineWidth(const VkPhysicalDeviceLimits& limits, float requestedWidth)
@@ -244,30 +255,28 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 // Called immediately after flip() via gr_setup_frame() per API contract.
     void gr_vulkan_setup_frame()
     {
-      auto& renderer = currentRenderer();
+  auto ctxBase = currentFrameCtx();
+  auto& renderer = ctxBase.renderer;
 
-  VulkanFrame& frame = currentFrame();
+  VulkanFrame& frame = ctxBase.frame();
 
   // Reset per-frame uniform bindings (optional will be empty at frame start)
   frame.resetPerFrameBindings();
 
-    vk::CommandBuffer cmd = frame.commandBuffer();
-    Assertion(cmd, "Frame has no valid command buffer");
+  // DO NOT start the render pass here - allow gr_clear to set clear flags first.
+  // The render pass will start lazily when the first draw or clear occurs.
 
-    // DO NOT start the render pass here - allow gr_clear to set clear flags first.
-    // The render pass will start lazily when the first draw or clear occurs.
-
-      // Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
+  // Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
     vk::Viewport viewport = createFullScreenViewport();
-    cmd.setViewport(0, 1, &viewport);
 
-    // Scissor: current clip region
+  // Scissor: current clip region
     vk::Rect2D scissor = createClipScissor();
-    cmd.setScissor(0, 1, &scissor);
 
-    // Line width: apply requested width, clamped to device limits
-    const auto& limits = renderer.vulkanDevice()->properties().limits;
-    cmd.setLineWidth(clampLineWidth(limits, g_requestedLineWidth));
+  // Line width: apply requested width, clamped to device limits
+  const auto& limits = renderer.vulkanDevice()->properties().limits;
+  const float lineWidth = clampLineWidth(limits, g_requestedLineWidth);
+
+  renderer.applySetupFrameDynamicState(ctxBase, viewport, scissor, lineWidth);
   }
 
 void gr_vulkan_delete_buffer(gr_buffer_handle handle)
@@ -456,8 +465,13 @@ void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
 {
   Assertion(light_deferred_enabled(), "Deferred lighting begin called while deferred lighting is disabled");
 
+  Assertion(g_backend != nullptr, "Deferred lighting begin called without backend");
+  Assertion(g_backend->recording.has_value(), "Deferred lighting begin called without active recording");
+  Assertion(std::holds_alternative<std::monostate>(g_backend->deferred),
+    "Deferred lighting begin called while deferred lighting is already active");
+
   auto& renderer = currentRenderer();
-  renderer.deferredLightingBegin(*g_backend->recording, clearNonColorBufs);
+  g_backend->deferred = renderer.deferredLightingBegin(*g_backend->recording, clearNonColorBufs);
 }
 
 void gr_vulkan_deferred_lighting_msaa()
@@ -467,15 +481,26 @@ void gr_vulkan_deferred_lighting_msaa()
 
 void gr_vulkan_deferred_lighting_end()
 {
+  Assertion(g_backend != nullptr, "Deferred lighting end called without backend");
+  Assertion(g_backend->recording.has_value(), "Deferred lighting end called without active recording");
+  auto* geometry = std::get_if<DeferredGeometryCtx>(&g_backend->deferred);
+  Assertion(geometry != nullptr, "Deferred lighting end called without a matching begin");
+
   auto& renderer = currentRenderer();
-  renderer.deferredLightingEnd(*g_backend->recording);
+  g_backend->deferred = renderer.deferredLightingEnd(*g_backend->recording, std::move(*geometry));
 }
 
 void gr_vulkan_deferred_lighting_finish()
 {
+  Assertion(g_backend != nullptr, "Deferred lighting finish called without backend");
+  Assertion(g_backend->recording.has_value(), "Deferred lighting finish called without active recording");
+  auto* lighting = std::get_if<DeferredLightingCtx>(&g_backend->deferred);
+  Assertion(lighting != nullptr, "Deferred lighting finish called without a matching end");
+
   auto& renderer = currentRenderer();
   vk::Rect2D scissor = createClipScissor();
-  renderer.deferredLightingFinish(*g_backend->recording, scissor);
+  renderer.deferredLightingFinish(*g_backend->recording, std::move(*lighting), scissor);
+  g_backend->deferred = std::monostate{};
 }
 
 void stub_set_line_width(float width)
@@ -546,9 +571,9 @@ struct ModelDrawContext {
   size_t texi;
 };
 
-static void issueModelDraw(const ModelDrawContext& ctx)
+static void issueModelDraw(const RenderCtx& render, const ModelDrawContext& ctx)
 {
-  auto cmd = ctx.bound.ctx.cmd();
+  auto cmd = render.cmd;
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
 
   // Set model descriptor set + dynamic UBO offset
@@ -618,13 +643,13 @@ void gr_vulkan_render_model(model_material* material_info,
             texi, bufferp->tex_buf.size());
 
   auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd();
   auto bound = requireModelBound(ctxBase);
   ctxBase.renderer.incrementModelDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  const auto& rt = renderScope.info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+  auto cmd = renderCtx.cmd;
+  const auto& rt = renderCtx.targetInfo;
 
   // Get shader modules for model shader
   ShaderModules modules = ctxBase.renderer.getShaderModules(SDR_TYPE_MODEL);
@@ -791,7 +816,7 @@ void gr_vulkan_render_model(model_material* material_info,
 
 
 
-  issueModelDraw(ctx);
+  issueModelDraw(renderCtx, ctx);
 }
 
 void gr_vulkan_render_primitives(material* material_info,
@@ -810,12 +835,12 @@ void gr_vulkan_render_primitives(material* material_info,
 
   auto ctxBase = currentFrameCtx();
   auto& frame = ctxBase.frame();
-  vk::CommandBuffer cmd = ctxBase.cmd();
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  const auto& rt = renderScope.info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+  vk::CommandBuffer cmd = renderCtx.cmd;
+  const auto& rt = renderCtx.targetInfo;
 
   // Use the shader type requested by the material
   shader_type shaderType = material_info->get_shader_type();
@@ -1139,23 +1164,20 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   Assertion(buffer_handle.isValid(), "render_nanovg called with invalid vertex buffer handle");
 
   auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd();
   auto nv = requireNanoVGBound(ctxBase);
   ctxBase.renderer.incrementPrimDraw();
 
   // NanoVG requires stencil. If we're currently rendering to a swapchain-without-depth target
   // or a non-swapchain target (deferred G-buffer), switch back to the swapchain target with depth/stencil.
-  std::optional<VulkanRenderingSession::RenderScope> renderScope;
-  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-  auto rt = renderScope->info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+  auto rt = renderCtx.targetInfo;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.depthFormat == vk::Format::eUndefined || rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
-    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
-    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-    rt = renderScope->info;
+    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+    rt = renderCtx.targetInfo;
   }
+  auto cmd = renderCtx.cmd;
 
   Assertion(rt.depthFormat != vk::Format::eUndefined, "render_nanovg requires a depth/stencil attachment");
   Assertion(ctxBase.renderer.renderTargets() != nullptr, "render_nanovg requires render targets");
@@ -1274,12 +1296,12 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 
   auto ctxBase = currentFrameCtx();
   auto& frame = ctxBase.frame();
-  vk::CommandBuffer cmd = ctxBase.cmd();
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
-  const auto& rt = renderScope.info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+  vk::CommandBuffer cmd = renderCtx.cmd;
+  const auto& rt = renderCtx.targetInfo;
 
   // Force batched bitmap shader
   shader_type shaderType = SDR_TYPE_BATCHED_BITMAP;
@@ -1462,21 +1484,18 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
 
   auto ctxBase = currentFrameCtx();
   auto& frame = ctxBase.frame();
-  vk::CommandBuffer cmd = ctxBase.cmd();
   ctxBase.renderer.incrementPrimDraw();
 
   // Ensure we're rendering to swapchain (menus/UI are swapchain-targeted).
-  std::optional<VulkanRenderingSession::RenderScope> renderScope;
-  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-  auto rt = renderScope->info;
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+  auto rt = renderCtx.targetInfo;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
-    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
-    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
-    rt = renderScope->info;
+    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+    rt = renderCtx.targetInfo;
   }
+  vk::CommandBuffer cmd = renderCtx.cmd;
 
   ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_ROCKET_UI);
   Assertion(shaderModules.vert != nullptr, "Rocket UI vertex shader not loaded");
@@ -1611,17 +1630,7 @@ void gr_vulkan_push_debug_group(const char* name)
     return;  // No-op if not recording yet
   }
   auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd();
-
-  vk::DebugUtilsLabelEXT label{};
-  label.pLabelName = name;
-  // Default color (white with alpha)
-  label.color[0] = 1.0f;
-  label.color[1] = 1.0f;
-  label.color[2] = 1.0f;
-  label.color[3] = 1.0f;
-
-  cmd.beginDebugUtilsLabelEXT(label);
+  ctxBase.renderer.pushDebugGroup(ctxBase, name);
 }
 
 void gr_vulkan_pop_debug_group()
@@ -1630,7 +1639,7 @@ void gr_vulkan_pop_debug_group()
     return;  // No-op if not recording yet
   }
   auto ctxBase = currentFrameCtx();
-  ctxBase.cmd().endDebugUtilsLabelEXT();
+  ctxBase.renderer.popDebugGroup(ctxBase);
 }
 
 int stub_create_query_object() { return -1; }
