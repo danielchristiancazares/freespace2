@@ -290,11 +290,12 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   // This is the explicit upload flush point - textures requested before rendering starts
   // will be queued and flushed here.
   Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
-  m_textureManager->setSafeRetireSerial(m_submitSerial);
+  // Resources retired during this frame's recording may still be referenced by the upcoming submission.
+  m_textureManager->setSafeRetireSerial(m_submitSerial + 1);
   m_textureManager->setCurrentFrameIndex(m_frameCounter);
 
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
-  m_bufferManager->setSafeRetireSerial(m_submitSerial);
+  m_bufferManager->setSafeRetireSerial(m_submitSerial + 1);
   maybeRunVulkanStress();
   Assertion(m_textureUploader != nullptr, "m_textureUploader must be initialized before beginFrame");
   m_textureUploader->flushPendingUploads(frame, cmd, m_frameCounter);
