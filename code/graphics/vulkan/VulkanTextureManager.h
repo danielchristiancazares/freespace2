@@ -15,6 +15,8 @@
 namespace graphics {
 namespace vulkan {
 
+class VulkanTextureUploader;
+
 // Helper for block-compressed images (BC1/BC3/BC7). Public for test coverage.
 inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
 {
@@ -126,9 +128,6 @@ class VulkanTextureManager {
 		}
 	};
 
-	// Flush pending uploads (only callable when no rendering is active).
-		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
-
 		// Queue texture for upload (CPU-side only; does not record GPU work).
 		void queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
 		// Variant for callers that already have a base-frame handle.
@@ -144,8 +143,6 @@ class VulkanTextureManager {
 		void cleanup();
 
 		// Descriptor binding management
-		void onTextureResident(int textureHandle);
-		void retireTexture(int textureHandle, uint64_t retireSerial);
 		uint32_t getBindlessSlotIndex(int textureHandle);
 
 		// Mark a texture as used by the upcoming submission (bindless or descriptor bind).
@@ -175,6 +172,14 @@ class VulkanTextureManager {
 	static constexpr int kDefaultTextureHandle = -1001;
 
   private:
+		friend class VulkanTextureUploader;
+
+		// Flush pending uploads (upload phase only; records GPU work).
+		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
+
+		void onTextureResident(int textureHandle);
+		void retireTexture(int textureHandle, uint64_t retireSerial);
+
 	vk::Device m_device;
 	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
 	vk::Queue m_transferQueue;
