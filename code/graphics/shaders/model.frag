@@ -1,7 +1,10 @@
 #version 460 core
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(set = 0, binding = 1) uniform sampler2D textures[];
+#include "gamma.sdr"
+
+// The Vulkan backend uploads textures as 2D arrays (layer 0 for non-array textures).
+layout(set = 0, binding = 1) uniform sampler2DArray textures[];
 
 layout(location = 0) in vec3 vPosition;
 layout(location = 1) in vec3 vNormal;
@@ -14,16 +17,16 @@ layout(location = 2) out vec4 outPosition;
 layout(location = 3) out vec4 outSpecular;
 layout(location = 4) out vec4 outEmissive;
 
-const uint OFFSET_ABSENT = 0xFFFFFFFFu;
-
 layout(push_constant) uniform ModelPushConstants
 {
 	uint vertexOffset;        // unused in fragment stage
 	uint stride;              // unused in fragment stage
+	uint vertexAttribMask;    // unused in fragment stage (layout must match vertex stage)
 	uint posOffset;
 	uint normalOffset;
 	uint texCoordOffset;
 	uint tangentOffset;
+	uint modelIdOffset;
 	uint boneIndicesOffset;
 	uint boneWeightsOffset;
 	uint baseMapIndex;
@@ -34,38 +37,43 @@ layout(push_constant) uniform ModelPushConstants
 	uint flags;
 } pcs;
 
-bool hasTexture(uint index)
-{
-	return index != OFFSET_ABSENT;
-}
-
-vec4 sampleTexture(uint index, vec2 uv, vec4 fallback)
-{
-	if (!hasTexture(index)) {
-		return fallback;
-	}
-	// nonuniformEXT ensures proper descriptor indexing semantics
-	return texture(textures[nonuniformEXT(index)], uv);
-}
-
 void main()
 {
 	// Base color
-	vec4 baseColor = sampleTexture(pcs.baseMapIndex, vTexCoord, vec4(1.0));
+	// Slot 0 is fallback; slots 1..3 are well-known defaults, so indices are always valid.
+	vec4 baseColor = texture(textures[nonuniformEXT(pcs.baseMapIndex)], vec3(vTexCoord, 0.0));
+	baseColor.rgb = srgb_to_linear(baseColor.rgb);
 
-	// Normals: fallback to interpolated normal; if a normal map exists, sample and remap
-	vec3 shadingNormal = normalize(vNormal);
-	if (hasTexture(pcs.normalMapIndex)) {
-		vec3 nmap = texture(textures[nonuniformEXT(pcs.normalMapIndex)], vTexCoord).xyz * 2.0 - 1.0;
-		shadingNormal = normalize(nmap);
-	}
+	// Normal mapping: normal map is tangent-space; convert to view-space using the per-vertex TBN.
+	vec3 N = vNormal;
+	float nLenSq = dot(N, N);
+	N = (nLenSq > 0.0) ? (N * inversesqrt(nLenSq)) : vec3(0.0, 0.0, 1.0);
 
-	// Specular: ensure G-buffer always contains valid dielectric default (F0).
-	// Deferred lighting samples directly; no fallback logic needed there.
-	vec4 specSample = sampleTexture(pcs.specMapIndex, vTexCoord, vec4(0.04, 0.04, 0.04, 0.0));
+	vec3 T = vTangent.xyz;
+	float tLenSq = dot(T, T);
+	T = (tLenSq > 0.0) ? (T * inversesqrt(tLenSq)) : vec3(1.0, 0.0, 0.0);
+	T = T - N * dot(T, N); // Gram-Schmidt orthonormalization
+	float orthoLenSq = dot(T, T);
+	T = (orthoLenSq > 0.0) ? (T * inversesqrt(orthoLenSq)) : vec3(1.0, 0.0, 0.0);
+
+	float handedness = (vTangent.w < 0.0) ? -1.0 : 1.0;
+	vec3 B = cross(N, T) * handedness;
+	mat3 TBN = mat3(T, B, N);
+
+	// Normal maps are typically stored as DXT5nm (X in A, Y in G).
+	vec4 nSample = texture(textures[nonuniformEXT(pcs.normalMapIndex)], vec3(vTexCoord, 0.0));
+	vec2 nXY = nSample.ag * 2.0 - 1.0;
+	vec3 nmap = vec3(nXY, clamp(sqrt(max(0.0, 1.0 - dot(nXY, nXY))), 0.0001, 1.0));
+	vec3 shadingNormal = TBN * nmap;
+	float sLenSq = dot(shadingNormal, shadingNormal);
+	shadingNormal = (sLenSq > 0.0) ? (shadingNormal * inversesqrt(sLenSq)) : N;
+
+	// Specular
+	vec4 specSample = texture(textures[nonuniformEXT(pcs.specMapIndex)], vec3(vTexCoord, 0.0));
 
 	// Emissive/glow
-	vec4 emissive = sampleTexture(pcs.glowMapIndex, vTexCoord, vec4(0.0));
+	vec4 emissive = texture(textures[nonuniformEXT(pcs.glowMapIndex)], vec3(vTexCoord, 0.0));
+	emissive.rgb = srgb_to_linear(emissive.rgb);
 
 	outColor = baseColor;
 	outNormal = vec4(shadingNormal, 1.0);
