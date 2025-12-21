@@ -16,9 +16,6 @@ struct SubmitInfo {
 };
 
 struct RecordingFrame {
-  std::reference_wrapper<VulkanFrame> frame;
-  uint32_t imageIndex;
-
   RecordingFrame(VulkanFrame& f, uint32_t img) : frame(f), imageIndex(img) {}
 
   RecordingFrame(const RecordingFrame&) = delete;
@@ -27,7 +24,14 @@ struct RecordingFrame {
   RecordingFrame& operator=(RecordingFrame&&) = default;
 
   VulkanFrame& ref() const { return frame.get(); }
+
+  private:
+  std::reference_wrapper<VulkanFrame> frame;
+  uint32_t imageIndex;
+
   vk::CommandBuffer cmd() const { return frame.get().commandBuffer(); }
+
+  friend class VulkanRenderer;
 };
 
 struct InFlightFrame {
@@ -46,4 +50,3 @@ struct InFlightFrame {
 
 } // namespace vulkan
 } // namespace graphics
-
