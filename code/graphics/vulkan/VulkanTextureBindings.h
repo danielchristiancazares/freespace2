@@ -34,7 +34,9 @@ public:
 		return info;
 	}
 
-	// Returns the bindless slot index if the texture is resident; otherwise returns MODEL_OFFSET_ABSENT.
+	// Returns a stable bindless slot index for this texture id.
+	// - If the texture is not resident yet, the slot's descriptor points at fallback until the upload completes.
+	// - If no slot can be assigned due to pressure, returns slot 0 (fallback) for this frame and retries at frame start.
 	// Also queues an upload for missing textures.
 	uint32_t bindlessIndex(TextureId id)
 	{

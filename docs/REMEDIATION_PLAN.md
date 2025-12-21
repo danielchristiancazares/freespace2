@@ -74,6 +74,7 @@ No state enum. No `std::variant`. Transitions are moves between containers.
 - `getBindlessSlotIndex()` returns a valid slot index (returns 0 on pressure/unavailable).
 - Non-resident slots sample fallback until upload completes.
 - Model bindless descriptor array is written with fallback first, then patched with resident textures.
+- The model bindless binding does not use `vk::DescriptorBindingFlagBits::ePartiallyBound` (all descriptors are written).
 
 ### 2.5 Eviction/deletion policy is serial-safe by construction (DONE baseline)
 
@@ -82,12 +83,6 @@ No state enum. No `std::variant`. Transitions are moves between containers.
 - Resident eviction and slot reuse only at upload phase (frame-start safe point).
 - Mid-frame: only reclaim non-resident slot mappings (safe because those slots already point to fallback that frame).
 - `deleteTexture()` defers retirement to upload phase (`m_pendingRetirements`) to prevent mid-frame slot reuse.
-
-### 2.6 Hardening follow-ups (NEXT)
-
-- Remove `vk::DescriptorBindingFlagBits::ePartiallyBound` from the model bindless binding now that all descriptors are written
-  every frame.
-- Fix stale docs/comments that still describe "absent" bindless indices.
 
 ---
 

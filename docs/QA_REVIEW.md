@@ -24,6 +24,8 @@ validation-safety, and "foot-gun" APIs.
 
 - Model bindless descriptor array is fully written every frame: initialize all `kMaxBindlessTextures` entries to fallback, then
   patch resident textures into their slots. This avoids relying on partially-bound descriptors.
+- The model bindless binding does not use `vk::DescriptorBindingFlagBits::ePartiallyBound`, and the model path no longer
+  requires `descriptorBindingPartiallyBound` device support.
 - `getBindlessSlotIndex()` returns a real slot (or slot 0 fallback) even when a texture is not yet resident.
 
 ### Frame lifecycle / serial tracking

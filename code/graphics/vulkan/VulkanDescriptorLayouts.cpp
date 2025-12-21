@@ -117,12 +117,11 @@ void VulkanDescriptorLayouts::createModelLayouts()
 	bindings[2].descriptorCount = 1;
 	bindings[2].stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
 
-	// Binding flags: ONLY PARTIALLY_BOUND on binding 1
-	// PARTIALLY_BOUND: unwritten descriptors OK if never dynamically used
-	// Shader MUST gate all texture reads: if (index != ABSENT) { ... }
+	// Binding flags: none. The model bindless descriptor array is fully written each frame
+	// (fallback-filled), so we do not rely on partially-bound descriptors.
 	std::array<vk::DescriptorBindingFlags, 3> bindingFlags{};
 	bindingFlags[0] = {};
-	bindingFlags[1] = vk::DescriptorBindingFlagBits::ePartiallyBound;
+	bindingFlags[1] = {};
 	bindingFlags[2] = {};
 
 	vk::DescriptorSetLayoutBindingFlagsCreateInfo flagsInfo;
