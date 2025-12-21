@@ -534,6 +534,7 @@ cmdline_parm luadev_arg("-luadev", "Make lua errors non-fatal", AT_NONE);	// Cmd
 cmdline_parm override_arg("-override_data", "Enable override directory", AT_NONE);	// Cmdline_override_data
 cmdline_parm imgui_debug_arg("-imgui_debug", nullptr, AT_NONE);
 cmdline_parm vulkan("-vulkan", nullptr, AT_NONE);
+cmdline_parm vk_stress("-vk_stress", "Enable Vulkan stress mode (buffer churn)", AT_NONE);
 cmdline_parm multithreading("-threads", nullptr, AT_INT);
 
 char *Cmdline_start_mission = NULL;
@@ -573,6 +574,7 @@ bool Cmdline_lua_devmode = false;
 bool Cmdline_override_data = false;
 bool Cmdline_show_imgui_debug = false;
 bool Cmdline_vulkan = false;
+bool Cmdline_vk_stress = false;
 int Cmdline_multithreading = 1;
 
 // Other
@@ -2326,22 +2328,26 @@ bool SetCmdlineParams()
 		Cmdline_show_imgui_debug = true;
 	}
 
-	if (show_video_info.found())
-	{
-		Cmdline_show_video_info = true;
-	}
+		if (show_video_info.found())
+		{
+			Cmdline_show_video_info = true;
+		}
 
-	if (vulkan.found()) {
-		Cmdline_vulkan = true;
-	}
+		if (vulkan.found()) {
+			Cmdline_vulkan = true;
+		}
+		if (vk_stress.found()) {
+			Cmdline_vulkan = true; // vk_stress is Vulkan-only
+			Cmdline_vk_stress = true;
+		}
 
-	//Deprecated flags - CommanderDJ
-	if (deprecated_no_emissive_arg.found()) {
-		Cmdline_emissive = 0;
-	}
+		//Deprecated flags - CommanderDJ
+		if (deprecated_no_emissive_arg.found()) {
+			Cmdline_emissive = 0;
+		}
 
-	if (deprecated_fxaa_arg.found() ) {
-		Gr_aa_mode = AntiAliasMode::FXAA_Medium;
+		if (deprecated_fxaa_arg.found() ) {
+			Gr_aa_mode = AntiAliasMode::FXAA_Medium;
 
 		if (deprecated_fxaa_preset_arg.found()) {
 			auto val = deprecated_fxaa_preset_arg.get_int();

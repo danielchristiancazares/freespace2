@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VulkanConstants.h"
+#include "VulkanDeferredRelease.h"
 #include "VulkanFrame.h"
 #include "VulkanModelTypes.h"
 
@@ -131,33 +132,42 @@ class VulkanTextureManager {
 	void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 	void markUploadsCompleted(uint32_t completedFrameIndex);
 
+	// Queue texture for async upload (public wrapper for ensureTextureResident)
+	void queueTextureUpload(int bitmapHandle, VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
+
 	// Preload uploads immediately; returns true on success.
 	bool preloadTexture(int bitmapHandle, bool isAABitmap);
 
 	// Delete texture for a bitmap handle (base frame)
 	void deleteTexture(int bitmapHandle);
 
-	// Cleanup all resources
-	void cleanup();
+		// Cleanup all resources
+		void cleanup();
 
 		// Descriptor binding management
 		void onTextureResident(int textureHandle);
 		void retireTexture(int textureHandle, uint64_t retireSerial);
-		uint32_t getBindlessSlotIndex(int textureHandle) const;
+		uint32_t getBindlessSlotIndex(int textureHandle);
 
-		const std::vector<uint32_t>& getRetiredSlots() const { return m_retiredSlots; }
-		void clearRetiredSlotsIfAllFramesUpdated(uint32_t completedFrameIndex);
+		void collect(uint64_t completedSerial);
+
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
-		void processPendingDestructions(uint64_t completedSerial);
 		const std::vector<int>& getNewlyResidentTextures() const { return m_newlyResidentTextures; }
 		void clearNewlyResidentTextures() { m_newlyResidentTextures.clear(); }
 
-	// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
-	std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
+		// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
+		std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
 
-	// Get texture descriptor info without frame/cmd (for already-resident textures)
-	vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey& samplerKey);
+		// Conservative serial used to defer destruction when evicting/deleting textures.
+		// Updated by the renderer (typically "last submitted serial").
+		void setSafeRetireSerial(uint64_t serial) { m_safeRetireSerial = serial; }
+
+		// Current CPU frame counter (monotonic). Used for LRU bookkeeping.
+		void setCurrentFrameIndex(uint32_t frameIndex) { m_currentFrameIndex = frameIndex; }
+
+		// Get texture descriptor info without frame/cmd (for already-resident textures)
+		vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey& samplerKey);
 
 	// Synthetic handle for fallback texture (won't collide with bmpman handles which are >= 0)
 	static constexpr int kFallbackTextureHandle = -1000;
@@ -193,28 +203,24 @@ class VulkanTextureManager {
 		bool& uploadQueued);
 	bool isUploadQueued(int baseFrame) const;
 
-		// Slots that need fallback descriptor written (original slot indices)
-		std::vector<uint32_t> m_retiredSlots;
-
 		// Pool of bindless texture slots (excluding 0, reserved for fallback)
 		std::vector<uint32_t> m_freeBindlessSlots;
 
-		// Counter for tracking when all frames have processed retired slots
-		uint32_t m_retiredSlotsFrameCounter = 0;
-
-	// Fallback "black" texture for retired slots (initialized at startup)
-	int m_fallbackTextureHandle = -1;
+			// Fallback "black" texture for missing/unavailable textures (initialized at startup)
+			int m_fallbackTextureHandle = -1;
 	// Default "white" texture for untextured draws (initialized at startup)
 	int m_defaultTextureHandle = -1;
 	
-	// Textures that became Resident in markUploadsCompleted and need descriptor write
-	std::vector<int> m_newlyResidentTextures;
+		// Textures that became Resident in markUploadsCompleted and need descriptor write
+		std::vector<int> m_newlyResidentTextures;
 
-	// Pending destructions: {textureHandle, retireSerial}
-	std::vector<std::pair<int, uint64_t>> m_pendingDestructions;
-};
+		DeferredReleaseQueue m_deferredReleases;
+
+		// Serial at/after which it is safe to destroy newly-retired resources.
+		uint64_t m_safeRetireSerial = 0;
+
+		uint32_t m_currentFrameIndex = 0;
+	};
 
 } // namespace vulkan
 } // namespace graphics
-
-
