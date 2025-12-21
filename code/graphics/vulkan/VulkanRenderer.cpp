@@ -298,7 +298,8 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   m_bufferManager->setSafeRetireSerial(m_submitSerial + 1);
   maybeRunVulkanStress();
   Assertion(m_textureUploader != nullptr, "m_textureUploader must be initialized before beginFrame");
-  m_textureUploader->flushPendingUploads(frame, cmd, m_frameCounter);
+  const UploadCtx uploadCtx{frame, cmd, m_frameCounter};
+  m_textureUploader->flushPendingUploads(uploadCtx);
 
   // Sync model descriptors AFTER upload flush so newly-resident textures are written this frame.
   Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
