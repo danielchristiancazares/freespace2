@@ -9,6 +9,7 @@
 #include "VulkanDescriptorLayouts.h"
 #include "VulkanDevice.h"
 #include "VulkanFrame.h"
+#include "VulkanPhaseContexts.h"
 #include "VulkanFrameFlow.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanRenderTargets.h"
@@ -32,6 +33,8 @@ namespace vulkan {
 
 class VulkanTextureBindings;
 class VulkanTextureUploader;
+class VulkanMovieManager;
+struct FrameCtx;
 
 // Light volume mesh for deferred rendering
 struct VolumeMesh {
@@ -64,7 +67,14 @@ class VulkanRenderer {
 		vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
 			const VulkanTextureManager::SamplerKey& samplerKey);
 		vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
+		// Returns a valid bindless slot index. Invalid handles return slot 0 (fallback).
 		uint32_t getBindlessTextureIndex(int bitmapHandle);
+		// Recording-only: update dynamic viewport/scissor state without requiring an active rendering pass.
+		void setViewport(const FrameCtx& ctx, const vk::Viewport& viewport);
+		void setScissor(const FrameCtx& ctx, const vk::Rect2D& scissor);
+		// Bitmap render targets (bmpman RTT API)
+		bool createBitmapRenderTarget(int handle, int* width, int* height, int* bpp, int* mm_lvl, int flags);
+		bool setBitmapRenderTarget(const FrameCtx& ctx, int handle, int face);
 		void setModelUniformBinding(VulkanFrame& frame,
 			gr_buffer_handle handle,
 			size_t offset,
@@ -73,11 +83,6 @@ class VulkanRenderer {
 		gr_buffer_handle handle,
 		size_t offset,
 		size_t size);
-	void updateModelDescriptors(vk::DescriptorSet set,
-		vk::Buffer vertexBuffer,
-		const std::vector<std::pair<uint32_t, int>>& textures,
-		VulkanFrame& frame,
-		vk::CommandBuffer cmd);
 
 	// Frame sync for model descriptors - called at frame start after fence wait
 	// vertexHeapBuffer must be valid (caller is responsible for checking)
@@ -85,7 +90,15 @@ class VulkanRenderer {
 
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
-	VulkanRenderingSession::RenderScope ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec); // Recording-only
+		RenderCtx ensureRenderingStarted(const FrameCtx& ctx); // Recording-only (requires FrameCtx token)
+		// Recording-only: apply dynamic state before rendering begins (viewport/scissor/line width).
+		void applySetupFrameDynamicState(const FrameCtx& ctx,
+			const vk::Viewport& viewport,
+			const vk::Rect2D& scissor,
+			float lineWidth);
+		// Recording-only: debug labels (no render pass requirement).
+		void pushDebugGroup(const FrameCtx& ctx, const char* name);
+		void popDebugGroup(const FrameCtx& ctx);
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }
@@ -106,18 +119,16 @@ class VulkanRenderer {
 	const VulkanBufferManager* bufferManager() const { return m_bufferManager.get(); }
 	VulkanTextureManager* textureManager() { return m_textureManager.get(); }
 	const VulkanTextureManager* textureManager() const { return m_textureManager.get(); }
+	VulkanMovieManager* movieManager() { return m_movieManager.get(); }
+	const VulkanMovieManager* movieManager() const { return m_movieManager.get(); }
 
 		// Deferred rendering hooks
-		enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish };
-
-		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
-		void endDeferredGeometry(vk::CommandBuffer cmd);
-		void bindDeferredGlobalDescriptors();
 		void setPendingRenderTargetSwapchain();
-		void recordDeferredLighting(graphics::vulkan::RecordingFrame& rec);
-		void deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs);
-		void deferredLightingEnd(graphics::vulkan::RecordingFrame& rec);
-		void deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, const vk::Rect2D& restoreScissor);
+
+		// Typestate API: begin -> end -> finish (no state enum).
+		DeferredGeometryCtx deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs);
+		DeferredLightingCtx deferredLightingEnd(graphics::vulkan::RecordingFrame& rec, DeferredGeometryCtx&& geometry);
+		void deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, DeferredLightingCtx&& lighting, const vk::Rect2D& restoreScissor);
 		uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
 		uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
 		ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
@@ -136,6 +147,26 @@ class VulkanRenderer {
 	void* mapBuffer(gr_buffer_handle handle);
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
 	int preloadTexture(int bitmapHandle, bool isAABitmap);
+	// Recording-only: uploads new pixel data into an existing bitmap texture (streaming anims, NanoVG, etc.).
+	void updateTexture(const FrameCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height);
+	void releaseBitmap(int bitmapHandle);
+	MovieTextureHandle createMovieTexture(uint32_t width, uint32_t height, MovieColorSpace colorspace, MovieColorRange range);
+	void uploadMovieTexture(const FrameCtx& ctx,
+		MovieTextureHandle handle,
+		const ubyte* y,
+		int yStride,
+		const ubyte* u,
+		int uStride,
+		const ubyte* v,
+		int vStride);
+	void drawMovieTexture(const FrameCtx& ctx,
+		MovieTextureHandle handle,
+		float x1,
+		float y1,
+		float x2,
+		float y2,
+		float alpha);
+	void releaseMovieTexture(MovieTextureHandle handle);
 
 	// Model vertex heap registration (called from GPUMemoryHeap when ModelVertex heap is created)
 	void setModelVertexHeapHandle(gr_buffer_handle handle);
@@ -151,12 +182,30 @@ class VulkanRenderer {
 	const VulkanDevice* vulkanDevice() const { return m_vulkanDevice.get(); }
 
   private:
-	static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
-	static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
-	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
+		static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
+		static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
+		static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
 
-		void createUploadCommandPool();
-		void createSubmitTimelineSemaphore();
+		RenderCtx ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec); // Recording-only (internal)
+
+		// Deferred implementation details (called by typestate wrapper API)
+		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
+		void endDeferredGeometry(vk::CommandBuffer cmd);
+		void bindDeferredGlobalDescriptors();
+		void recordPreDeferredSceneColorCopy(const RenderCtx& render, uint32_t imageIndex);
+		void recordDeferredLighting(const RenderCtx& render,
+			vk::Buffer uniformBuffer,
+			const std::vector<DeferredLight>& lights);
+
+		// Descriptor sync helpers (called from beginFrame).
+		void updateModelDescriptors(uint32_t frameIndex,
+				vk::DescriptorSet set,
+				vk::Buffer vertexHeapBuffer,
+				vk::Buffer transformBuffer,
+				const std::vector<std::pair<uint32_t, int>>& textures);
+
+			void createUploadCommandPool();
+			void createSubmitTimelineSemaphore();
 		void createDescriptorResources();
 		void createFrames();
 		void createVertexBuffer();
@@ -184,12 +233,7 @@ class VulkanRenderer {
 		uint64_t queryCompletedSerial() const;
 		void maybeRunVulkanStress();
 
-		// Descriptor sync helpers
-		void writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer);
-		void writeTextureDescriptor(vk::DescriptorSet set, uint32_t arrayIndex, int textureHandle);
-		void writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex);
-
-	void prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial);
+		void prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial);
 
 	// Device layer - owns instance, surface, physical device, logical device, swapchain
 	std::unique_ptr<VulkanDevice> m_vulkanDevice;
@@ -207,6 +251,7 @@ class VulkanRenderer {
 	std::unique_ptr<VulkanPipelineManager> m_pipelineManager;
 		std::unique_ptr<VulkanBufferManager> m_bufferManager;
 		std::unique_ptr<VulkanTextureManager> m_textureManager;
+		std::unique_ptr<VulkanMovieManager> m_movieManager;
 
 		std::array<std::unique_ptr<VulkanFrame>, kFramesInFlight> m_frames;
 		// Frames ready for CPU reuse (already waited/reset); completedSerial is the latest known safe serial.
@@ -236,12 +281,17 @@ class VulkanRenderer {
 		std::unique_ptr<VulkanTextureBindings> m_textureBindings;
 		std::unique_ptr<VulkanTextureUploader> m_textureUploader;
 
-		DeferredBoundaryState m_deferredBoundaryState = DeferredBoundaryState::Idle;
-
-	// Model vertex heap handle - set via setModelVertexHeapHandle when ModelVertex heap is created.
+		// Model vertex heap handle - set via setModelVertexHeapHandle when ModelVertex heap is created.
 	// The actual VkBuffer is looked up lazily via queryModelVertexHeapBuffer() since the buffer
 	// may not exist at registration time (VulkanBufferManager defers buffer creation).
 	gr_buffer_handle m_modelVertexHeapHandle;
+
+	// Per-frame cache of bindless descriptor contents so we can update only dirty slots.
+	struct ModelBindlessDescriptorCache {
+		bool initialized = false;
+		std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> infos{};
+	};
+	std::array<ModelBindlessDescriptorCache, kFramesInFlight> m_modelBindlessCache;
 
 	// Z-buffer mode tracking (for getZbufferMode)
 	gr_zbuffer_type m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;

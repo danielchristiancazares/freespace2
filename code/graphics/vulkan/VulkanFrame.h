@@ -56,12 +56,16 @@ class VulkanFrame {
   vk::DescriptorSet modelDescriptorSet() const { return m_modelDescriptorSet; }
   DynamicUniformBinding modelUniformBinding{ gr_buffer_handle::invalid(), 0 };
   DynamicUniformBinding sceneUniformBinding{ gr_buffer_handle::invalid(), 0 };
+  uint32_t modelTransformDynamicOffset = 0;
+  size_t modelTransformSize = 0;
   BoundUniformBuffer nanovgData;
 
   void resetPerFrameBindings()
   {
     modelUniformBinding = { gr_buffer_handle::invalid(), 0 };
     sceneUniformBinding = { gr_buffer_handle::invalid(), 0 };
+    modelTransformDynamicOffset = 0;
+    modelTransformSize = 0;
     nanovgData = {};
   }
 
