@@ -100,7 +100,6 @@ class VulkanTextureManager {
 	enum class TextureState {
 		Missing,
 		Queued,
-		Uploading,
 		Resident,
 		Failed,
 		Retired // Marked for destruction, awaiting frame drainage
@@ -113,7 +112,6 @@ class VulkanTextureManager {
 	struct TextureRecord {
 		VulkanTexture gpu;
 		TextureState state = TextureState::Missing;
-		uint32_t pendingFrameIndex = 0; // Frame that recorded the upload
 		uint32_t lastUsedFrame = 0;
 		TextureBindingState bindingState;
 	};
@@ -130,7 +128,6 @@ class VulkanTextureManager {
 
 	// Flush pending uploads (only callable when no rendering is active).
 		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
-		void markUploadsCompleted(uint32_t completedFrameIndex);
 
 		// Queue texture for upload (CPU-side only; does not record GPU work).
 		void queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
@@ -155,8 +152,6 @@ class VulkanTextureManager {
 
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
-		const std::vector<int>& getNewlyResidentTextures() const { return m_newlyResidentTextures; }
-		void clearNewlyResidentTextures() { m_newlyResidentTextures.clear(); }
 
 		// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
 		std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
@@ -209,9 +204,6 @@ class VulkanTextureManager {
 			int m_fallbackTextureHandle = -1;
 	// Default "white" texture for untextured draws (initialized at startup)
 	int m_defaultTextureHandle = -1;
-	
-		// Textures that became Resident in markUploadsCompleted and need descriptor write
-		std::vector<int> m_newlyResidentTextures;
 
 		DeferredReleaseQueue m_deferredReleases;
 

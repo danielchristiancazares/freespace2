@@ -405,7 +405,6 @@ void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completed
   m_bufferManager->collect(completedSerial);
 
   Assertion(m_textureManager != nullptr, "m_textureManager must be initialized");
-  m_textureManager->markUploadsCompleted(frame.frameIndex());
   m_textureManager->collect(completedSerial);
 
   frame.reset();
@@ -448,20 +447,6 @@ graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 
   const uint32_t imageIndex = acquireImageOrThrow(*af.frame);
   beginFrame(*af.frame, imageIndex);
-
-  // Write descriptors for textures that became Resident via async completion.
-  // Do this AFTER beginFrame so we write to the correct frame's descriptor set.
-  const auto& newlyResident = m_textureManager->getNewlyResidentTextures();
-  if (!newlyResident.empty() && af.frame->modelDescriptorSet()) {
-    for (int handle : newlyResident) {
-      auto& record = m_textureManager->allTextures()[handle];
-      if (record.state == VulkanTextureManager::TextureState::Resident &&
-          record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
-        writeTextureDescriptor(af.frame->modelDescriptorSet(), record.bindingState.arrayIndex, handle);
-      }
-    }
-    m_textureManager->clearNewlyResidentTextures();
-  }
 
   return graphics::vulkan::RecordingFrame{ *af.frame, imageIndex };
 }

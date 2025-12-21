@@ -549,8 +549,8 @@ VulkanTextureManager::TextureRecord* VulkanTextureManager::ensureTextureResident
   }
   auto& record = it->second;
 
-  // If a previous upload for this record is queued or in flight, just update usage/sampler.
-  if (record.state == TextureState::Uploading || record.state == TextureState::Queued) {
+  // If a previous upload for this record is queued, just update usage/sampler.
+  if (record.state == TextureState::Queued) {
     record.lastUsedFrame = currentFrameIndex;
     record.gpu.sampler = getOrCreateSampler(samplerKey);
     return &record;
@@ -818,36 +818,11 @@ void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBu
 
     record.state = TextureState::Resident;
     record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    record.pendingFrameIndex = currentFrameIndex;
     record.lastUsedFrame = currentFrameIndex;
       onTextureResident(baseFrame);
     }
 
   m_pendingUploads.swap(remaining);
-}
-
-void VulkanTextureManager::markUploadsCompleted(uint32_t completedFrameIndex)
-{
-  std::vector<int> newlyResidentTextures;
-  
-  for (auto& kv : m_textures) {
-    auto& record = kv.second;
-    if (record.state == TextureState::Uploading && record.pendingFrameIndex == completedFrameIndex) {
-      record.state = TextureState::Resident;
-      onTextureResident(kv.first);
-      
-      // Track textures that became Resident and got slots (need immediate descriptor write)
-      if (record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
-        newlyResidentTextures.push_back(kv.first);
-      }
-    }
-  }
-  
-  // Notify renderer to write descriptors for newly Resident textures
-  // This will be called from VulkanRenderer::flip() after markUploadsCompleted
-  if (!newlyResidentTextures.empty()) {
-    m_newlyResidentTextures = std::move(newlyResidentTextures);
-  }
 }
 
 bool VulkanTextureManager::isUploadQueued(int baseFrame) const
