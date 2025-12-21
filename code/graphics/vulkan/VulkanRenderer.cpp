@@ -841,19 +841,8 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
   // Binding 0: Vertex heap SSBO; Binding 1: bindless textures (only for textures with assigned slots).
   // We batch the writes to avoid issuing one vkUpdateDescriptorSets call per texture.
   std::vector<std::pair<uint32_t, int>> textures;
-  textures.reserve(m_textureManager->allTextures().size());
-  for (auto& [handle, record] : m_textureManager->allTextures()) {
-    if (record.state != VulkanTextureManager::TextureState::Resident) {
-      continue;
-    }
-
-    const uint32_t slot = record.bindingState.arrayIndex;
-    if (slot == MODEL_OFFSET_ABSENT) {
-      continue;
-    }
-
-    textures.emplace_back(slot, handle);
-  }
+  textures.reserve(kMaxBindlessTextures);
+  m_textureManager->appendResidentBindlessDescriptors(textures);
 
   updateModelDescriptors(frame.modelDescriptorSet(), vertexHeapBuffer, textures);
 }

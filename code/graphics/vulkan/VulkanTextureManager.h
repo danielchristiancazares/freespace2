@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -99,23 +100,22 @@ class VulkanTextureManager {
 		vk::Queue transferQueue,
 		uint32_t transferQueueIndex);
 
-	enum class TextureState {
-		Missing,
-		Queued,
-		Resident,
-		Failed,
+	enum class UnavailableReason {
+		InvalidHandle,
+		InvalidArray,
+		BmpLockFailed,
+		TooLargeForStaging,
+		UnsupportedFormat,
 	};
 
-		struct TextureBindingState {
-			uint32_t arrayIndex = MODEL_OFFSET_ABSENT;
-		};
-
-	struct TextureRecord {
+	struct ResidentTexture {
 		VulkanTexture gpu;
-		TextureState state = TextureState::Missing;
 		uint32_t lastUsedFrame = 0;
 		uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
-		TextureBindingState bindingState;
+	};
+
+	struct UnavailableTexture {
+		UnavailableReason reason = UnavailableReason::InvalidHandle;
 	};
 
 	struct SamplerKey {
@@ -153,8 +153,8 @@ class VulkanTextureManager {
 		int getFallbackTextureHandle() const { return m_fallbackTextureHandle; }
 		int getDefaultTextureHandle() const { return m_defaultTextureHandle; }
 
-		// Direct access to textures for descriptor sync (non-const to allow marking dirty flags)
-		std::unordered_map<int, TextureRecord>& allTextures() { return m_textures; }
+		// Populate (slot, baseFrameHandle) pairs for bindless descriptor updates.
+		void appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, int>>& out) const;
 
 		// Serial at/after which it is safe to destroy newly-retired resources.
 		// During frame recording this should be the serial of the upcoming submit; after submit it should match the last submitted serial.
@@ -177,6 +177,8 @@ class VulkanTextureManager {
 		// Flush pending uploads (upload phase only; records GPU work).
 		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
 
+		void retryPendingBindlessSlots();
+		bool tryAssignBindlessSlot(int textureHandle);
 		void onTextureResident(int textureHandle);
 		void retireTexture(int textureHandle, uint64_t retireSerial);
 
@@ -187,7 +189,15 @@ class VulkanTextureManager {
 
 	vk::UniqueSampler m_defaultSampler;
 
-	std::unordered_map<int, TextureRecord> m_textures; // keyed by base frame
+	// State as location:
+	// - presence in m_residentTextures => resident
+	// - presence in m_pendingUploads   => queued for upload
+	// - presence in m_unavailable      => permanently unavailable (non-retriable under current algorithm)
+	// - presence in m_bindlessSlots    => has a bindless slot assigned
+	std::unordered_map<int, ResidentTexture> m_residentTextures; // keyed by base frame (or synthetic handles)
+	std::unordered_map<int, UnavailableTexture> m_unavailableTextures; // keyed by base frame
+	std::unordered_map<int, uint32_t> m_bindlessSlots; // keyed by base frame
+	std::unordered_set<int> m_pendingBindlessSlots; // resident textures waiting for a bindless slot (retry each frame)
 	std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
 	std::vector<int> m_pendingUploads; // base frame handles queued for upload
 
