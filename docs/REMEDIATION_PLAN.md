@@ -16,6 +16,7 @@ correctness and making invalid states non-representable via typestate, RAII, and
 - Texture eviction/deletion was changed to defer destruction (serial-gated) instead of immediate RAII teardown.
 - Resource retirement during `beginFrame()` is now guarded against the *upcoming* submit serial (prevents premature destruction before the frame completes).
 - Bindless slot eviction only considers textures whose `lastUsedSerial <= completedSerial` (no eviction of in-flight textures).
+- Cache eviction now drops cache state immediately and moves GPU handles into the deferred release queue (no long-lived `Retired` records blocking re-requests).
 
 ## 0) Target Invariants (Non-Negotiable)
 

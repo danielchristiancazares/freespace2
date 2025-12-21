@@ -102,7 +102,6 @@ class VulkanTextureManager {
 		Queued,
 		Resident,
 		Failed,
-		Retired // Marked for destruction, awaiting frame drainage
 	};
 
 		struct TextureBindingState {
@@ -195,10 +194,6 @@ class VulkanTextureManager {
 		void createSolidTexture(int textureHandle, const uint8_t rgba[4]);
 		void createFallbackTexture();
 		void createDefaultTexture();
-		TextureRecord* ensureTextureResident(int bitmapHandle,
-			uint32_t currentFrameIndex,
-			const SamplerKey& samplerKey,
-			bool& uploadQueued);
 	bool isUploadQueued(int baseFrame) const;
 
 		// Pool of bindless texture slots (excluding 0, reserved for fallback)
