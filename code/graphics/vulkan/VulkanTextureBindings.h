@@ -22,15 +22,11 @@ public:
 		const int fallbackHandle = m_textures.getFallbackTextureHandle();
 		Assertion(fallbackHandle != -1, "Fallback texture must be initialized");
 
-		if (!id.isValid()) {
-			return m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
-		}
-
-		auto info = m_textures.getTextureDescriptorInfo(id.value, samplerKey);
+		auto info = m_textures.getTextureDescriptorInfo(id.baseFrame(), samplerKey);
 		if (info.imageView) {
-			m_textures.markTextureUsedBaseFrame(id.value, currentFrameIndex);
+			m_textures.markTextureUsedBaseFrame(id.baseFrame(), currentFrameIndex);
 		} else {
-			m_textures.queueTextureUploadBaseFrame(id.value, currentFrameIndex, samplerKey);
+			m_textures.queueTextureUploadBaseFrame(id.baseFrame(), currentFrameIndex, samplerKey);
 			info = m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
 		}
 
@@ -38,14 +34,13 @@ public:
 		return info;
 	}
 
-	// Returns the bindless slot index if the texture is resident; otherwise returns MODEL_OFFSET_ABSENT.
+	// Returns a stable bindless slot index for this texture id.
+	// - If the texture is not resident yet, the slot's descriptor points at fallback until the upload completes.
+	// - If no slot can be assigned due to pressure, returns slot 0 (fallback) for this frame and retries at frame start.
 	// Also queues an upload for missing textures.
 	uint32_t bindlessIndex(TextureId id)
 	{
-		if (!id.isValid()) {
-			return MODEL_OFFSET_ABSENT;
-		}
-		return m_textures.getBindlessSlotIndex(id.value);
+		return m_textures.getBindlessSlotIndex(id.baseFrame());
 	}
 
 private:
