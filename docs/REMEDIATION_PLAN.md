@@ -87,14 +87,22 @@ Replace the current “all-in-one” texture manager with:
 Key rule:
 - Bindings never flush uploads; they only queue work.
 
-### 2.2 Typestate makes invalid states non-representable
+### 2.2 State as Location (Preferred Over `std::variant`)
 
-Replace `TextureState` + nullable members with:
-`std::variant<Missing, Queued, Resident, Failed, Retiring>`, where:
-- `Resident` contains `std::shared_ptr<GpuTexture>` (never null).
-- `Retiring` contains GPU object + `retireSerial`.
+Per `docs/DESIGN_PHILOSOPHY.md`, encode texture state as **container membership** (state as location), not
+as enums/variants/optionals inside a single record.
 
-This prevents “Resident but no imageView”, etc.
+Concrete shape:
+- `resident`: `unordered_map<TextureId, ResidentTexture>` (always-valid `VkImage`/`VkImageView`)
+- `queued`: `unordered_set<TextureId>` (+ FIFO list if ordering matters)
+- `unavailable`: `unordered_map<TextureId, UnavailableReason>` (domain-real/non-retriable)
+- `bindlessSlots`: `unordered_map<TextureId, SlotIndex>`
+- `pendingBindlessSlots`: `unordered_set<TextureId>` (retry at frame start; never treat as "unavailable")
+
+Boundary-only optionals:
+- Raw handles become `std::optional<TextureId>` once at the boundary; internal code uses `TextureId` exclusively.
+
+This prevents "Resident but no imageView" and removes the need for internal `switch`/`visit` routing.
 
 ### 2.3 Enforce upload-only-before-rendering via typed contexts
 
