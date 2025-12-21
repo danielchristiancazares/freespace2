@@ -2,6 +2,7 @@
 #include "VulkanRenderer.h"
 #include "VulkanGraphics.h"
 #include "VulkanConstants.h"
+#include "VulkanFrameFlow.h"
 #include "graphics/util/uniform_structs.h"
 
 #include "def_files/def_files.h"
@@ -12,6 +13,7 @@
 #include "osapi/outwnd.h"
 #include "bmpman/bmpman.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -19,32 +21,10 @@
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
-#include <fstream>
-#include <chrono>
-#include <atomic>
-#include <sstream>
 
 namespace graphics {
 namespace vulkan {
 
-// #region agent log
-static void agent_log(const char* location, const char* message, const char* hypothesisId, const char* data = nullptr) {
-	std::ofstream logfile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
-	if (logfile.is_open()) {
-		auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::system_clock::now().time_since_epoch()).count();
-		logfile << R"({"sessionId":"debug-session","runId":"run1","hypothesisId":")" << hypothesisId
-			<< R"(","location":")" << location << R"(","message":")" << message;
-		if (data) {
-			logfile << R"(","data":")" << data << R"("})";
-		} else {
-			logfile << R"("})";
-		}
-		logfile << "\n";
-		logfile.close();
-	}
-}
-// #endregion agent log
 
 
 
@@ -96,8 +76,6 @@ bool VulkanRenderer::initialize() {
   createDeferredLightingResources();
 
   m_inFlightFrames.clear();
-  m_recording = std::make_unique<NoRecording>();
-  m_framePool = std::make_unique<WarmupFramePool>();
 
   return true;
 }
@@ -131,7 +109,8 @@ void VulkanRenderer::createFrames() {
       props.limits.optimalBufferCopyOffsetAlignment,
       modelSet);
 
-    m_availableFrames.push_back(m_frames[i].get());
+    // Newly created frames haven't been submitted yet; completedSerial is whatever we last observed.
+    m_availableFrames.push_back(AvailableFrame{ m_frames[i].get(), m_completedSerial });
   }
 }
 
@@ -179,6 +158,32 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
   return result.imageIndex;
 }
 
+uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame& frame) {
+  auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
+
+  if (result.needsRecreate) {
+    const auto extent = m_vulkanDevice->swapchainExtent();
+    if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+      throw std::runtime_error("acquireImageOrThrow: swapchain recreation failed");
+    }
+    // Recreate render targets that depend on swapchain size
+    m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+
+    // Retry acquire after successful recreation
+    result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
+    if (!result.success) {
+      throw std::runtime_error("acquireImageOrThrow: acquire failed after swapchain recreation");
+    }
+    return result.imageIndex;
+  }
+
+  if (!result.success) {
+    throw std::runtime_error("acquireImageOrThrow: acquire failed");
+  }
+
+  return result.imageIndex;
+}
+
 void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
     "New frame started while deferred boundary state was not idle");
@@ -197,7 +202,9 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   // This is the explicit upload flush point - textures requested before rendering starts
   // will be queued and flushed here.
   Assertion(m_textureManager != nullptr, "m_textureManager must be initialized before beginFrame");
-  m_textureManager->flushPendingUploads(frame, cmd, frame.frameIndex());
+  m_textureManager->setSafeRetireSerial(m_submitSerial);
+  m_textureManager->setCurrentFrameIndex(m_frameCounter);
+  m_textureManager->flushPendingUploads(frame, cmd, m_frameCounter);
 
   // Sync model descriptors AFTER upload flush so newly-resident textures are written this frame.
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
@@ -211,16 +218,18 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   m_renderingSession->beginFrame(cmd, imageIndex);
 }
 
-void VulkanRenderer::endFrame(VulkanFrame& frame, uint32_t imageIndex) {
-  vk::CommandBuffer cmd = frame.commandBuffer();
+void VulkanRenderer::endFrame(graphics::vulkan::RecordingFrame& rec) {
+  vk::CommandBuffer cmd = rec.cmd();
 
   // Terminate any active rendering and transition swapchain for present
-  m_renderingSession->endFrame(cmd, imageIndex);
+  m_renderingSession->endFrame(cmd, rec.imageIndex);
 
   cmd.end();
 }
 
-VulkanRenderer::SubmitInfo VulkanRenderer::submitRecordedFrame(VulkanFrame& frame, uint32_t imageIndex) {
+graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulkan::RecordingFrame& rec) {
+  VulkanFrame& frame = rec.ref();
+  uint32_t imageIndex = rec.imageIndex;
   vk::CommandBufferSubmitInfo cmdInfo;
   cmdInfo.commandBuffer = frame.commandBuffer();
 
@@ -252,6 +261,9 @@ VulkanRenderer::SubmitInfo VulkanRenderer::submitRecordedFrame(VulkanFrame& fram
   submitInfo.pSignalSemaphoreInfos = signalSemaphores;
 
   const uint64_t submitSerial = ++m_submitSerial;
+  if (m_textureManager) {
+    m_textureManager->setSafeRetireSerial(m_submitSerial);
+  }
   const uint64_t timelineValue = frame.nextTimelineValue();
 
 #if defined(VULKAN_HPP_NO_EXCEPTIONS)
@@ -272,7 +284,7 @@ VulkanRenderer::SubmitInfo VulkanRenderer::submitRecordedFrame(VulkanFrame& fram
 
   frame.advanceTimeline();
 
-  SubmitInfo info{};
+  graphics::vulkan::SubmitInfo info{};
   info.imageIndex = imageIndex;
   info.frameIndex = frame.frameIndex();
   info.serial = submitSerial;
@@ -292,37 +304,9 @@ void VulkanRenderer::logFrameCounters() {
   m_frameCounter++;
 }
 
-VulkanFrame& VulkanRenderer::NoRecording::frame(VulkanRenderer& /*renderer*/) const
-{
-  // #region agent log
-  agent_log("VulkanRenderer.cpp:277", "NoRecording::frame called - about to throw", "A");
-  // #endregion agent log
-  throw std::runtime_error("No recording frame available (flip() must be called before rendering)");
-}
-
-void VulkanRenderer::ActiveRecording::finishAndSubmit(VulkanRenderer& renderer)
-{
-  Assertion(m_recording.frame != nullptr, "ActiveRecording missing frame");
-
-  renderer.endFrame(*m_recording.frame, m_recording.imageIndex);
-  auto submit = renderer.submitRecordedFrame(*m_recording.frame, m_recording.imageIndex);
-  renderer.m_inFlightFrames.push_back(InFlightFrame{ m_recording.frame, submit });
-
-  // Log per-frame draw counters now that the frame is finalized
-  renderer.logFrameCounters();
-  renderer.m_frameModelDraws = 0;
-  renderer.m_framePrimDraws = 0;
-}
-
-VulkanFrame& VulkanRenderer::ActiveRecording::frame(VulkanRenderer& /*renderer*/) const
-{
-  return *m_recording.frame;
-}
 
 void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial)
 {
-  frame.wait_for_gpu();
-
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized");
   m_bufferManager->onFrameEnd();
 
@@ -333,101 +317,79 @@ void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completed
   frame.reset();
 }
 
-VulkanFrame& VulkanRenderer::WarmupFramePool::acquireFrame(VulkanRenderer& renderer)
+void VulkanRenderer::recycleOneInFlight()
 {
-  Assertion(!renderer.m_availableFrames.empty(), "WarmupFramePool has no available frames");
-  VulkanFrame* frame = renderer.m_availableFrames.front();
-  renderer.m_availableFrames.pop_front();
-  renderer.prepareFrameForReuse(*frame, 0);
-  transitionIfNeeded(renderer);
-  return *frame;
+  graphics::vulkan::InFlightFrame inflight = std::move(m_inFlightFrames.front());
+  m_inFlightFrames.pop_front();
+
+  VulkanFrame& f = inflight.ref();
+
+  // We recycle in FIFO order, so submission serials should complete monotonically.
+  f.wait_for_gpu();
+  m_completedSerial = std::max(m_completedSerial, inflight.submit.serial);
+  prepareFrameForReuse(f, m_completedSerial);
+
+  m_availableFrames.push_back(AvailableFrame{ &f, m_completedSerial });
 }
 
-void VulkanRenderer::WarmupFramePool::transitionIfNeeded(VulkanRenderer& renderer)
+VulkanRenderer::AvailableFrame VulkanRenderer::acquireAvailableFrame()
 {
-  if (renderer.m_availableFrames.empty()) {
-    renderer.m_framePool = std::make_unique<SteadyFramePool>();
+  while (m_availableFrames.empty()) {
+    recycleOneInFlight();
   }
+
+  AvailableFrame af = m_availableFrames.front();
+  m_availableFrames.pop_front();
+  return af;
 }
 
-VulkanFrame& VulkanRenderer::SteadyFramePool::acquireFrame(VulkanRenderer& renderer)
+graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 {
-  Assertion(!renderer.m_inFlightFrames.empty(), "SteadyFramePool has no in-flight frames");
-  auto inflight = renderer.m_inFlightFrames.front();
-  renderer.m_inFlightFrames.pop_front();
+  auto af = acquireAvailableFrame();
 
-  Assertion(inflight.frame != nullptr, "InFlightFrame missing frame");
-  renderer.prepareFrameForReuse(*inflight.frame, inflight.info.serial);
-  return *inflight.frame;
-}
-
-VulkanFrame& VulkanRenderer::recordingFrame()
-{
-  // #region agent log
-  const char* stateType = (dynamic_cast<NoRecording*>(m_recording.get()) != nullptr) ? "NoRecording" : "ActiveRecording";
-  std::stringstream ss;
-  ss << "stateType=" << stateType;
-  std::string dataStr = ss.str();
-  agent_log("VulkanRenderer.cpp:343", "recordingFrame called", "B", dataStr.c_str());
-  // #endregion agent log
-  return m_recording->frame(*this);
-}
-
-uint32_t VulkanRenderer::recordingImageIndex() const
-{
-  return m_recording->imageIndex();
-}
-
-void VulkanRenderer::flip()
-{
-  // #region agent log
-  const char* stateTypeBefore = (dynamic_cast<NoRecording*>(m_recording.get()) != nullptr) ? "NoRecording" : "ActiveRecording";
-  std::stringstream ss1;
-  ss1 << "stateBefore=" << stateTypeBefore;
-  agent_log("VulkanRenderer.cpp:353", "flip() entry", "C", ss1.str().c_str());
-  // #endregion agent log
-  
-  Assertion(m_recording != nullptr, "VulkanRenderer missing recording state");
-  Assertion(m_framePool != nullptr, "VulkanRenderer missing frame pool state");
-
-  m_recording->finishAndSubmit(*this);
-
-  VulkanFrame& frame = m_framePool->acquireFrame(*this);
-  uint32_t imageIndex = acquireImage(frame);
-  Assertion(imageIndex != std::numeric_limits<uint32_t>::max(), "flip() failed to acquire swapchain image");
-
-  beginFrame(frame, imageIndex);
-  m_recording = std::make_unique<ActiveRecording>(RecordingFrame{ &frame, imageIndex });
-  
-  // #region agent log
-  agent_log("VulkanRenderer.cpp:363", "flip() set ActiveRecording", "C");
-  // #endregion agent log
+  const uint32_t imageIndex = acquireImageOrThrow(*af.frame);
+  beginFrame(*af.frame, imageIndex);
 
   // Write descriptors for textures that became Resident via async completion.
   // Do this AFTER beginFrame so we write to the correct frame's descriptor set.
   const auto& newlyResident = m_textureManager->getNewlyResidentTextures();
-  if (!newlyResident.empty() && frame.modelDescriptorSet()) {
+  if (!newlyResident.empty() && af.frame->modelDescriptorSet()) {
     for (int handle : newlyResident) {
       auto& record = m_textureManager->allTextures()[handle];
       if (record.state == VulkanTextureManager::TextureState::Resident &&
           record.bindingState.arrayIndex != MODEL_OFFSET_ABSENT) {
-        writeTextureDescriptor(frame.modelDescriptorSet(), record.bindingState.arrayIndex, handle);
+        writeTextureDescriptor(af.frame->modelDescriptorSet(), record.bindingState.arrayIndex, handle);
       }
     }
     m_textureManager->clearNewlyResidentTextures();
   }
+
+  return graphics::vulkan::RecordingFrame{ *af.frame, imageIndex };
 }
 
-VulkanRenderingSession::RenderScope VulkanRenderer::ensureRenderingStarted(vk::CommandBuffer cmd) {
-  return m_renderingSession->beginRendering(cmd, recordingImageIndex());
-}
-
-void VulkanRenderer::beginDeferredLighting(vk::CommandBuffer cmd, bool clearNonColorBufs)
+graphics::vulkan::RecordingFrame VulkanRenderer::advanceFrame(graphics::vulkan::RecordingFrame prev)
 {
-  Assertion(cmd, "beginDeferredLighting called with null command buffer");
+  endFrame(prev);
+  auto submit = submitRecordedFrame(prev);
+
+  m_inFlightFrames.emplace_back(prev.ref(), submit);
+
+  logFrameCounters();
+  m_frameModelDraws = 0;
+  m_framePrimDraws = 0;
+
+  return beginRecording();
+}
+
+VulkanRenderingSession::RenderScope VulkanRenderer::ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec) {
+  return m_renderingSession->beginRendering(rec.cmd(), rec.imageIndex);
+}
+
+void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
+{
   m_renderingSession->beginDeferredPass(clearNonColorBufs);
   // Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
-  auto scope = m_renderingSession->beginRendering(cmd, recordingImageIndex());
+  auto scope = m_renderingSession->beginRendering(rec.cmd(), rec.imageIndex);
 }
 
 void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
@@ -440,37 +402,35 @@ void VulkanRenderer::setPendingRenderTargetSwapchain()
   m_renderingSession->requestSwapchainTarget();
 }
 
-void VulkanRenderer::deferredLightingBegin(VulkanFrame& frame, bool clearNonColorBufs)
+void VulkanRenderer::deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
 {
   Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
     "deferredLightingBegin called while deferred boundary state was not idle");
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "deferredLightingBegin called with null command buffer");
-
-  beginDeferredLighting(cmd, clearNonColorBufs);
+  
+  beginDeferredLighting(rec, clearNonColorBufs);
   m_deferredBoundaryState = DeferredBoundaryState::InGeometry;
 }
 
-void VulkanRenderer::deferredLightingEnd(VulkanFrame& frame)
+void VulkanRenderer::deferredLightingEnd(graphics::vulkan::RecordingFrame& rec)
 {
   Assertion(m_deferredBoundaryState == DeferredBoundaryState::InGeometry,
     "deferredLightingEnd called while not in geometry state");
-  vk::CommandBuffer cmd = frame.commandBuffer();
+  vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingEnd called with null command buffer");
 
   endDeferredGeometry(cmd);
   m_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
 }
 
-void VulkanRenderer::deferredLightingFinish(VulkanFrame& frame, const vk::Rect2D& restoreScissor)
+void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, const vk::Rect2D& restoreScissor)
 {
   Assertion(m_deferredBoundaryState == DeferredBoundaryState::AwaitFinish,
     "deferredLightingFinish called while not awaiting finish");
 
   bindDeferredGlobalDescriptors();
-  recordDeferredLighting(frame);
+  recordDeferredLighting(rec);
 
-  vk::CommandBuffer cmd = frame.commandBuffer();
+  vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingFinish called with null command buffer");
   cmd.setScissor(0, 1, &restoreScissor);
 
@@ -625,9 +585,6 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
   VulkanFrame& frame,
   vk::CommandBuffer cmd,
   const VulkanTextureManager::SamplerKey& samplerKey) {
-  (void)frame;
-  (void)cmd;
-
   Assertion(m_textureManager != nullptr, "getTextureDescriptor called before texture manager initialization");
   Assertion(bitmapHandle >= 0, "getTextureDescriptor called with invalid bitmapHandle %d", bitmapHandle);
 
@@ -635,7 +592,18 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
   Assertion(baseFrame >= 0, "Invalid bitmapHandle %d in getTextureDescriptor", bitmapHandle);
 
   auto info = m_textureManager->getTextureDescriptorInfo(baseFrame, samplerKey);
-  Assertion(info.imageView, "Texture %d not resident when descriptor was requested", bitmapHandle);
+
+  // Never flush uploads here: this may be called while dynamic rendering is active.
+  // If the texture is not resident yet, queue it and return a stable fallback descriptor.
+  if (!info.imageView) {
+    m_textureManager->queueTextureUpload(bitmapHandle, frame, cmd, m_frameCounter, samplerKey);
+
+    const int fallbackHandle = m_textureManager->getFallbackTextureHandle();
+    Assertion(fallbackHandle != -1, "Fallback texture handle must be initialized");
+    info = m_textureManager->getTextureDescriptorInfo(fallbackHandle, samplerKey);
+  }
+
+  Assertion(info.imageView, "Texture descriptor must have a valid imageView");
   return info;
 }
 
@@ -1124,13 +1092,13 @@ void VulkanRenderer::createDeferredLightingResources() {
   m_cylinderMesh.indexCount = static_cast<uint32_t>(cylIndices.size());
 }
 
-void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  vk::Buffer uniformBuffer = frame.uniformBuffer().buffer();
+void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& rec) {
+  vk::CommandBuffer cmd = rec.cmd();
+  vk::Buffer uniformBuffer = rec.ref().uniformBuffer().buffer();
 
   // Build lights from engine state
   std::vector<DeferredLight> lights = buildDeferredLights(
-    frame,
+    rec.ref(),
     uniformBuffer,
     gr_view_matrix,
     gr_projection_matrix,
@@ -1144,8 +1112,7 @@ void VulkanRenderer::recordDeferredLighting(VulkanFrame& frame) {
 
     // Activate swapchain rendering without depth (target set by endDeferredGeometry)
     // ensureRenderingStarted starts the render pass if not already active
-  auto renderScope = ensureRenderingStarted(cmd);
-  const auto& rt = renderScope.info;
+  auto renderScope = ensureRenderingStarted(rec);
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {

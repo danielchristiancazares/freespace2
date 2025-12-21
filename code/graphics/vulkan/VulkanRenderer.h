@@ -9,6 +9,7 @@
 #include "VulkanDescriptorLayouts.h"
 #include "VulkanDevice.h"
 #include "VulkanFrame.h"
+#include "VulkanFrameFlow.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanRenderTargets.h"
 #include "VulkanRenderingSession.h"
@@ -40,8 +41,11 @@ class VulkanRenderer {
 	explicit VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsOps);
 
 	bool initialize();
-	void flip();
 	void shutdown();
+
+	// New frame flow API - Phase 1
+	graphics::vulkan::RecordingFrame beginRecording();
+	graphics::vulkan::RecordingFrame advanceFrame(graphics::vulkan::RecordingFrame prev);
 
 	void setClearColor(int r, int g, int b);
 	int setCullMode(int cull);
@@ -50,9 +54,6 @@ class VulkanRenderer {
 	void requestClear();
 	void zbufferClear(int mode);
 
-	// Current recording frame access (valid during frame recording)
-	VulkanFrame& recordingFrame();
-	uint32_t recordingImageIndex() const;
 
 	// Helper methods for rendering
 	vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
@@ -80,7 +81,7 @@ class VulkanRenderer {
 
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
-	VulkanRenderingSession::RenderScope ensureRenderingStarted(vk::CommandBuffer cmd);
+	VulkanRenderingSession::RenderScope ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec); // Recording-only
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }
@@ -105,14 +106,14 @@ class VulkanRenderer {
 		// Deferred rendering hooks
 		enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish };
 
-		void beginDeferredLighting(vk::CommandBuffer cmd, bool clearNonColorBufs);
+		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
 		void endDeferredGeometry(vk::CommandBuffer cmd);
 		void bindDeferredGlobalDescriptors();
 		void setPendingRenderTargetSwapchain();
-		void recordDeferredLighting(VulkanFrame& frame);
-		void deferredLightingBegin(VulkanFrame& frame, bool clearNonColorBufs);
-		void deferredLightingEnd(VulkanFrame& frame);
-		void deferredLightingFinish(VulkanFrame& frame, const vk::Rect2D& restoreScissor);
+		void recordDeferredLighting(graphics::vulkan::RecordingFrame& rec);
+		void deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs);
+		void deferredLightingEnd(graphics::vulkan::RecordingFrame& rec);
+		void deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, const vk::Rect2D& restoreScissor);
 		uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
 		uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
 		ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
@@ -159,115 +160,62 @@ class VulkanRenderer {
 	void createDeferredLightingResources();
 
 	uint32_t acquireImage(VulkanFrame& frame);
-	void beginFrame(VulkanFrame& frame, uint32_t imageIndex);
-	void endFrame(VulkanFrame& frame, uint32_t imageIndex);
-	void logFrameCounters();
+	uint32_t acquireImageOrThrow(VulkanFrame& frame); // Throws on failure, no sentinels
+		void beginFrame(VulkanFrame& frame, uint32_t imageIndex);
+		void endFrame(graphics::vulkan::RecordingFrame& rec); // Recording-only
+		void logFrameCounters();
 
-	void immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder);
+		// Container-based frame management (replaces warmup/steady states)
+		struct AvailableFrame {
+			VulkanFrame* frame;
+			uint64_t completedSerial;
+		};
+		AvailableFrame acquireAvailableFrame(); // Non-recording: pulls from containers
+		void recycleOneInFlight(); // Consumes one in-flight frame, adds to available
+		graphics::vulkan::SubmitInfo submitRecordedFrame(graphics::vulkan::RecordingFrame& rec); // Recording-only
+
+		void immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder);
 
 	// Descriptor sync helpers
 	void writeVertexHeapDescriptor(VulkanFrame& frame, vk::Buffer vertexHeapBuffer);
 	void writeTextureDescriptor(vk::DescriptorSet set, uint32_t arrayIndex, int textureHandle);
 	void writeFallbackDescriptor(vk::DescriptorSet set, uint32_t arrayIndex);
 
-	struct SubmitInfo {
-		uint32_t imageIndex = 0;
-		uint32_t frameIndex = 0;
-		uint64_t serial = 0;
-		uint64_t timeline = 0;
-	};
-
-	struct InFlightFrame {
-		VulkanFrame* frame = nullptr;
-		SubmitInfo info{};
-	};
-
-	struct RecordingFrame {
-		VulkanFrame* frame = nullptr;
-		uint32_t imageIndex = 0;
-	};
-
-	class RecordingState {
-	  public:
-		virtual ~RecordingState() = default;
-		virtual void finishAndSubmit(VulkanRenderer& renderer) = 0;
-		virtual VulkanFrame& frame(VulkanRenderer& renderer) const = 0;
-		virtual uint32_t imageIndex() const = 0;
-	};
-
-	class NoRecording final : public RecordingState {
-	  public:
-		void finishAndSubmit(VulkanRenderer& /*renderer*/) override {}
-		VulkanFrame& frame(VulkanRenderer& /*renderer*/) const override;
-		uint32_t imageIndex() const override { return 0; }
-	};
-
-	class ActiveRecording final : public RecordingState {
-	  public:
-		explicit ActiveRecording(RecordingFrame recording) : m_recording(recording) {}
-		void finishAndSubmit(VulkanRenderer& renderer) override;
-		VulkanFrame& frame(VulkanRenderer& /*renderer*/) const override;
-		uint32_t imageIndex() const override { return m_recording.imageIndex; }
-
-	  private:
-		RecordingFrame m_recording{};
-	};
-
-	class FramePoolState {
-	  public:
-		virtual ~FramePoolState() = default;
-		virtual VulkanFrame& acquireFrame(VulkanRenderer& renderer) = 0;
-		virtual void transitionIfNeeded(VulkanRenderer& renderer) = 0;
-	};
-
-	class WarmupFramePool final : public FramePoolState {
-	  public:
-		VulkanFrame& acquireFrame(VulkanRenderer& renderer) override;
-		void transitionIfNeeded(VulkanRenderer& renderer) override;
-	};
-
-	class SteadyFramePool final : public FramePoolState {
-	  public:
-		VulkanFrame& acquireFrame(VulkanRenderer& renderer) override;
-		void transitionIfNeeded(VulkanRenderer& /*renderer*/) override {}
-	};
-
 	void prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial);
-	SubmitInfo submitRecordedFrame(VulkanFrame& frame, uint32_t imageIndex);
 
 	// Device layer - owns instance, surface, physical device, logical device, swapchain
 	std::unique_ptr<VulkanDevice> m_vulkanDevice;
 
-	// Render targets - owns depth buffer and G-buffer
-	std::unique_ptr<VulkanRenderTargets> m_renderTargets;
+		// Render targets - owns depth buffer and G-buffer
+		std::unique_ptr<VulkanRenderTargets> m_renderTargets;
 
-			// Rendering session - manages render pass state machine
-			std::unique_ptr<VulkanRenderingSession> m_renderingSession;
+		// Rendering session - manages render pass state machine
+		std::unique_ptr<VulkanRenderingSession> m_renderingSession;
 
 	std::unique_ptr<VulkanDescriptorLayouts> m_descriptorLayouts;
 	vk::DescriptorSet m_globalDescriptorSet{};
 
 	std::unique_ptr<VulkanShaderManager> m_shaderManager;
 	std::unique_ptr<VulkanPipelineManager> m_pipelineManager;
-	std::unique_ptr<VulkanBufferManager> m_bufferManager;
-	std::unique_ptr<VulkanTextureManager> m_textureManager;
+		std::unique_ptr<VulkanBufferManager> m_bufferManager;
+		std::unique_ptr<VulkanTextureManager> m_textureManager;
 
-	std::array<std::unique_ptr<VulkanFrame>, kFramesInFlight> m_frames;
-	std::deque<VulkanFrame*> m_availableFrames;
-	std::deque<InFlightFrame> m_inFlightFrames;
-	std::unique_ptr<RecordingState> m_recording;
-	std::unique_ptr<FramePoolState> m_framePool;
+		std::array<std::unique_ptr<VulkanFrame>, kFramesInFlight> m_frames;
+		// Frames ready for CPU reuse (already waited/reset); completedSerial is the latest known safe serial.
+		std::deque<AvailableFrame> m_availableFrames;
+		std::deque<graphics::vulkan::InFlightFrame> m_inFlightFrames;
 
 	vk::UniqueCommandPool m_uploadCommandPool;
 
 	vk::UniqueBuffer m_vertexBuffer;
-	vk::UniqueDeviceMemory m_vertexBufferMemory;
+		vk::UniqueDeviceMemory m_vertexBufferMemory;
 
-	// Per-frame draw counters
-	uint32_t m_frameModelDraws = 0;
-	uint32_t m_framePrimDraws = 0;
-	uint32_t m_frameCounter = 0;
-	uint64_t m_submitSerial = 0;
+		// Per-frame draw counters
+		uint32_t m_frameModelDraws = 0;
+		uint32_t m_framePrimDraws = 0;
+		uint32_t m_frameCounter = 0;
+		uint64_t m_submitSerial = 0;
+		uint64_t m_completedSerial = 0;
 
 	DeferredBoundaryState m_deferredBoundaryState = DeferredBoundaryState::Idle;
 
