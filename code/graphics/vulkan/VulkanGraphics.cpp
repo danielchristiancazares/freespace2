@@ -8,11 +8,10 @@
 #include "VulkanDebug.h"
 #include "VulkanClip.h"
 #include "VulkanFrameCaps.h"
+#include "VulkanFrameFlow.h"
+#include <optional>
 #include <array>
-#include <fstream>
-#include <chrono>
-#include <atomic>
-#include <sstream>
+#include <stdexcept>
 
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_vulkan.h"
@@ -25,7 +24,6 @@
 #include "mod_table/mod_table.h"
 #include "cmdline/cmdline.h"
 #include "globalincs/version.h"
-#include "VulkanRenderer.h"
 #include "lighting/lighting.h"
 
 extern transform_stack gr_model_matrix_stack;
@@ -35,38 +33,56 @@ extern matrix4 gr_projection_matrix;
 
 #define BMPMAN_INTERNAL
 #include "bmpman/bm_internal.h"
-#include <fstream>
-#include <chrono>
-#include <sstream>
 
 namespace graphics::vulkan {
 
 
 
 namespace {
-std::unique_ptr<VulkanRenderer> renderer_instance;
+
+struct Backend {
+  std::unique_ptr<VulkanRenderer> renderer;
+  std::optional<graphics::vulkan::RecordingFrame> recording;
+
+  explicit Backend(std::unique_ptr<os::GraphicsOperations>&& ops)
+    : renderer(std::make_unique<VulkanRenderer>(std::move(ops)))
+  {
+    if (!renderer->initialize()) {
+      throw std::runtime_error("VulkanRenderer::initialize failed");
+    }
+  }
+
+  void flip() {
+    if (!recording) {
+      recording = renderer->beginRecording();
+    } else {
+      recording = renderer->advanceFrame(std::move(*recording));
+    }
+  }
+};
+
+std::unique_ptr<Backend> g_backend;
 
 float g_requestedLineWidth = 1.0f;
 
 VulkanRenderer& currentRenderer()
 {
-  Assertion(renderer_instance != nullptr, "Vulkan renderer must be initialized before use");
-  return *renderer_instance;
+  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
+  return *g_backend->renderer;
 }
 
 VulkanFrame& currentFrame()
 {
-  return currentRenderer().recordingFrame();
+  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
+  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
+  return g_backend->recording->ref();
 }
 
 FrameCtx currentFrameCtx()
 {
-  auto& renderer = currentRenderer();
-  auto& frame = currentFrame();
-  vk::CommandBuffer cmd = frame.commandBuffer();
-  Assertion(cmd, "Frame has no valid command buffer");
-
-  return FrameCtx{ renderer, frame, cmd };
+  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
+  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
+  return FrameCtx{ *g_backend->renderer, *g_backend->recording };
 }
 
 float clampLineWidth(const VkPhysicalDeviceLimits& limits, float requestedWidth)
@@ -228,7 +244,7 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
     {
       auto& renderer = currentRenderer();
 
-  VulkanFrame& frame = renderer.recordingFrame();
+  VulkanFrame& frame = currentFrame();
 
   // Reset per-frame uniform bindings (optional will be empty at frame start)
   frame.resetPerFrameBindings();
@@ -392,8 +408,7 @@ void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
   Assertion(light_deferred_enabled(), "Deferred lighting begin called while deferred lighting is disabled");
 
   auto& renderer = currentRenderer();
-  VulkanFrame& frame = renderer.recordingFrame();
-  renderer.deferredLightingBegin(frame, clearNonColorBufs);
+  renderer.deferredLightingBegin(*g_backend->recording, clearNonColorBufs);
 }
 
 void gr_vulkan_deferred_lighting_msaa()
@@ -404,16 +419,14 @@ void gr_vulkan_deferred_lighting_msaa()
 void gr_vulkan_deferred_lighting_end()
 {
   auto& renderer = currentRenderer();
-  VulkanFrame& frame = renderer.recordingFrame();
-  renderer.deferredLightingEnd(frame);
+  renderer.deferredLightingEnd(*g_backend->recording);
 }
 
 void gr_vulkan_deferred_lighting_finish()
 {
   auto& renderer = currentRenderer();
   vk::Rect2D scissor = createClipScissor();
-  VulkanFrame& frame = renderer.recordingFrame();
-  renderer.deferredLightingFinish(frame, scissor);
+  renderer.deferredLightingFinish(*g_backend->recording, scissor);
 }
 
 void stub_set_line_width(float width)
@@ -486,7 +499,7 @@ struct ModelDrawContext {
 
 static void issueModelDraw(const ModelDrawContext& ctx)
 {
-  auto cmd = ctx.bound.ctx.cmd;
+  auto cmd = ctx.bound.ctx.cmd();
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
 
   // Set model descriptor set + dynamic UBO offset
@@ -546,7 +559,7 @@ void gr_vulkan_render_model(model_material* material_info,
   size_t texi)
 {
   // Preconditions - frame injected by setup_frame, parameters must be valid
-  Assertion(renderer_instance != nullptr, "render_model called without renderer");
+  Assertion(g_backend->renderer != nullptr, "render_model called without renderer");
   Assertion(material_info != nullptr, "render_model called with null material_info");
   Assertion(vert_source != nullptr, "render_model called with null vert_source");
   Assertion(bufferp != nullptr, "render_model called with null bufferp");
@@ -554,12 +567,12 @@ void gr_vulkan_render_model(model_material* material_info,
             texi, bufferp->tex_buf.size());
 
   auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd;
+  auto cmd = ctxBase.cmd();
   auto bound = requireModelBound(ctxBase);
   ctxBase.renderer.incrementModelDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
   const auto& rt = renderScope.info;
 
   // Get shader modules for model shader
@@ -733,18 +746,18 @@ void gr_vulkan_render_primitives(material* material_info,
   size_t buffer_offset)
 {
   // Preconditions - frame injected by setup_frame, parameters must be valid
-  Assertion(renderer_instance != nullptr, "render_primitives called without renderer");
+  Assertion(g_backend->renderer != nullptr, "render_primitives called without renderer");
   Assertion(material_info != nullptr, "render_primitives called with null material_info");
   Assertion(layout != nullptr, "render_primitives called with null vertex layout");
   Assertion(n_verts > 0, "render_primitives called with zero vertices");
 
   auto ctxBase = currentFrameCtx();
-  auto& frame = ctxBase.frame;
-  vk::CommandBuffer cmd = ctxBase.cmd;
+  auto& frame = ctxBase.frame();
+  vk::CommandBuffer cmd = ctxBase.cmd();
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
   const auto& rt = renderScope.info;
 
   // Use the shader type requested by the material
@@ -1062,26 +1075,29 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   int n_verts,
   gr_buffer_handle buffer_handle)
 {
-  Assertion(renderer_instance != nullptr, "render_nanovg called without renderer");
+  Assertion(g_backend->renderer != nullptr, "render_nanovg called without renderer");
   Assertion(material_info != nullptr, "render_nanovg called with null material_info");
   Assertion(layout != nullptr, "render_nanovg called with null vertex layout");
   Assertion(n_verts > 0, "render_nanovg called with zero vertices");
   Assertion(buffer_handle.isValid(), "render_nanovg called with invalid vertex buffer handle");
 
   auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd;
+  auto cmd = ctxBase.cmd();
   auto nv = requireNanoVGBound(ctxBase);
   ctxBase.renderer.incrementPrimDraw();
 
   // NanoVG requires stencil. If we're currently rendering to a swapchain-without-depth target
   // or a non-swapchain target (deferred G-buffer), switch back to the swapchain target with depth/stencil.
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
-  auto rt = renderScope.info;
+  std::optional<VulkanRenderingSession::RenderScope> renderScope;
+  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+  auto rt = renderScope->info;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.depthFormat == vk::Format::eUndefined || rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
+    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
+    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
-    rt = renderScope.info;
+    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+    rt = renderScope->info;
   }
 
   Assertion(rt.depthFormat != vk::Format::eUndefined, "render_nanovg requires a depth/stencil attachment");
@@ -1138,7 +1154,7 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
   const int textureHandle = material_info->get_texture_map(TM_BASE_TYPE);
   vk::DescriptorImageInfo textureInfo = material_info->is_textured()
-    ? ctxBase.renderer.getTextureDescriptor(textureHandle, ctxBase.frame, cmd, samplerKey)
+    ? ctxBase.renderer.getTextureDescriptor(textureHandle, ctxBase.frame(), cmd, samplerKey)
     : ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
 
   std::array<vk::WriteDescriptorSet, 2> writes{};
@@ -1194,18 +1210,18 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   gr_buffer_handle buffer_handle)
 {
   // Preconditions
-  Assertion(renderer_instance != nullptr, "render_primitives_batched called without renderer");
+  Assertion(g_backend->renderer != nullptr, "render_primitives_batched called without renderer");
   Assertion(material_info != nullptr, "render_primitives_batched called with null material_info");
   Assertion(layout != nullptr, "render_primitives_batched called with null vertex layout");
   Assertion(n_verts > 0, "render_primitives_batched called with zero vertices");
 
   auto ctxBase = currentFrameCtx();
-  auto& frame = ctxBase.frame;
-  vk::CommandBuffer cmd = ctxBase.cmd;
+  auto& frame = ctxBase.frame();
+  vk::CommandBuffer cmd = ctxBase.cmd();
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
+  auto renderScope = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
   const auto& rt = renderScope.info;
 
   // Force batched bitmap shader
@@ -1375,7 +1391,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   gr_buffer_handle index_buffer)
 {
   // Preconditions
-  Assertion(renderer_instance != nullptr, "render_rocket_primitives called without renderer");
+  Assertion(g_backend->renderer != nullptr, "render_rocket_primitives called without renderer");
   Assertion(material_info != nullptr, "render_rocket_primitives called with null material_info");
   Assertion(layout != nullptr, "render_rocket_primitives called with null vertex layout");
   Assertion(n_indices > 0, "render_rocket_primitives called with zero indices");
@@ -1388,18 +1404,21 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   gr_set_2d_matrix();
 
   auto ctxBase = currentFrameCtx();
-  auto& frame = ctxBase.frame;
-  vk::CommandBuffer cmd = ctxBase.cmd;
+  auto& frame = ctxBase.frame();
+  vk::CommandBuffer cmd = ctxBase.cmd();
   ctxBase.renderer.incrementPrimDraw();
 
   // Ensure we're rendering to swapchain (menus/UI are swapchain-targeted).
-  auto renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
-  auto rt = renderScope.info;
+  std::optional<VulkanRenderingSession::RenderScope> renderScope;
+  renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+  auto rt = renderScope->info;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
+    // End the current pass before switching targets; boundaries are invalid while a RenderScope is alive.
+    renderScope.reset();
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderScope = ctxBase.renderer.ensureRenderingStarted(cmd);
-    rt = renderScope.info;
+    renderScope.emplace(ctxBase.renderer.ensureRenderingStarted(ctxBase.recording));
+    rt = renderScope->info;
   }
 
   ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_ROCKET_UI);
@@ -1530,19 +1549,12 @@ bool gr_vulkan_get_property(gr_property p, void* dest)
 
 void gr_vulkan_push_debug_group(const char* name)
 {
-  // #region agent log
-  std::ofstream logfile("c:\\Users\\danie\\Documents\\freespace2\\.cursor\\debug.log", std::ios::app);
-  if (logfile.is_open()) {
-    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch()).count();
-    logfile << R"({"sessionId":"debug-session","runId":"post-fix","hypothesisId":"D","location":"VulkanGraphics.cpp:1530","message":"gr_vulkan_push_debug_group entry","data":"name=)" << (name ? name : "null") << R"("})" << "\n";
-    logfile.close();
-  }
-  // #endregion agent log
-  
   Assertion(name != nullptr, "gr_vulkan_push_debug_group called with null name");
+  if (!g_backend || !g_backend->recording.has_value()) {
+    return;  // No-op if not recording yet
+  }
   auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd;
+  auto cmd = ctxBase.cmd();
 
   vk::DebugUtilsLabelEXT label{};
   label.pLabelName = name;
@@ -1557,8 +1569,11 @@ void gr_vulkan_push_debug_group(const char* name)
 
 void gr_vulkan_pop_debug_group()
 {
+  if (!g_backend || !g_backend->recording.has_value()) {
+    return;  // No-op if not recording yet
+  }
   auto ctxBase = currentFrameCtx();
-  ctxBase.cmd.endDebugUtilsLabelEXT();
+  ctxBase.cmd().endDebugUtilsLabelEXT();
 }
 
 int stub_create_query_object() { return -1; }
@@ -1583,6 +1598,12 @@ bool stub_openxr_acquire_swapchain_buffers() { return false; }
 
 bool stub_openxr_flip() { return false; }
 
+void gr_vulkan_flip()
+{
+  Assertion(g_backend != nullptr, "flip() called without backend");
+  g_backend->flip();
+}
+
 } // namespace (anonymous)
 
 void init_function_pointers()
@@ -1591,9 +1612,7 @@ void init_function_pointers()
   gr_stub_init_function_pointers();
 
   // Core frame management
-  gr_screen.gf_flip = []() {
-    currentRenderer().flip();
-  };
+  gr_screen.gf_flip = gr_vulkan_flip;
   gr_screen.gf_setup_frame = gr_vulkan_setup_frame;
   gr_screen.gf_clear = []() {
     currentRenderer().requestClear();
@@ -1684,8 +1703,10 @@ void initialize_function_pointers() {
 
 bool initialize(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 {
-  renderer_instance = std::make_unique<VulkanRenderer>(std::move(graphicsOps));
-  if (!renderer_instance->initialize()) {
+  try {
+    g_backend = std::make_unique<Backend>(std::move(graphicsOps));
+  } catch (const std::runtime_error& e) {
+    mprintf(("Vulkan initialization failed: %s\n", e.what()));
     return false;
   }
 
@@ -1696,13 +1717,15 @@ bool initialize(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 
 VulkanRenderer* getRendererInstance()
 {
-  return renderer_instance.get();
+  return g_backend ? g_backend->renderer.get() : nullptr;
 }
 
 void cleanup()
 {
-  renderer_instance->shutdown();
-  renderer_instance = nullptr;
+  if (g_backend) {
+    g_backend->renderer->shutdown();
+    g_backend.reset();
+  }
 }
 
 } // namespace graphics::vulkan
