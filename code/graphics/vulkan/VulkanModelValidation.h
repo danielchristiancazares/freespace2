@@ -8,7 +8,7 @@ namespace vulkan {
 
 // Returns true if all descriptor-indexing features required by the Vulkan model path are supported.
 // Required: shaderSampledImageArrayNonUniformIndexing, runtimeDescriptorArray,
-// descriptorBindingPartiallyBound.
+// (descriptorBindingPartiallyBound is no longer required; the bindless array is fully written each frame).
 bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceDescriptorIndexingFeatures& features);
 
 // Overload for Vulkan 1.2 features struct (used during device selection).
