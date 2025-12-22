@@ -47,20 +47,22 @@ class VulkanBufferManager {
 	void setSafeRetireSerial(uint64_t serial) { m_safeRetireSerial = serial; }
 	void collect(uint64_t completedSerial) { m_deferredReleases.collect(completedSerial); }
 
-  private:
-	vk::Device m_device;
-	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
-	vk::Queue m_transferQueue;
-	uint32_t m_transferQueueIndex;
+	private:
+		vk::Device m_device;
+		vk::PhysicalDeviceMemoryProperties m_memoryProperties;
+		vk::Queue m_transferQueue;
+		uint32_t m_transferQueueIndex;
+		vk::UniqueCommandPool m_transferCommandPool;
 
-	std::vector<VulkanBuffer> m_buffers;
-	DeferredReleaseQueue m_deferredReleases;
-	uint64_t m_safeRetireSerial = 0;
+		std::vector<VulkanBuffer> m_buffers;
+		DeferredReleaseQueue m_deferredReleases;
+		uint64_t m_safeRetireSerial = 0;
 
-	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
-	vk::BufferUsageFlags getVkUsageFlags(BufferType type) const;
-	vk::MemoryPropertyFlags getMemoryProperties(BufferUsageHint usage) const;
-};
+		uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
+		vk::BufferUsageFlags getVkUsageFlags(BufferType type) const;
+		vk::MemoryPropertyFlags getMemoryProperties(BufferUsageHint usage) const;
+		void uploadToDeviceLocal(const VulkanBuffer& buffer, vk::DeviceSize dstOffset, vk::DeviceSize size, const void* data);
+	};
 
 } // namespace vulkan
 } // namespace graphics

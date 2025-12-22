@@ -75,14 +75,16 @@ validation-safety, and "foot-gun" APIs.
 - Removed `MODEL_OFFSET_ABSENT`; `ModelPushConstants` now includes `vertexAttribMask` and shaders only consume offsets when the
   corresponding bit is present.
 
+### Static buffers are device-local (staging upload implemented)
+
+- `BufferUsageHint::Static` allocates device-local memory; updates use a staging upload path when buffers are not mapped
+  (`code/graphics/vulkan/VulkanBufferManager.cpp`).
+- `updateBufferData(..., nullptr)` is treated as allocation-only (persistent mapping setup).
+
 ## Medium
 
 No remaining medium items.
 
 ## Low
 
-### Unfinished / empty branches and TODOs
-
-- Static buffers are host-visible with TODO for staging/device-local (`code/graphics/vulkan/VulkanBufferManager.cpp`).
-- Deferred shader pipeline caching is TODO (`code/graphics/vulkan/VulkanRenderer.cpp`).
-- Empty `else {}` in deferred lights (`code/graphics/vulkan/VulkanDeferredLights.cpp`).
+No remaining low items.

@@ -1249,11 +1249,14 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
   }
 
   // Get pipeline and layout for deferred shader
-  // TODO: These should be cached, for now we create them on demand
+  // Pipelines are cached by VulkanPipelineManager; we still build the key per frame since the render target contract can vary.
   ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_DEFERRED_LIGHTING);
 
-  vertex_layout deferredLayout{};
-  deferredLayout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);  // Position only for volume meshes
+  static const vertex_layout deferredLayout = []() {
+    vertex_layout layout{};
+    layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0); // Position only for volume meshes
+    return layout;
+  }();
 
   // Create pipeline key for deferred lighting
   const auto& rt = render.targetInfo;

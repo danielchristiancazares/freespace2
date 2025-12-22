@@ -142,6 +142,7 @@ Introduce `RenderCtx` (proves rendering is active):
 3) `VulkanFrame::reset()` handles both exceptions-enabled and `VULKAN_HPP_NO_EXCEPTIONS` builds.
 4) Removed dead `VulkanShaderReflection.cpp` TU (it duplicated the header and provided no definitions).
 5) Removed `MODEL_OFFSET_ABSENT` sentinel; model vertex attribute presence is explicit via a `vertexAttribMask` push constant.
+6) `BufferUsageHint::Static` buffers are device-local; device-local updates are staged via a dedicated transfer command pool.
 
 ---
 
