@@ -108,7 +108,8 @@ Responsible for:
 - Image layout transitions (swapchain, depth, G-buffer) via `pipelineBarrier2`
 - Target switching:
   - `requestSwapchainTarget()` — swapchain + depth
-  - `beginDeferredPass()` — select G-buffer target
+  - `requestGBufferEmissiveTarget()` — G-buffer emissive-only (pre-deferred scene copy)
+  - `beginDeferredPass(clearNonColorBufs, preserveEmissive)` — select G-buffer target + clear policy (emissive may be preserved)
   - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
 - Lazy render pass begin via `ensureRendering(cmd, imageIndex)`. The session owns the active pass and ends it automatically at frame/target boundaries.
 - Dynamic state application (`applyDynamicState()`) is performed when a pass begins after selecting the target.
@@ -134,6 +135,7 @@ Packages everything for one frame in the ring:
 Owns:
 - Depth image, depth attachment view, depth sample view (for shader reads)
 - G-buffer images (`kGBufferCount = 5`)
+- Scene color snapshot images (one per swapchain image) for OpenGL-parity deferred begin
 - Resize logic tied to swapchain recreation
 
 ### Resource Managers

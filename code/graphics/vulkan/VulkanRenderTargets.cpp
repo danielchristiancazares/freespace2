@@ -49,6 +49,7 @@ VulkanRenderTargets::VulkanRenderTargets(VulkanDevice& device)
 void VulkanRenderTargets::create(vk::Extent2D extent) {
   createDepthResources(extent);
   createGBufferResources(extent);
+  createSceneColorResources(extent);
 }
 
 void VulkanRenderTargets::resize(vk::Extent2D newExtent) {
@@ -187,6 +188,81 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
   samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
   samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
   m_gbufferSampler = m_device.device().createSamplerUnique(samplerInfo);
+}
+
+void VulkanRenderTargets::createSceneColorResources(vk::Extent2D extent)
+{
+  const uint32_t imageCount = m_device.swapchainImageCount();
+  m_sceneColorImages.clear();
+  m_sceneColorMemories.clear();
+  m_sceneColorViews.clear();
+  m_sceneColorLayouts.clear();
+
+  m_sceneColorImages.reserve(imageCount);
+  m_sceneColorMemories.reserve(imageCount);
+  m_sceneColorViews.reserve(imageCount);
+  m_sceneColorLayouts.reserve(imageCount);
+
+  const vk::Format format = m_device.swapchainFormat();
+
+  // Captured scene color is sampled in a fullscreen copy shader, so ensure the format supports sampling.
+  {
+    const vk::FormatProperties props = m_device.physicalDevice().getFormatProperties(format);
+    const bool sampledOk = (props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImage) != vk::FormatFeatureFlags{};
+    Assertion(sampledOk,
+              "Swapchain format %u does not support sampled image usage (optimalTilingFeatures=0x%x)",
+              static_cast<uint32_t>(format),
+              static_cast<uint32_t>(props.optimalTilingFeatures));
+  }
+
+  vk::ImageCreateInfo imageInfo{};
+  imageInfo.imageType = vk::ImageType::e2D;
+  imageInfo.format = format;
+  imageInfo.extent = vk::Extent3D(extent.width, extent.height, 1);
+  imageInfo.mipLevels = 1;
+  imageInfo.arrayLayers = 1;
+  imageInfo.samples = vk::SampleCountFlagBits::e1;
+  imageInfo.tiling = vk::ImageTiling::eOptimal;
+  imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+  imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+  for (uint32_t i = 0; i < imageCount; ++i) {
+    auto image = m_device.device().createImageUnique(imageInfo);
+
+    vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(image.get());
+    vk::MemoryAllocateInfo allocInfo{};
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex = m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    auto memory = m_device.device().allocateMemoryUnique(allocInfo);
+    m_device.device().bindImageMemory(image.get(), memory.get(), 0);
+
+    vk::ImageViewCreateInfo viewInfo{};
+    viewInfo.image = image.get();
+    viewInfo.viewType = vk::ImageViewType::e2D;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    auto view = m_device.device().createImageViewUnique(viewInfo);
+
+    m_sceneColorImages.push_back(std::move(image));
+    m_sceneColorMemories.push_back(std::move(memory));
+    m_sceneColorViews.push_back(std::move(view));
+    m_sceneColorLayouts.push_back(vk::ImageLayout::eUndefined);
+  }
+
+  if (!m_sceneColorSampler) {
+    vk::SamplerCreateInfo samplerInfo{};
+    samplerInfo.magFilter = vk::Filter::eNearest;
+    samplerInfo.minFilter = vk::Filter::eNearest;
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+    m_sceneColorSampler = m_device.device().createSamplerUnique(samplerInfo);
+  }
 }
 
 } // namespace vulkan
