@@ -138,9 +138,9 @@ Introduce `RenderCtx` (proves rendering is active):
 ## 6) Cleanups (DONE / LOW)
 
 1) Hard-coded debug file IO removed from Vulkan hot paths.
-2) Validation callback logs via `vkprintf`.
+2) Validation callback logs include message id/name and object/label context, with duplicate suppression (via `vkprintf`).
 3) `VulkanFrame::reset()` handles both exceptions-enabled and `VULKAN_HPP_NO_EXCEPTIONS` builds.
-4) `VulkanShaderReflection.cpp` remains (low priority).
+4) Removed dead `VulkanShaderReflection.cpp` TU (it duplicated the header and provided no definitions).
 
 ---
 

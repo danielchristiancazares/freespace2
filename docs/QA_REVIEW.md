@@ -39,6 +39,15 @@ validation-safety, and "foot-gun" APIs.
 
 - Hard-coded file IO blocks were removed from hot paths.
 
+### Validation callback logging is actionable
+
+- `debugReportCallback()` logs include severity/type, message id/name, and object/label context, with duplicate suppression to reduce spam
+  (`code/graphics/vulkan/VulkanDevice.cpp`).
+
+### Dead shader reflection TU removed
+
+- Removed `code/graphics/vulkan/VulkanShaderReflection.cpp` (it duplicated the header and provided no definitions).
+
 ### Texture upload state machine simplified
 
 - Unused `Uploading` state and `markUploadsCompleted()` path removed.
@@ -63,13 +72,7 @@ validation-safety, and "foot-gun" APIs.
 
 ## Medium
 
-### Validation callback logging is basic
-
-`debugReportCallback()` logs messages via `vkprintf` (`code/graphics/vulkan/VulkanDevice.cpp`).
-
-### `VulkanShaderReflection.cpp` is a header duplicate / dead TU
-
-`code/graphics/vulkan/VulkanShaderReflection.cpp` is effectively a copy of the header and provides no definitions.
+No remaining medium items.
 
 ## Low
 

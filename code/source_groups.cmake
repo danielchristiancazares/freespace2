@@ -605,7 +605,6 @@ if (FSO_BUILD_WITH_VULKAN)
 				graphics/vulkan/VulkanRenderingSession.h
 		graphics/vulkan/VulkanTextureManager.cpp
 		graphics/vulkan/VulkanTextureManager.h
-		graphics/vulkan/VulkanShaderReflection.cpp
 		graphics/vulkan/VulkanShaderReflection.h
 	)
 endif()
