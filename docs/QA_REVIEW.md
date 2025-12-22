@@ -33,6 +33,7 @@ validation-safety, and "foot-gun" APIs.
 - `prepareFrameForReuse()` executes exactly once per recycled frame.
 - A monotonic `m_completedSerial` is tracked from FIFO fence waits and passed into manager `collect()` calls.
 - Resource retirement during `beginFrame()` uses the upcoming submit serial (prevents premature destruction).
+- Swapchain present transition uses a sync2-compatible "NONE" destination stage rather than `BottomOfPipe`.
 
 ### Debug/telemetry file IO removed
 
@@ -70,16 +71,7 @@ validation-safety, and "foot-gun" APIs.
 
 `code/graphics/vulkan/VulkanShaderReflection.cpp` is effectively a copy of the header and provides no definitions.
 
-### Swapchain layout transition uses BottomOfPipe as destination stage (sync2 smell)
-
-`transitionSwapchainToPresent()` uses `dstStageMask = eBottomOfPipe` (`code/graphics/vulkan/VulkanRenderingSession.cpp`).
-
 ## Low
-
-### `VulkanFrame::reset()` overload handling is incomplete
-
-`VulkanFrame::reset()` attempts to handle "void-return vs vk::Result-return" but only defines the `true_type` path
-(`code/graphics/vulkan/VulkanFrame.cpp`). If `resetCommandPool()` returns `vk::Result`, this will not compile.
 
 ### Unfinished / empty branches and TODOs
 

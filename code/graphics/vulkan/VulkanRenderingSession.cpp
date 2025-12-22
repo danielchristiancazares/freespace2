@@ -44,7 +44,9 @@ StageAccess stageAccessForLayout(vk::ImageLayout layout)
     out.accessMask = vk::AccessFlagBits2::eShaderRead;
     break;
   case vk::ImageLayout::ePresentSrcKHR:
-    out.stageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+    // "Present" is external to the pipeline. For sync2 barriers that transition to/from present,
+    // the destination stage/access should typically be NONE/0.
+    out.stageMask = {};
     out.accessMask = {};
     break;
   default:
@@ -366,7 +368,8 @@ void VulkanRenderingSession::transitionSwapchainToPresent(vk::CommandBuffer cmd,
   vk::ImageMemoryBarrier2 toPresent{};
   toPresent.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
   toPresent.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-  toPresent.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+  // Present is external to the pipeline; this is a release barrier.
+  toPresent.dstStageMask = {};
   toPresent.dstAccessMask = {};
   toPresent.oldLayout = m_swapchainLayouts[imageIndex];
   toPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;

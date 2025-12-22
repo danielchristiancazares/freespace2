@@ -139,7 +139,7 @@ Track which bindless slots changed since last frame and write only dirty slots i
 
 1) Hard-coded debug file IO removed from Vulkan hot paths.
 2) Validation callback logs via `vkprintf`.
-3) `VulkanFrame::reset()` compiles in current configuration.
+3) `VulkanFrame::reset()` handles both exceptions-enabled and `VULKAN_HPP_NO_EXCEPTIONS` builds.
 4) `VulkanShaderReflection.cpp` remains (low priority).
 
 ---
