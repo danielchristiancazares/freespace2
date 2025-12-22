@@ -18,10 +18,15 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 	          "Vulkan model rendering not supported on this device.",
 	          limits.maxDescriptorSetSampledImages, kMaxBindlessTextures);
 
-	// Validate storage buffer limits - we only bind 1 storage buffer per set at binding 0
-	Assertion(limits.maxDescriptorSetStorageBuffers >= 1,
-	          "Device maxDescriptorSetStorageBuffers (%u) < required 1",
-	          limits.maxDescriptorSetStorageBuffers);
+		// Model rendering uses:
+		// - binding 0: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER (vertex heap)
+		// - binding 3: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC (batched transform buffer)
+		Assertion(limits.maxDescriptorSetStorageBuffers >= 1,
+		          "Device maxDescriptorSetStorageBuffers (%u) < required 1",
+		          limits.maxDescriptorSetStorageBuffers);
+		Assertion(limits.maxDescriptorSetStorageBuffersDynamic >= 1,
+		          "Device maxDescriptorSetStorageBuffersDynamic (%u) < required 1",
+		          limits.maxDescriptorSetStorageBuffersDynamic);
 }
 
 	VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(device)
@@ -97,7 +102,7 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 
 void VulkanDescriptorLayouts::createModelLayouts()
 {
-	std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+		std::array<vk::DescriptorSetLayoutBinding, 4> bindings{};
 
 	// Binding 0: Storage buffer (vertex heap)
 	bindings[0].binding = 0;
@@ -111,18 +116,22 @@ void VulkanDescriptorLayouts::createModelLayouts()
 	bindings[1].descriptorCount = kMaxBindlessTextures;
 	bindings[1].stageFlags = vk::ShaderStageFlagBits::eFragment;
 
-	// Binding 2: ModelData dynamic UBO
-	bindings[2].binding = 2;
-	bindings[2].descriptorType = vk::DescriptorType::eUniformBufferDynamic;
-	bindings[2].descriptorCount = 1;
-	bindings[2].stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
+		// Binding 2: ModelData dynamic UBO
+		bindings[2].binding = 2;
+		bindings[2].descriptorType = vk::DescriptorType::eUniformBufferDynamic;
+		bindings[2].descriptorCount = 1;
+		bindings[2].stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
 
-	// Binding flags: none. The model bindless descriptor array is fully written each frame
-	// (fallback-filled), so we do not rely on partially-bound descriptors.
-	std::array<vk::DescriptorBindingFlags, 3> bindingFlags{};
-	bindingFlags[0] = {};
-	bindingFlags[1] = {};
-	bindingFlags[2] = {};
+		// Binding 3: Batched transforms (dynamic SSBO; offset recorded per draw)
+		bindings[3].binding = 3;
+		bindings[3].descriptorType = vk::DescriptorType::eStorageBufferDynamic;
+		bindings[3].descriptorCount = 1;
+		bindings[3].stageFlags = vk::ShaderStageFlagBits::eVertex;
+
+		// Binding flags: none. The model bindless descriptor array is fully written each frame
+		// (fallback-filled), so we do not rely on partially-bound descriptors.
+		std::array<vk::DescriptorBindingFlags, 4> bindingFlags{};
+		bindingFlags.fill({});
 
 	vk::DescriptorSetLayoutBindingFlagsCreateInfo flagsInfo;
 	flagsInfo.bindingCount = static_cast<uint32_t>(bindingFlags.size());
@@ -156,14 +165,16 @@ void VulkanDescriptorLayouts::createModelLayouts()
 
 	m_modelPipelineLayout = m_device.createPipelineLayoutUnique(pipelineLayoutInfo);
 
-	// Descriptor pool - sizes derived from kFramesInFlight (one set per frame)
-	std::array<vk::DescriptorPoolSize, 3> poolSizes{};
-	poolSizes[0].type = vk::DescriptorType::eStorageBuffer;
-	poolSizes[0].descriptorCount = kFramesInFlight; // 1 SSBO per set (vertex heap)
-	poolSizes[1].type = vk::DescriptorType::eCombinedImageSampler;
-	poolSizes[1].descriptorCount = kFramesInFlight * kMaxBindlessTextures;
-	poolSizes[2].type = vk::DescriptorType::eUniformBufferDynamic;
-	poolSizes[2].descriptorCount = kFramesInFlight; // 1 dynamic UBO per set
+		// Descriptor pool - sizes derived from kFramesInFlight (one set per frame)
+		std::array<vk::DescriptorPoolSize, 4> poolSizes{};
+		poolSizes[0].type = vk::DescriptorType::eStorageBuffer;
+		poolSizes[0].descriptorCount = kFramesInFlight; // 1 SSBO per set (vertex heap)
+		poolSizes[1].type = vk::DescriptorType::eStorageBufferDynamic;
+		poolSizes[1].descriptorCount = kFramesInFlight; // 1 dynamic SSBO per set (transform buffer)
+		poolSizes[2].type = vk::DescriptorType::eCombinedImageSampler;
+		poolSizes[2].descriptorCount = kFramesInFlight * kMaxBindlessTextures;
+		poolSizes[3].type = vk::DescriptorType::eUniformBufferDynamic;
+		poolSizes[3].descriptorCount = kFramesInFlight; // 1 dynamic UBO per set
 
 	vk::DescriptorPoolCreateInfo poolInfo;
 	// eFreeDescriptorSet not strictly needed for fixed ring, but harmless

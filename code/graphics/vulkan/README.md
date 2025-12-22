@@ -10,6 +10,9 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanRenderer.*` | Frame orchestration, submission, per-frame sync |
 | `VulkanRenderingSession.*` | Render pass state machine, layout transitions, dynamic state |
 | `VulkanFrame.*` | Per-frame resources: command buffer, fences, semaphores, ring buffers |
+| `VulkanFrameCaps.h` | Capability tokens (`FrameCtx`, `RenderCtx`) |
+| `VulkanPhaseContexts.h` | Typestate tokens for deferred lighting |
+| `FrameLifecycleTracker.h` | Debug validation for recording state |
 | `VulkanGraphics.*` | Engine glue: `gr_vulkan_*` functions, `g_currentFrame` injection |
 | `VulkanBufferManager.*` | Buffer creation, updates, deferred deletion |
 | `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache |
@@ -31,6 +34,24 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 ## Constants
 
 - `kFramesInFlight` in `VulkanConstants.h` defines the frame-ring size and any per-frame tracking. Avoid duplicating a second frames-in-flight constant elsewhere.
+
+## Design Patterns in Practice
+
+This backend adheres to the [Type-Driven Design Philosophy](../../../docs/DESIGN_PHILOSOPHY.md).
+
+### Capability Tokens & Typestates
+- **`FrameCtx`**: Proof of recording state.
+- **`RenderCtx`**: Proof of active render pass.
+- **`ModelBoundFrame`**: Proof of allocated model descriptors.
+- **Deferred Lighting**: Enforces `begin` → `end` → `finish` sequence via `DeferredGeometryCtx` and `DeferredLightingCtx` tokens.
+
+### State as Location
+- **Frames**: Managed by moving between `m_availableFrames` and `m_inFlightFrames` containers.
+- **Render Targets**: Represented by the active `RenderTargetState` subclass instance.
+
+### Boundary / Adapter
+`VulkanGraphics.cpp` bridges the legacy engine's implicit global state to the backend's explicit token requirements.
+*Caution:* This is not a place for "inhabitant branching" (e.g., `if (exists)` logic). While it currently validates state to produce tokens, the architectural goal is to push these ownership requirements upstream into the engine. If `VulkanGraphics.cpp` requires complex conditionals to handle engine state, the engine's ownership model is likely what needs fixing.
 
 ## Entry Points
 
@@ -76,6 +97,8 @@ Key methods:
 - `flip()` — frame boundary
 - `ensureRenderingStarted(frameCtx)` — lazy render pass start + dynamic state (returns `RenderCtx`)
 
+**Token-based API:** Rendering methods require proof of state via capability tokens (e.g., `ensureRenderingStarted(FrameCtx)`).
+
 Model descriptor sync happens in `beginFrame()` via `beginModelDescriptorSync()` before recording starts.
 
 ### `VulkanRenderingSession` (Render Pass State Machine)
@@ -91,6 +114,10 @@ Responsible for:
   - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
 - Lazy render pass begin via `ensureRendering(cmd, imageIndex)`. The session owns the active pass and ends it automatically at frame/target boundaries.
 - Dynamic state application (`applyDynamicState()`) is performed when a pass begins after selecting the target (but does not override viewport/scissor; those are driven by engine calls).
+
+**Polymorphic State:** The active render target is represented by a `std::unique_ptr<RenderTargetState>` (State as Location). There is no "target mode" enum; the object *is* the state.
+
+**RAII Guard:** `ActivePass` manages `vkCmdBeginRendering`/`vkCmdEndRendering`.
 
 The render target’s “contract” (attachment formats + count) is exposed as `RenderTargetInfo` and is used to key pipelines.
 

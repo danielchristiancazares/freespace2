@@ -13,10 +13,11 @@ constexpr uint32_t MODEL_ATTRIB_TEXCOORD    = 1u << 2;
 constexpr uint32_t MODEL_ATTRIB_TANGENT     = 1u << 3;
 constexpr uint32_t MODEL_ATTRIB_BONEINDICES = 1u << 4;
 constexpr uint32_t MODEL_ATTRIB_BONEWEIGHTS = 1u << 5;
+constexpr uint32_t MODEL_ATTRIB_MODEL_ID    = 1u << 6;
 
 // Push constant block for model rendering with vertex pulling and bindless textures.
 // Layout must exactly match the GLSL declaration in model.vert and model.frag.
-// 15 fields x 4 bytes = 60 bytes total.
+// 16 fields x 4 bytes = 64 bytes total.
 struct ModelPushConstants {
 	// Vertex heap addressing
 	uint32_t vertexOffset;      // Byte offset into vertex heap buffer for this draw
@@ -30,6 +31,7 @@ struct ModelPushConstants {
 	uint32_t normalOffset;      // Normal (vec3)
 	uint32_t texCoordOffset;    // Texture coordinate (vec2)
 	uint32_t tangentOffset;     // Tangent (vec4)
+	uint32_t modelIdOffset;     // Model id (float; used for batched transforms)
 	uint32_t boneIndicesOffset; // Bone indices (ivec4)
 	uint32_t boneWeightsOffset; // Bone weights (vec4)
 
@@ -45,7 +47,7 @@ struct ModelPushConstants {
 	// Shader variant flags
 	uint32_t flags;
 };
-static_assert(sizeof(ModelPushConstants) == 60, "ModelPushConstants must be 60 bytes to match GLSL layout");
+static_assert(sizeof(ModelPushConstants) == 64, "ModelPushConstants must be 64 bytes to match GLSL layout");
 
 } // namespace vulkan
 } // namespace graphics

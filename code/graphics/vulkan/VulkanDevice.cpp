@@ -516,12 +516,14 @@ bool VulkanDevice::initializeInstance() {
 				extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 			}
 		}
-#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
-		if (!stricmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
-			extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-		}
+#if defined(__APPLE__) && defined(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)
+			// Portability enumeration is required for MoltenVK/portability subset drivers on Apple, but
+			// RenderDoc's Vulkan layer may reject it on other platforms (breaking vkCreateInstance).
+			if (!stricmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+				extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+			}
 #endif
-	}
+		}
 
 	std::vector<const char*> layers;
 	const auto supportedLayers = vk::enumerateInstanceLayerProperties();
@@ -541,12 +543,12 @@ bool VulkanDevice::initializeInstance() {
 	createInfo.ppEnabledExtensionNames = extensions.data();
 	createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
 	createInfo.ppEnabledLayerNames = layers.data();
-#ifdef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
-	if (std::find_if(extensions.begin(), extensions.end(), [](const char* ext) {
-		return !stricmp(ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-	}) != extensions.end()) {
-		createInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
-	}
+#if defined(__APPLE__) && defined(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)
+		if (std::find_if(extensions.begin(), extensions.end(), [](const char* ext) {
+			return !stricmp(ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+		}) != extensions.end()) {
+			createInfo.flags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
+		}
 #endif
 
 	vk::DebugUtilsMessengerCreateInfoEXT createInstanceDebugInfo(

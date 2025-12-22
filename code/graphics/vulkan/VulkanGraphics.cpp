@@ -27,6 +27,9 @@
 #include "globalincs/version.h"
 #include "lighting/lighting.h"
 
+#define MODEL_SDR_FLAG_MODE_CPP
+#include "def_files/data/effects/model_shader_flags.h"
+
 extern transform_stack gr_model_matrix_stack;
 extern matrix4 gr_view_matrix;
 extern matrix4 gr_model_view_matrix;
@@ -40,7 +43,6 @@ namespace graphics::vulkan {
 
 
 namespace {
-
 struct Backend {
   std::unique_ptr<VulkanRenderer> renderer;
   std::optional<graphics::vulkan::RecordingFrame> recording;
@@ -379,7 +381,51 @@ void gr_vulkan_resize_buffer(gr_buffer_handle handle, size_t size)
   currentRenderer().resizeBuffer(handle, size);
 }
 
-void stub_update_transform_buffer(void* /*data*/, size_t /*size*/) {}
+void gr_vulkan_update_transform_buffer(void* data, size_t size)
+{
+  // Upload batched model transforms into per-frame transient storage.
+  // Shader indexing uses uModel.buffer_matrix_offset + vertModelID (see model.vert).
+  Assertion(g_backend != nullptr && g_backend->renderer != nullptr, "update_transform_buffer called without backend");
+  Assertion(g_backend->recording.has_value(),
+    "update_transform_buffer called without active recording; gr_flip/gr_setup_frame must run first");
+  Assertion(data != nullptr, "update_transform_buffer called with null data");
+
+  auto ctxBase = currentFrameCtx();
+  VulkanFrame& frame = ctxBase.frame();
+
+  frame.modelTransformDynamicOffset = 0;
+  frame.modelTransformSize = 0;
+
+  if (size == 0) {
+    return;
+  }
+
+  // The shader reads vec4 texels from a std430 buffer, so require 16-byte granularity.
+  Assertion((size % 16) == 0, "Transform buffer size must be 16-byte aligned (size=%zu)", size);
+
+  auto& ring = frame.vertexBuffer();
+  const auto minAlign = static_cast<vk::DeviceSize>(
+    ctxBase.renderer.vulkanDevice()->properties().limits.minStorageBufferOffsetAlignment);
+  vk::DeviceSize alignment = minAlign;
+  if (alignment < 16) {
+    alignment = 16;
+  }
+
+  const vk::DeviceSize requestSize = static_cast<vk::DeviceSize>(size);
+  auto allocOpt = ring.try_allocate(requestSize, alignment);
+  Assertion(allocOpt.has_value(),
+    "Transform buffer upload of %zu bytes exceeds per-frame vertex ring remaining %zu bytes. "
+    "Increase VERTEX_RING_SIZE or reduce batched transforms.",
+    size, static_cast<size_t>(ring.remaining()));
+  const auto alloc = *allocOpt;
+
+  memcpy(alloc.mapped, data, size);
+
+  Assertion(alloc.offset <= std::numeric_limits<uint32_t>::max(),
+    "Transform buffer offset %zu exceeds uint32 range", static_cast<size_t>(alloc.offset));
+  frame.modelTransformDynamicOffset = static_cast<uint32_t>(alloc.offset);
+  frame.modelTransformSize = size;
+}
 
   void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode)
   {
@@ -444,10 +490,13 @@ void stub_scene_texture_end() {}
 
 void stub_copy_effect_texture() {}
 
-void stub_deferred_lighting_begin(bool /*clearNonColorBufs*/) {}
+void stub_deferred_lighting_begin(bool /*clearNonColorBufs*/) {
+}
 void stub_deferred_lighting_msaa() {}
-void stub_deferred_lighting_end() {}
-void stub_deferred_lighting_finish() {}
+void stub_deferred_lighting_end() {
+}
+void stub_deferred_lighting_finish() {
+}
 
 void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs)
 {
@@ -600,14 +649,16 @@ static void issueModelDraw(const RenderCtx& render, const ModelDrawContext& ctx)
   // Set model descriptor set + dynamic UBO offset
   const auto modelSet = ctx.bound.modelSet;
   const auto modelDynamicOffset = ctx.bound.modelUbo.dynamicOffset;
+  const auto transformDynamicOffset = ctx.bound.transformDynamicOffset;
+  std::array<uint32_t, 2> dynamicOffsets = { modelDynamicOffset, transformDynamicOffset };
   cmd.bindDescriptorSets(
     vk::PipelineBindPoint::eGraphics,
     ctx.pipelineLayout,
     0,
     1,
     &modelSet,
-    1,
-    &modelDynamicOffset);
+    static_cast<uint32_t>(dynamicOffsets.size()),
+    dynamicOffsets.data());
 
   // Push constants (vertex layout + texture indices)
   cmd.pushConstants(
@@ -719,6 +770,7 @@ void gr_vulkan_render_model(model_material* material_info,
   pcs.normalOffset      = 0;
   pcs.texCoordOffset    = 0;
   pcs.tangentOffset     = 0;
+  pcs.modelIdOffset     = 0;
   pcs.boneIndicesOffset = 0;
   pcs.boneWeightsOffset = 0;
 
@@ -741,6 +793,10 @@ void gr_vulkan_render_model(model_material* material_info,
     case vertex_format_data::TANGENT:
       pcs.tangentOffset = static_cast<uint32_t>(comp->offset);
       pcs.vertexAttribMask |= MODEL_ATTRIB_TANGENT;
+      break;
+    case vertex_format_data::MODEL_ID:
+      pcs.modelIdOffset = static_cast<uint32_t>(comp->offset);
+      pcs.vertexAttribMask |= MODEL_ATTRIB_MODEL_ID;
       break;
     default:
       break;
@@ -767,6 +823,13 @@ void gr_vulkan_render_model(model_material* material_info,
   pcs.specMapIndex   = toIndexOr(specTex, kBindlessTextureSlotDefaultSpec);
   pcs.matrixIndex    = 0;  // Unused
   pcs.flags          = material_info->get_shader_flags();
+
+  if (pcs.flags & MODEL_SDR_FLAG_TRANSFORM) {
+    Assertion((pcs.vertexAttribMask & MODEL_ATTRIB_MODEL_ID) != 0,
+      "MODEL_SDR_FLAG_TRANSFORM set but vertex buffer lacks MODEL_ID attribute; batching requires MODEL_ID");
+    Assertion(bound.transformSize > 0,
+      "MODEL_SDR_FLAG_TRANSFORM set but transform buffer was not uploaded; expected gr_update_transform_buffer call");
+  }
 
   // Dynamic state: compensate for viewport Y-flip (CCW becomes CW)
   cmd.setFrontFace(vk::FrontFace::eClockwise);
@@ -1737,6 +1800,7 @@ void init_function_pointers()
   gr_screen.gf_flush_mapped_buffer = [](gr_buffer_handle handle, size_t offset, size_t size) {
     currentRenderer().flushMappedBuffer(handle, offset, size);
   };
+  gr_screen.gf_update_transform_buffer = gr_vulkan_update_transform_buffer;
   gr_screen.gf_bind_uniform_buffer = gr_vulkan_bind_uniform_buffer;
   gr_screen.gf_register_model_vertex_heap = [](gr_buffer_handle handle) {
     currentRenderer().setModelVertexHeapHandle(handle);

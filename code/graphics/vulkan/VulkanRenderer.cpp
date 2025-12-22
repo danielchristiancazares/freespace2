@@ -1065,28 +1065,47 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
 
 void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex,
   vk::DescriptorSet set,
-			vk::Buffer vertexHeapBuffer,
-			const std::vector<std::pair<uint32_t, int>>& textures) {
-  std::vector<vk::WriteDescriptorSet> writes;
-  writes.reserve(2);
+				vk::Buffer vertexHeapBuffer,
+				vk::Buffer transformBuffer,
+				const std::vector<std::pair<uint32_t, int>>& textures) {
+	std::vector<vk::WriteDescriptorSet> writes;
+	writes.reserve(3);
 
-  // Binding 0: Vertex heap SSBO
-  Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
-    "updateModelDescriptors called with null vertexHeapBuffer");
+	// Binding 0: Vertex heap SSBO
+	Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
+		"updateModelDescriptors called with null vertexHeapBuffer");
 
-  vk::DescriptorBufferInfo heapInfo{};
-  heapInfo.buffer = vertexHeapBuffer;
-  heapInfo.offset = 0;
-  heapInfo.range = VK_WHOLE_SIZE;
+	vk::DescriptorBufferInfo heapInfo{};
+	heapInfo.buffer = vertexHeapBuffer;
+	heapInfo.offset = 0;
+	heapInfo.range = VK_WHOLE_SIZE;
 
   vk::WriteDescriptorSet heapWrite{};
   heapWrite.dstSet = set;
   heapWrite.dstBinding = 0;
   heapWrite.dstArrayElement = 0;
   heapWrite.descriptorCount = 1;
-  heapWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
-  heapWrite.pBufferInfo = &heapInfo;
-  writes.push_back(heapWrite);
+	heapWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
+	heapWrite.pBufferInfo = &heapInfo;
+	writes.push_back(heapWrite);
+
+	// Binding 3: Batched transforms (dynamic SSBO)
+	Assertion(static_cast<VkBuffer>(transformBuffer) != VK_NULL_HANDLE,
+		"updateModelDescriptors called with null transformBuffer");
+
+	vk::DescriptorBufferInfo transformInfo{};
+	transformInfo.buffer = transformBuffer;
+	transformInfo.offset = 0;
+	transformInfo.range = VK_WHOLE_SIZE;
+
+	vk::WriteDescriptorSet transformWrite{};
+	transformWrite.dstSet = set;
+	transformWrite.dstBinding = 3;
+	transformWrite.dstArrayElement = 0;
+	transformWrite.descriptorCount = 1;
+	transformWrite.descriptorType = vk::DescriptorType::eStorageBufferDynamic;
+	transformWrite.pBufferInfo = &transformInfo;
+	writes.push_back(transformWrite);
 
   // Binding 1: Bindless textures
   // Correctness rule: every slot must always point at a valid descriptor (fallback until resident).
@@ -1178,13 +1197,17 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
 
   Assertion(m_textureManager != nullptr, "beginModelDescriptorSync requires texture manager");
 
-  // Binding 0: Vertex heap SSBO; Binding 1: bindless textures (only for textures with assigned slots).
+  // Binding 0: Vertex heap SSBO; Binding 1: bindless textures; Binding 3: batched transform buffer (dynamic SSBO).
   // We batch the writes to avoid issuing one vkUpdateDescriptorSets call per texture.
   std::vector<std::pair<uint32_t, int>> textures;
   textures.reserve(kMaxBindlessTextures);
   m_textureManager->appendResidentBindlessDescriptors(textures);
 
-  updateModelDescriptors(frameIndex, frame.modelDescriptorSet(), vertexHeapBuffer, textures);
+  updateModelDescriptors(frameIndex,
+    frame.modelDescriptorSet(),
+    vertexHeapBuffer,
+    frame.vertexBuffer().buffer(),
+    textures);
 }
 
 int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {

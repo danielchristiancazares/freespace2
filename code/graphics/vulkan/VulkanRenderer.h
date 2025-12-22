@@ -177,9 +177,10 @@ class VulkanRenderer {
 
 		// Descriptor sync helpers (called from beginFrame).
 		void updateModelDescriptors(uint32_t frameIndex,
-			vk::DescriptorSet set,
-			vk::Buffer vertexHeapBuffer,
-			const std::vector<std::pair<uint32_t, int>>& textures);
+				vk::DescriptorSet set,
+				vk::Buffer vertexHeapBuffer,
+				vk::Buffer transformBuffer,
+				const std::vector<std::pair<uint32_t, int>>& textures);
 
 			void createUploadCommandPool();
 			void createSubmitTimelineSemaphore();

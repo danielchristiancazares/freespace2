@@ -30,6 +30,8 @@ struct ModelBoundFrame {
   FrameCtx ctx;
   vk::DescriptorSet modelSet;
   DynamicUniformBinding modelUbo;
+  uint32_t transformDynamicOffset = 0;
+  size_t transformSize = 0;
 };
 
 inline ModelBoundFrame requireModelBound(FrameCtx ctx)
@@ -38,7 +40,11 @@ inline ModelBoundFrame requireModelBound(FrameCtx ctx)
     "ModelData UBO binding not set; call gr_bind_uniform_buffer(ModelData) before rendering models");
   Assertion(ctx.frame().modelDescriptorSet(), "Model descriptor set must be allocated");
 
-  return ModelBoundFrame{ ctx, ctx.frame().modelDescriptorSet(), ctx.frame().modelUniformBinding };
+  return ModelBoundFrame{ ctx,
+    ctx.frame().modelDescriptorSet(),
+    ctx.frame().modelUniformBinding,
+    ctx.frame().modelTransformDynamicOffset,
+    ctx.frame().modelTransformSize };
 }
 
 struct NanoVGBoundFrame {

@@ -23,6 +23,7 @@ layout(push_constant) uniform ModelPushConstants
 	uint normalOffset;
 	uint texCoordOffset;
 	uint tangentOffset;
+	uint modelIdOffset;
 	uint boneIndicesOffset;
 	uint boneWeightsOffset;
 	uint baseMapIndex;
