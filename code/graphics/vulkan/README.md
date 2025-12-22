@@ -68,13 +68,13 @@ Coordinates:
 - Initialization order: device → layouts → render targets → session → frames → managers
 - Frame ring (`kFramesInFlight` frames via `VulkanFrame`)
 - CPU/GPU sync via `VulkanFrame::wait_for_gpu()` fence
-- Frame lifecycle tracking via recording typestate: available/in-flight deques + `RecordingState` (`NoRecording`/`ActiveRecording`)
+- Frame lifecycle tracking: available/in-flight deques (renderer) + `std::optional<RecordingFrame>` (graphics backend)
 - Descriptor state: global set (frame-wide), model set (per-frame; bound per draw via dynamic offsets), and per-draw push descriptors
 
 Key methods:
 - `initialize()` / `shutdown()`
 - `flip()` — frame boundary
-- `ensureRenderingStarted(rec)` — lazy render pass start + dynamic state (returns `RenderCtx`)
+- `ensureRenderingStarted(frameCtx)` — lazy render pass start + dynamic state (returns `RenderCtx`)
 
 Model descriptor sync happens in `beginFrame()` via `beginModelDescriptorSync()` before recording starts.
 

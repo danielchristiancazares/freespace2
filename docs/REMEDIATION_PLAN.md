@@ -1,6 +1,6 @@
 # Vulkan Remediation Plan (Bulletproof Refactor)
 
-Date: 2025-12-21
+Date: 2025-12-22
 
 Scope: Remediate issues identified in `docs/QA_REVIEW.md` for `code/graphics/vulkan/`, prioritizing correctness and making
 invalid states non-representable via typestate, RAII, and type-driven design.
@@ -62,11 +62,11 @@ Per `docs/DESIGN_PHILOSOPHY.md`, texture state is container membership:
 
 No state enum. No `std::variant`. Transitions are moves between containers.
 
-### 2.3 Enforce upload-only-before-rendering via typed contexts (PARTIAL)
+### 2.3 Enforce upload-only-before-rendering via typed contexts (DONE)
 
 - `UploadCtx` implemented: private constructor, `friend class VulkanRenderer`.
 - Upload recording requires `UploadCtx`; upload during rendering becomes a compile-time error.
-- `RenderCtx` not yet implemented (see Section 4).
+- Upload flush remains centralized to `VulkanRenderer::beginFrame()` (explicit safe point before any rendering begins).
 
 ### 2.4 Bindless slot semantics: slot always points at something valid (DONE)
 
@@ -101,16 +101,18 @@ Acceptance:
 
 ## 4) Typestate Enforcement (PARTIAL)
 
-### 4.1 `RenderCtx` token
+### 4.1 `RenderCtx` token (DONE)
 
 Introduce `RenderCtx` (proves rendering is active):
 - Only constructible by `VulkanRenderer` after starting/ensuring dynamic rendering.
-- Returned from `VulkanRenderer::ensureRenderingStarted()` and consumed by draw code as proof of phase.
+- Returned from `VulkanRenderer::ensureRenderingStarted(frameCtx)` and consumed by draw code as proof of phase.
+- Draw code cannot access the raw command buffer without `RenderCtx`:
+  `VulkanFrame::commandBuffer()` is private and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
 
-### 4.2 Migrate draw APIs
+### 4.2 Migrate draw APIs (PARTIAL)
 
-- In progress: thread `RenderCtx&` through internal draw helpers so "rendering active" is required by signature rather than being
-  fetched internally (model draw helper updated; expand to other draw paths).
+- Thread `RenderCtx&` through internal draw helpers so "rendering active" is required by signature rather than being fetched
+  internally (model draw helper updated; continue expanding this pattern).
 
 ### 4.3 Deferred lighting call order tokens
 

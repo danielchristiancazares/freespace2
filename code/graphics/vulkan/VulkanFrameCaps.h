@@ -12,11 +12,18 @@ class VulkanRenderer;
 
 struct FrameCtx {
   VulkanRenderer& renderer;
-  graphics::vulkan::RecordingFrame& recording;
 
-  VulkanFrame& frame() const { return recording.ref(); }
-  vk::CommandBuffer cmd() const { return recording.cmd(); }
-  uint32_t imageIndex() const { return recording.imageIndex; }
+  FrameCtx(VulkanRenderer& inRenderer, graphics::vulkan::RecordingFrame& inRecording)
+      : renderer(inRenderer), m_recording(inRecording)
+  {
+  }
+
+  VulkanFrame& frame() const { return m_recording.ref(); }
+
+  private:
+  graphics::vulkan::RecordingFrame& m_recording;
+
+  friend class VulkanRenderer;
 };
 
 struct ModelBoundFrame {
@@ -50,4 +57,3 @@ inline NanoVGBoundFrame requireNanoVGBound(FrameCtx ctx)
 
 } // namespace vulkan
 } // namespace graphics
-

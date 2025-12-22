@@ -82,11 +82,18 @@ VulkanFrame& currentFrame()
   return g_backend->recording->ref();
 }
 
+RecordingFrame& currentRecording()
+{
+  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
+  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
+  return *g_backend->recording;
+}
+
 FrameCtx currentFrameCtx()
 {
   Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
   Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
-  return FrameCtx{ *g_backend->renderer, *g_backend->recording };
+  return FrameCtx{ *g_backend->renderer, currentRecording() };
 }
 
 float clampLineWidth(const VkPhysicalDeviceLimits& limits, float requestedWidth)
@@ -248,12 +255,13 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
     {
       auto& renderer = currentRenderer();
 
-  VulkanFrame& frame = currentFrame();
+  auto& rec = currentRecording();
+  VulkanFrame& frame = rec.ref();
 
   // Reset per-frame uniform bindings (optional will be empty at frame start)
   frame.resetPerFrameBindings();
 
-    vk::CommandBuffer cmd = frame.commandBuffer();
+    vk::CommandBuffer cmd = rec.cmd();
     Assertion(cmd, "Frame has no valid command buffer");
 
     // DO NOT start the render pass here - allow gr_clear to set clear flags first.
@@ -520,7 +528,6 @@ struct ModelDrawContext {
 static void issueModelDraw(const RenderCtx& render, const ModelDrawContext& ctx)
 {
   auto cmd = render.cmd;
-  Assertion(cmd == ctx.bound.ctx.cmd(), "RenderCtx command buffer mismatch for model draw");
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, ctx.pipeline);
 
   // Set model descriptor set + dynamic UBO offset
@@ -592,7 +599,7 @@ void gr_vulkan_render_model(model_material* material_info,
   ctxBase.renderer.incrementModelDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
   auto cmd = renderCtx.cmd;
   const auto& rt = renderCtx.targetInfo;
 
@@ -766,7 +773,7 @@ void gr_vulkan_render_primitives(material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
   vk::CommandBuffer cmd = renderCtx.cmd;
   const auto& rt = renderCtx.targetInfo;
 
@@ -1097,12 +1104,12 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
 
   // NanoVG requires stencil. If we're currently rendering to a swapchain-without-depth target
   // or a non-swapchain target (deferred G-buffer), switch back to the swapchain target with depth/stencil.
-  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
   auto rt = renderCtx.targetInfo;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.depthFormat == vk::Format::eUndefined || rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
     rt = renderCtx.targetInfo;
   }
   auto cmd = renderCtx.cmd;
@@ -1227,7 +1234,7 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Start rendering FIRST and get the actual target contract
-  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
   vk::CommandBuffer cmd = renderCtx.cmd;
   const auto& rt = renderCtx.targetInfo;
 
@@ -1415,12 +1422,12 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   ctxBase.renderer.incrementPrimDraw();
 
   // Ensure we're rendering to swapchain (menus/UI are swapchain-targeted).
-  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
   auto rt = renderCtx.targetInfo;
   const auto swapchainFormat = static_cast<vk::Format>(ctxBase.renderer.getSwapChainImageFormat());
   if (rt.colorAttachmentCount != 1 || rt.colorFormat != swapchainFormat) {
     ctxBase.renderer.setPendingRenderTargetSwapchain();
-    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase.recording);
+    renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
     rt = renderCtx.targetInfo;
   }
   vk::CommandBuffer cmd = renderCtx.cmd;
@@ -1557,8 +1564,7 @@ void gr_vulkan_push_debug_group(const char* name)
   if (!g_backend || !g_backend->recording.has_value()) {
     return;  // No-op if not recording yet
   }
-  auto ctxBase = currentFrameCtx();
-  auto cmd = ctxBase.cmd();
+  auto cmd = currentRecording().cmd();
 
   vk::DebugUtilsLabelEXT label{};
   label.pLabelName = name;
@@ -1576,8 +1582,7 @@ void gr_vulkan_pop_debug_group()
   if (!g_backend || !g_backend->recording.has_value()) {
     return;  // No-op if not recording yet
   }
-  auto ctxBase = currentFrameCtx();
-  ctxBase.cmd().endDebugUtilsLabelEXT();
+  currentRecording().cmd().endDebugUtilsLabelEXT();
 }
 
 int stub_create_query_object() { return -1; }

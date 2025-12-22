@@ -2,6 +2,7 @@
 #include "VulkanRenderer.h"
 #include "VulkanGraphics.h"
 #include "VulkanConstants.h"
+#include "VulkanFrameCaps.h"
 #include "VulkanFrameFlow.h"
 #include "VulkanTextureBindings.h"
 #include "graphics/util/uniform_structs.h"
@@ -463,7 +464,14 @@ graphics::vulkan::RecordingFrame VulkanRenderer::advanceFrame(graphics::vulkan::
   return beginRecording();
 }
 
-RenderCtx VulkanRenderer::ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec)
+RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
+{
+  Assertion(&ctx.renderer == this,
+    "ensureRenderingStarted called with FrameCtx from a different VulkanRenderer instance");
+  return ensureRenderingStartedRecording(ctx.m_recording);
+}
+
+RenderCtx VulkanRenderer::ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec)
 {
   auto info = m_renderingSession->ensureRendering(rec.cmd(), rec.imageIndex);
   return RenderCtx{ rec.cmd(), info };
@@ -473,7 +481,7 @@ void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec
 {
   m_renderingSession->beginDeferredPass(clearNonColorBufs);
   // Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
-  (void)ensureRenderingStarted(rec);
+  (void)ensureRenderingStartedRecording(rec);
 }
 
 void VulkanRenderer::endDeferredGeometry(vk::CommandBuffer cmd)
@@ -1119,10 +1127,10 @@ void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& re
 
     if (lights.empty()) {
       return;
-    }
+  }
 
   // Activate swapchain rendering without depth (target set by endDeferredGeometry).
-  (void)ensureRenderingStarted(rec);
+  (void)ensureRenderingStartedRecording(rec);
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {

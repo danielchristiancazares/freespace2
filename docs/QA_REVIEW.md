@@ -1,11 +1,11 @@
 # Vulkan QA Review (code/graphics/vulkan)
 
-Date: 2025-12-21
+Date: 2025-12-22
 
 Scope: QA review of Vulkan backend code in `code/graphics/vulkan/`, with emphasis on correctness, lifetime/sync,
 validation-safety, and "foot-gun" APIs.
 
-## Resolved (As Of 2025-12-21)
+## Resolved (As Of 2025-12-22)
 
 ### Texture uploads no longer flushed mid-rendering
 
@@ -47,7 +47,9 @@ validation-safety, and "foot-gun" APIs.
 
 - Dynamic rendering is started via an idempotent `VulkanRenderingSession::ensureRendering()` (session owns the active pass).
 - Frame/target boundaries always end any active pass internally (`endActivePass()` is no longer a no-op).
-- Draw paths consume a `RenderCtx` capability token from `VulkanRenderer::ensureRenderingStarted()` as proof that rendering is active.
+- Draw paths consume a `RenderCtx` capability token from `VulkanRenderer::ensureRenderingStarted(frameCtx)` as proof that rendering is active.
+- Draw code can no longer grab the raw command buffer from `VulkanFrame`/`FrameCtx` as an escape hatch:
+  `VulkanFrame::commandBuffer()` is private, and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
 
 ### Deferred lighting call order uses typestate tokens (no enum)
 

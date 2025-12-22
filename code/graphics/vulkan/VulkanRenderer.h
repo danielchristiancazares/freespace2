@@ -33,6 +33,7 @@ namespace vulkan {
 
 class VulkanTextureBindings;
 class VulkanTextureUploader;
+struct FrameCtx;
 
 // Light volume mesh for deferred rendering
 struct VolumeMesh {
@@ -85,7 +86,7 @@ class VulkanRenderer {
 
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
-		RenderCtx ensureRenderingStarted(graphics::vulkan::RecordingFrame& rec); // Recording-only
+		RenderCtx ensureRenderingStarted(const FrameCtx& ctx); // Recording-only (requires FrameCtx token)
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }
@@ -150,6 +151,8 @@ class VulkanRenderer {
 		static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
 		static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
 		static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
+
+		RenderCtx ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec); // Recording-only (internal)
 
 		// Deferred implementation details (called by typestate wrapper API)
 		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only

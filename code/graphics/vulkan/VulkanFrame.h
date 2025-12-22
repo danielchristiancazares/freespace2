@@ -9,6 +9,9 @@
 namespace graphics {
 namespace vulkan {
 
+class VulkanRenderer;
+struct RecordingFrame;
+
 struct BoundUniformBuffer {
   gr_buffer_handle handle{};
   size_t offset = 0;
@@ -39,7 +42,6 @@ class VulkanFrame {
 
   uint32_t frameIndex() const { return m_frameIndex; }
 
-  vk::CommandBuffer commandBuffer() const { return m_commandBuffer; }
   VulkanRingBuffer& uniformBuffer() { return m_uniformRing; }
   VulkanRingBuffer& vertexBuffer() { return m_vertexRing; }
   VulkanRingBuffer& stagingBuffer() { return m_stagingRing; }
@@ -66,6 +68,12 @@ class VulkanFrame {
   }
 
   private:
+  // Only the renderer/frame-flow tokens should be able to record commands.
+  friend class VulkanRenderer;
+  friend struct RecordingFrame;
+
+  vk::CommandBuffer commandBuffer() const { return m_commandBuffer; }
+
   vk::Device m_device;
   uint32_t m_frameIndex = 0;
 
