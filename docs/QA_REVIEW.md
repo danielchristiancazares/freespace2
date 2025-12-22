@@ -86,8 +86,10 @@ validation-safety, and "foot-gun" APIs.
 - Removed temporary diagnostic output paths in `code/graphics/shaders/deferred.frag` that produced magenta output.
 - The ambient deferred-light pass now *initializes background pixels* (no geometry) so `loadOp=LOAD` + fragment discard
   cannot manifest as "trails" / stale swapchain memory.
-- Deferred geometry always clears the full G-buffer on entry (prevents stale G-buffer accumulation when deferred starts
-  after an earlier swapchain draw).
+- Deferred begin snapshots the current swapchain color into a per-swapchain-image scene buffer and copies it into the
+  emissive G-buffer attachment (OpenGL parity; requires `TRANSFER_SRC` swapchain usage).
+- Deferred geometry clears the non-emissive G-buffer attachments on entry and loads emissive (prevents stale G-buffer
+  accumulation while preserving pre-deferred backgrounds).
 
 ## Medium
 

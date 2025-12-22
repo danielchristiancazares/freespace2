@@ -82,6 +82,11 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
     const auto fragPath = fs::path(m_shaderRoot) / "vulkan.frag.spv";
     return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
   }
+  case shader_type::SDR_TYPE_COPY: {
+    const auto vertPath = fs::path(m_shaderRoot) / "copy.vert.spv";
+    const auto fragPath = fs::path(m_shaderRoot) / "copy.frag.spv";
+    return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
   case shader_type::SDR_TYPE_DEFERRED_LIGHTING: {
     const auto vertPath = fs::path(m_shaderRoot) / "deferred.vert.spv";
     const auto fragPath = fs::path(m_shaderRoot) / "deferred.frag.spv";

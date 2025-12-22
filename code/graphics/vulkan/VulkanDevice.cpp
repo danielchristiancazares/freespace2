@@ -754,7 +754,20 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues& deviceValues) {
 	createInfo.imageColorSpace = surfaceFormat.colorSpace;
 	createInfo.imageExtent = chooseSwapExtent(deviceValues, gr_screen.max_w, gr_screen.max_h);
 	createInfo.imageArrayLayers = 1;
-	createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+	{
+		// We need transfer-src so the Vulkan backend can snapshot pre-deferred scene color (OpenGL parity).
+		// Only request usages explicitly supported by the surface.
+		const auto supported = deviceValues.surfaceCapabilities.supportedUsageFlags;
+		const auto requested = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
+		createInfo.imageUsage = requested & supported;
+		Assertion((createInfo.imageUsage & vk::ImageUsageFlagBits::eColorAttachment) != vk::ImageUsageFlags{},
+		          "Surface does not support swapchain images as color attachments (supportedUsageFlags=0x%x)",
+		          static_cast<uint32_t>(supported));
+		if ((createInfo.imageUsage & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
+			vkprintf("VulkanDevice: swapchain does not support TRANSFER_SRC usage; "
+			         "pre-deferred scene capture will be disabled.\n");
+		}
+	}
 
 	const uint32_t queueFamilyIndices[] = {deviceValues.graphicsQueueIndex.index, deviceValues.presentQueueIndex.index};
 	if (deviceValues.graphicsQueueIndex.index != deviceValues.presentQueueIndex.index) {
@@ -779,6 +792,7 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues& deviceValues) {
 	m_swapchainImages = SCP_vector<vk::Image>(swapchainImages.begin(), swapchainImages.end());
 	m_swapchainFormat = surfaceFormat.format;
 	m_swapchainExtent = createInfo.imageExtent;
+	m_swapchainUsage = createInfo.imageUsage;
 
 	m_swapchainImageViews.reserve(m_swapchainImages.size());
 	for (const auto& image : m_swapchainImages) {
@@ -1064,7 +1078,18 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
 	createInfo.imageColorSpace = surfaceFormat.colorSpace;
 	createInfo.imageExtent = chooseSwapExtent(tempValues, width, height);
 	createInfo.imageArrayLayers = 1;
-	createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+	{
+		const auto supported = m_surfaceCapabilities.supportedUsageFlags;
+		const auto requested = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
+		createInfo.imageUsage = requested & supported;
+		Assertion((createInfo.imageUsage & vk::ImageUsageFlagBits::eColorAttachment) != vk::ImageUsageFlags{},
+		          "Surface does not support swapchain images as color attachments (supportedUsageFlags=0x%x)",
+		          static_cast<uint32_t>(supported));
+		if ((createInfo.imageUsage & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
+			vkprintf("VulkanDevice: swapchain does not support TRANSFER_SRC usage; "
+			         "pre-deferred scene capture will be disabled.\n");
+		}
+	}
 
 	const uint32_t queueFamilyIndices[] = {m_graphicsQueueIndex, m_presentQueueIndex};
 	if (m_graphicsQueueIndex != m_presentQueueIndex) {
@@ -1098,6 +1123,7 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
 	m_swapchainImages = SCP_vector<vk::Image>(swapchainImages.begin(), swapchainImages.end());
 	m_swapchainFormat = surfaceFormat.format;
 	m_swapchainExtent = createInfo.imageExtent;
+	m_swapchainUsage = createInfo.imageUsage;
 
 	// Create new image views
 	m_swapchainImageViews.reserve(m_swapchainImages.size());

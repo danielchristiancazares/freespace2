@@ -39,6 +39,14 @@ StageAccess stageAccessForLayout(vk::ImageLayout layout)
     out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
     out.accessMask = vk::AccessFlagBits2::eShaderRead;
     break;
+  case vk::ImageLayout::eTransferSrcOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
+    out.accessMask = vk::AccessFlagBits2::eTransferRead;
+    break;
+  case vk::ImageLayout::eTransferDstOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
+    out.accessMask = vk::AccessFlagBits2::eTransferWrite;
+    break;
   case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
     out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
     out.accessMask = vk::AccessFlagBits2::eShaderRead;
@@ -67,6 +75,7 @@ VulkanRenderingSession::VulkanRenderingSession(VulkanDevice& device,
   m_swapchainLayouts.assign(m_device.swapchainImageCount(), vk::ImageLayout::eUndefined);
   m_target = std::make_unique<SwapchainWithDepthTarget>();
   m_clearOps = ClearOps::clearAll();
+  m_gbufferLoadOps.fill(vk::AttachmentLoadOp::eClear);
 }
 
 void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex) {
@@ -112,15 +121,94 @@ void VulkanRenderingSession::requestSwapchainTarget() {
   m_target = std::make_unique<SwapchainWithDepthTarget>();
 }
 
-void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs) {
+void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive) {
   endActivePass();
-  // Deferred geometry targets must not inherit swapchain clear/load state. If we "load" here we
-  // can accumulate stale G-buffer data (which then shows up as smearing/trails during deferred
-  // shading). The OpenGL backend preserves pre-deferred scene color by explicitly copying it
-  // into the emissive buffer; until we mirror that behavior, we hard-clear the full G-buffer.
-  (void)clearNonColorBufs; // parameter retained for API parity; Vulkan clears all G-buffer attachments currently.
-  m_clearOps = ClearOps::clearAll();
+  // Vulkan mirrors OpenGL's deferred begin semantics:
+  // - pre-deferred swapchain color is captured and copied into the emissive buffer (handled by VulkanRenderer)
+  // - the remaining G-buffer attachments are cleared here by loadOp=CLEAR
+  (void)clearNonColorBufs; // parameter retained for API parity; Vulkan always clears non-emissive G-buffer attachments.
+
+  // Depth is shared across swapchain and deferred targets. Always clear it when entering deferred geometry so
+  // pre-deferred draws (treated as emissive background) cannot occlude deferred geometry.
+  m_clearOps = m_clearOps.withDepthStencilClear();
+
+  m_gbufferLoadOps.fill(vk::AttachmentLoadOp::eClear);
+  if (preserveEmissive) {
+    m_gbufferLoadOps[VulkanRenderTargets::kGBufferEmissiveIndex] = vk::AttachmentLoadOp::eLoad;
+  }
   m_target = std::make_unique<DeferredGBufferTarget>();
+}
+
+void VulkanRenderingSession::requestGBufferEmissiveTarget()
+{
+  endActivePass();
+  m_target = std::make_unique<GBufferEmissiveTarget>();
+}
+
+void VulkanRenderingSession::captureSwapchainColorToSceneCopy(vk::CommandBuffer cmd, uint32_t imageIndex)
+{
+  if ((m_device.swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
+    return;
+  }
+
+  Assertion(imageIndex < m_swapchainLayouts.size(),
+    "captureSwapchainColorToSceneCopy: imageIndex %u out of bounds (swapchain has %zu images)",
+    imageIndex, m_swapchainLayouts.size());
+
+  endActivePass();
+
+  auto transitionSwapchainTo = [&](vk::ImageLayout newLayout) {
+    const auto oldLayout = m_swapchainLayouts[imageIndex];
+    if (oldLayout == newLayout) {
+      return;
+    }
+
+    vk::ImageMemoryBarrier2 barrier{};
+    const auto src = stageAccessForLayout(oldLayout);
+    const auto dst = stageAccessForLayout(newLayout);
+    barrier.srcStageMask = src.stageMask;
+    barrier.srcAccessMask = src.accessMask;
+    barrier.dstStageMask = dst.stageMask;
+    barrier.dstAccessMask = dst.accessMask;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.image = m_device.swapchainImage(imageIndex);
+    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+
+    vk::DependencyInfo dep{};
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &barrier;
+    cmd.pipelineBarrier2(dep);
+
+    m_swapchainLayouts[imageIndex] = newLayout;
+  };
+
+  transitionSwapchainTo(vk::ImageLayout::eTransferSrcOptimal);
+  transitionSceneCopyToLayout(cmd, imageIndex, vk::ImageLayout::eTransferDstOptimal);
+
+  vk::ImageCopy region{};
+  region.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.srcSubresource.mipLevel = 0;
+  region.srcSubresource.baseArrayLayer = 0;
+  region.srcSubresource.layerCount = 1;
+  region.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.dstSubresource.mipLevel = 0;
+  region.dstSubresource.baseArrayLayer = 0;
+  region.dstSubresource.layerCount = 1;
+  region.extent = vk::Extent3D(m_device.swapchainExtent().width, m_device.swapchainExtent().height, 1);
+
+  cmd.copyImage(
+    m_device.swapchainImage(imageIndex),
+    vk::ImageLayout::eTransferSrcOptimal,
+    m_targets.sceneColorImage(imageIndex),
+    vk::ImageLayout::eTransferDstOptimal,
+    1,
+    &region);
+
+  transitionSceneCopyToLayout(cmd, imageIndex, vk::ImageLayout::eShaderReadOnlyOptimal);
+  transitionSwapchainTo(vk::ImageLayout::eColorAttachmentOptimal);
 }
 
 void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
@@ -193,6 +281,21 @@ void VulkanRenderingSession::SwapchainNoDepthTarget::begin(VulkanRenderingSessio
   s.beginSwapchainRenderingNoDepthInternal(cmd, imageIndex);
 }
 
+RenderTargetInfo
+VulkanRenderingSession::GBufferEmissiveTarget::info(const VulkanDevice& /*device*/, const VulkanRenderTargets& targets) const
+{
+  RenderTargetInfo out{};
+  out.colorFormat = targets.gbufferFormat();
+  out.colorAttachmentCount = 1;
+  out.depthFormat = vk::Format::eUndefined;
+  return out;
+}
+
+void VulkanRenderingSession::GBufferEmissiveTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t /*imageIndex*/)
+{
+  s.beginGBufferEmissiveRenderingInternal(cmd);
+}
+
 // ---- Internal rendering methods ----
 
 void VulkanRenderingSession::beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
@@ -253,7 +356,7 @@ void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd
   for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
     colorAttachments[i].imageView = m_targets.gbufferView(i);
     colorAttachments[i].imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    colorAttachments[i].loadOp = m_clearOps.color;
+    colorAttachments[i].loadOp = m_gbufferLoadOps[i];
     colorAttachments[i].storeOp = vk::AttachmentStoreOp::eStore;
     colorAttachments[i].clearValue = vk::ClearColorValue(std::array<float, 4>{0.f, 0.f, 0.f, 0.f});
   }
@@ -289,6 +392,30 @@ void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd
 
   // Clear flags are one-shot; reset after we consume them
   m_clearOps = ClearOps::loadAll();
+}
+
+void VulkanRenderingSession::beginGBufferEmissiveRenderingInternal(vk::CommandBuffer cmd)
+{
+  const auto extent = m_device.swapchainExtent();
+
+  // Transition G-buffer images to color attachment optimal (emissive uses the same layout).
+  transitionGBufferToAttachment(cmd);
+
+  vk::RenderingAttachmentInfo emissiveAttachment{};
+  emissiveAttachment.imageView = m_targets.gbufferView(VulkanRenderTargets::kGBufferEmissiveIndex);
+  emissiveAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+  // The fullscreen copy shader overwrites the entire target, so the previous contents are irrelevant.
+  emissiveAttachment.loadOp = vk::AttachmentLoadOp::eDontCare;
+  emissiveAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+
+  vk::RenderingInfo renderingInfo{};
+  renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &emissiveAttachment;
+  renderingInfo.pDepthAttachment = nullptr;
+
+  cmd.beginRendering(renderingInfo);
 }
 
 void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
@@ -466,6 +593,39 @@ void VulkanRenderingSession::transitionGBufferToShaderRead(vk::CommandBuffer cmd
     m_targets.setGBufferLayout(i, vk::ImageLayout::eShaderReadOnlyOptimal);
   }
   m_targets.setDepthLayout(newDepthLayout);
+}
+
+void VulkanRenderingSession::transitionSceneCopyToLayout(vk::CommandBuffer cmd, uint32_t imageIndex, vk::ImageLayout newLayout)
+{
+  Assertion(imageIndex < m_device.swapchainImageCount(),
+    "transitionSceneCopyToLayout: imageIndex %u out of bounds (swapchain has %u images)",
+    imageIndex, m_device.swapchainImageCount());
+
+  const auto oldLayout = m_targets.sceneColorLayout(imageIndex);
+  if (oldLayout == newLayout) {
+    return;
+  }
+
+  vk::ImageMemoryBarrier2 barrier{};
+  const auto src = stageAccessForLayout(oldLayout);
+  const auto dst = stageAccessForLayout(newLayout);
+  barrier.srcStageMask = src.stageMask;
+  barrier.srcAccessMask = src.accessMask;
+  barrier.dstStageMask = dst.stageMask;
+  barrier.dstAccessMask = dst.accessMask;
+  barrier.oldLayout = oldLayout;
+  barrier.newLayout = newLayout;
+  barrier.image = m_targets.sceneColorImage(imageIndex);
+  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.layerCount = 1;
+
+  vk::DependencyInfo dep{};
+  dep.imageMemoryBarrierCount = 1;
+  dep.pImageMemoryBarriers = &barrier;
+  cmd.pipelineBarrier2(dep);
+
+  m_targets.setSceneColorLayout(imageIndex, newLayout);
 }
 
 // ---- Dynamic state ----

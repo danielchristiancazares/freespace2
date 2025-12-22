@@ -163,6 +163,7 @@ class VulkanRenderer {
 		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
 		void endDeferredGeometry(vk::CommandBuffer cmd);
 		void bindDeferredGlobalDescriptors();
+		void recordPreDeferredSceneColorCopy(const RenderCtx& render, uint32_t imageIndex);
 		void recordDeferredLighting(const RenderCtx& render,
 			vk::Buffer uniformBuffer,
 			const std::vector<DeferredLight>& lights);

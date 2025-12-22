@@ -29,8 +29,13 @@ public:
 
   // Boundary-facing state transitions (no "pending", no dual state)
   void requestSwapchainTarget();                  // swapchain + depth
-  void beginDeferredPass(bool clearNonColorBufs); // selects gbuffer target
+  void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
   void endDeferredGeometry(vk::CommandBuffer cmd);// transitions gbuffer -> shader read, selects swapchain-no-depth
+  void requestGBufferEmissiveTarget();            // gbuffer emissive-only (for pre-deferred scene copy)
+
+  // Capture the current swapchain image into the scene-color snapshot for this swapchain image index.
+  // No-op if the swapchain was not created with TRANSFER_SRC usage.
+  void captureSwapchainColorToSceneCopy(vk::CommandBuffer cmd, uint32_t imageIndex);
 
   // Clear control
   void requestClear();
@@ -107,6 +112,12 @@ private:
     void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
+  class GBufferEmissiveTarget final : public RenderTargetState {
+  public:
+    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
+  };
+
   struct ClearOps {
     vk::AttachmentLoadOp color = vk::AttachmentLoadOp::eLoad;
     vk::AttachmentLoadOp depth = vk::AttachmentLoadOp::eLoad;
@@ -133,6 +144,7 @@ private:
   // Render pass variants - called by target state classes
   void beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
   void beginGBufferRenderingInternal(vk::CommandBuffer cmd);
+  void beginGBufferEmissiveRenderingInternal(vk::CommandBuffer cmd);
   void beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
 
   // Layout transitions (barriers encapsulated here)
@@ -141,6 +153,7 @@ private:
   void transitionSwapchainToPresent(vk::CommandBuffer cmd, uint32_t imageIndex);
   void transitionGBufferToAttachment(vk::CommandBuffer cmd);
   void transitionGBufferToShaderRead(vk::CommandBuffer cmd);
+  void transitionSceneCopyToLayout(vk::CommandBuffer cmd, uint32_t imageIndex, vk::ImageLayout newLayout);
 
   VulkanDevice& m_device;
   VulkanRenderTargets& m_targets;
@@ -154,6 +167,7 @@ private:
   std::array<float, 4> m_clearColor{0.f, 0.f, 0.f, 1.f};
   float m_clearDepth = 1.0f;
   ClearOps m_clearOps = ClearOps::clearAll();
+  std::array<vk::AttachmentLoadOp, VulkanRenderTargets::kGBufferCount> m_gbufferLoadOps{};
 
   // Dynamic state cache
   vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;

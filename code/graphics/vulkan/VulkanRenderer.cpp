@@ -2,6 +2,7 @@
 #include "VulkanRenderer.h"
 #include "VulkanGraphics.h"
 #include "VulkanConstants.h"
+#include "VulkanClip.h"
 #include "VulkanFrameCaps.h"
 #include "VulkanFrameFlow.h"
 #include "VulkanTextureBindings.h"
@@ -526,7 +527,35 @@ RenderCtx VulkanRenderer::ensureRenderingStartedRecording(graphics::vulkan::Reco
 
 void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
 {
-  m_renderingSession->beginDeferredPass(clearNonColorBufs);
+  vk::CommandBuffer cmd = rec.cmd();
+  Assertion(cmd, "beginDeferredLighting called with null command buffer");
+
+  // Preserve the current clip scissor across the internal fullscreen copy pass. Model draw paths
+  // don't currently set scissor themselves.
+  const auto clip = getClipScissorFromScreen(gr_screen);
+  vk::Rect2D restoreScissor{};
+  restoreScissor.offset = vk::Offset2D{clip.x, clip.y};
+  restoreScissor.extent = vk::Extent2D{clip.width, clip.height};
+
+  const bool canCaptureSwapchain =
+    (m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) != vk::ImageUsageFlags{};
+
+  bool preserveEmissive = false;
+  if (canCaptureSwapchain) {
+    // End any active swapchain rendering and snapshot the current swapchain image.
+    m_renderingSession->captureSwapchainColorToSceneCopy(cmd, rec.imageIndex);
+
+    // Copy the captured scene color into the emissive G-buffer attachment (OpenGL parity).
+    m_renderingSession->requestGBufferEmissiveTarget();
+    const auto emissiveRender = ensureRenderingStartedRecording(rec);
+    recordPreDeferredSceneColorCopy(emissiveRender, rec.imageIndex);
+
+    // Restore scissor for subsequent geometry draws.
+    cmd.setScissor(0, 1, &restoreScissor);
+    preserveEmissive = true;
+  }
+
+  m_renderingSession->beginDeferredPass(clearNonColorBufs, preserveEmissive);
   // Begin dynamic rendering immediately so clears execute even if no geometry draws occur.
   (void)ensureRenderingStartedRecording(rec);
 }
@@ -680,6 +709,85 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
   
 
+}
+
+void VulkanRenderer::recordPreDeferredSceneColorCopy(const RenderCtx& render, uint32_t imageIndex)
+{
+  vk::CommandBuffer cmd = render.cmd;
+  Assertion(cmd, "recordPreDeferredSceneColorCopy called with null command buffer");
+  Assertion(m_renderTargets != nullptr, "recordPreDeferredSceneColorCopy requires render targets");
+  Assertion(m_bufferManager != nullptr, "recordPreDeferredSceneColorCopy requires buffer manager");
+  Assertion(m_shaderManager != nullptr, "recordPreDeferredSceneColorCopy requires shader manager");
+  Assertion(m_pipelineManager != nullptr, "recordPreDeferredSceneColorCopy requires pipeline manager");
+
+  const auto extent = m_vulkanDevice->swapchainExtent();
+
+  // Fullscreen draw state: independent of current clip/scissor.
+  vk::Viewport viewport{};
+  viewport.x = 0.f;
+  viewport.y = static_cast<float>(extent.height);
+  viewport.width = static_cast<float>(extent.width);
+  viewport.height = -static_cast<float>(extent.height);
+  viewport.minDepth = 0.f;
+  viewport.maxDepth = 1.f;
+  cmd.setViewport(0, 1, &viewport);
+
+  vk::Rect2D scissor{{0, 0}, extent};
+  cmd.setScissor(0, 1, &scissor);
+
+  cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+  cmd.setCullMode(vk::CullModeFlagBits::eNone);
+  cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
+  cmd.setDepthTestEnable(VK_FALSE);
+  cmd.setDepthWriteEnable(VK_FALSE);
+  cmd.setDepthCompareOp(vk::CompareOp::eAlways);
+  cmd.setStencilTestEnable(VK_FALSE);
+
+  ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_COPY);
+
+  static const vertex_layout copyLayout = []() {
+    vertex_layout layout{};
+    layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);
+    return layout;
+  }();
+
+  PipelineKey key{};
+  key.type = shader_type::SDR_TYPE_COPY;
+  key.variant_flags = 0;
+  key.color_format = static_cast<VkFormat>(render.targetInfo.colorFormat);
+  key.depth_format = static_cast<VkFormat>(render.targetInfo.depthFormat);
+  key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
+  key.color_attachment_count = render.targetInfo.colorAttachmentCount;
+  key.blend_mode = ALPHA_BLEND_NONE;
+  key.layout_hash = copyLayout.hash();
+
+  vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, copyLayout);
+  cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+
+  // Push the scene-color snapshot as the per-draw texture (binding 2).
+  vk::DescriptorImageInfo sceneInfo{};
+  sceneInfo.sampler = m_renderTargets->sceneColorSampler();
+  sceneInfo.imageView = m_renderTargets->sceneColorView(imageIndex);
+  sceneInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+  vk::WriteDescriptorSet write{};
+  write.dstBinding = 2;
+  write.descriptorCount = 1;
+  write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  write.pImageInfo = &sceneInfo;
+
+  std::array<vk::WriteDescriptorSet, 1> writes{write};
+  cmd.pushDescriptorSetKHR(
+    vk::PipelineBindPoint::eGraphics,
+    m_descriptorLayouts->pipelineLayout(),
+    0,
+    writes);
+
+  // Fullscreen triangle (same vertex buffer as deferred ambient).
+  vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
+  vk::DeviceSize offset = 0;
+  cmd.bindVertexBuffers(0, 1, &fullscreenVB, &offset);
+  cmd.draw(3, 1, 0, 0);
 }
 
 vk::Buffer VulkanRenderer::getBuffer(gr_buffer_handle handle) const
