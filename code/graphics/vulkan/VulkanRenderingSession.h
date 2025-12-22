@@ -13,10 +13,13 @@
 namespace graphics {
 namespace vulkan {
 
+class VulkanTextureManager;
+
 class VulkanRenderingSession {
 public:
   VulkanRenderingSession(VulkanDevice& device,
-    VulkanRenderTargets& targets);
+    VulkanRenderTargets& targets,
+    VulkanTextureManager& textures);
 
     // Frame boundaries - called by VulkanRenderer
     void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
@@ -32,6 +35,7 @@ public:
   void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
   void endDeferredGeometry(vk::CommandBuffer cmd);// transitions gbuffer -> shader read, selects swapchain-no-depth
   void requestGBufferEmissiveTarget();            // gbuffer emissive-only (for pre-deferred scene copy)
+  void requestBitmapTarget(int bitmapHandle, int face); // bitmap render target (RTT)
 
   // Capture the current swapchain image into the scene-color snapshot for this swapchain image index.
   // No-op if the swapchain was not created with TRANSFER_SRC usage.
@@ -118,6 +122,18 @@ private:
     void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
   };
 
+  class BitmapTarget final : public RenderTargetState {
+  public:
+    BitmapTarget(int handle, int face, vk::Format format);
+    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
+
+  private:
+    int m_handle = -1;
+    int m_face = 0;
+    vk::Format m_format = vk::Format::eUndefined;
+  };
+
   struct ClearOps {
     vk::AttachmentLoadOp color = vk::AttachmentLoadOp::eLoad;
     vk::AttachmentLoadOp depth = vk::AttachmentLoadOp::eLoad;
@@ -146,6 +162,7 @@ private:
   void beginGBufferRenderingInternal(vk::CommandBuffer cmd);
   void beginGBufferEmissiveRenderingInternal(vk::CommandBuffer cmd);
   void beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
+  void beginBitmapRenderingInternal(vk::CommandBuffer cmd, int bitmapHandle, int face);
 
   // Layout transitions (barriers encapsulated here)
   void transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex);
@@ -157,6 +174,7 @@ private:
 
   VulkanDevice& m_device;
   VulkanRenderTargets& m_targets;
+  VulkanTextureManager& m_textures;
 
   // Target state - single truth, no pending/active duality
   std::unique_ptr<RenderTargetState> m_target;
