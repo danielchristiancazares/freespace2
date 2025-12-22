@@ -523,7 +523,22 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& re
     m_frameCounter);
 
   bindDeferredGlobalDescriptors();
-  recordDeferredLighting(rec);
+  VulkanFrame& frame = rec.ref();
+  vk::Buffer uniformBuffer = frame.uniformBuffer().buffer();
+
+  // Build lights from engine state (boundary: conditionals live here only).
+  std::vector<DeferredLight> lights = buildDeferredLights(
+    frame,
+    uniformBuffer,
+    gr_view_matrix,
+    gr_projection_matrix,
+    getMinUniformBufferAlignment());
+
+  if (!lights.empty()) {
+    // Activate swapchain rendering without depth (target set by endDeferredGeometry).
+    auto render = ensureRenderingStartedRecording(rec);
+    recordDeferredLighting(render, uniformBuffer, lights);
+  }
 
   vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingFinish called with null command buffer");
@@ -1111,26 +1126,12 @@ void VulkanRenderer::createDeferredLightingResources() {
   m_cylinderMesh.indexCount = static_cast<uint32_t>(cylIndices.size());
 }
 
-void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& rec) {
-  vk::CommandBuffer cmd = rec.cmd();
-  vk::Buffer uniformBuffer = rec.ref().uniformBuffer().buffer();
-
-  // Build lights from engine state
-  std::vector<DeferredLight> lights = buildDeferredLights(
-    rec.ref(),
-    uniformBuffer,
-    gr_view_matrix,
-    gr_projection_matrix,
-    getMinUniformBufferAlignment());
-    
-
-
-    if (lights.empty()) {
-      return;
-  }
-
-  // Activate swapchain rendering without depth (target set by endDeferredGeometry).
-  (void)ensureRenderingStartedRecording(rec);
+void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
+  vk::Buffer uniformBuffer,
+  const std::vector<DeferredLight>& lights)
+{
+  vk::CommandBuffer cmd = render.cmd;
+  Assertion(cmd, "recordDeferredLighting called with null command buffer");
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {
@@ -1167,12 +1168,14 @@ void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& re
   deferredLayout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);  // Position only for volume meshes
 
   // Create pipeline key for deferred lighting
+  const auto& rt = render.targetInfo;
   PipelineKey key{};
   key.type = shader_type::SDR_TYPE_DEFERRED_LIGHTING;
   key.variant_flags = 0;
-  key.color_format = static_cast<VkFormat>(m_vulkanDevice->swapchainFormat());
-  key.depth_format = VK_FORMAT_UNDEFINED;  // No depth attachment
-  key.color_attachment_count = 1;
+  key.color_format = static_cast<VkFormat>(rt.colorFormat);
+  key.depth_format = static_cast<VkFormat>(rt.depthFormat);
+  key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
+  key.color_attachment_count = rt.colorAttachmentCount;
   key.blend_mode = ALPHA_BLEND_ADDITIVE;
   key.layout_hash = deferredLayout.hash();
 

@@ -112,7 +112,7 @@ Introduce `RenderCtx` (proves rendering is active):
 ### 4.2 Migrate draw APIs (PARTIAL)
 
 - Thread `RenderCtx&` through internal draw helpers so "rendering active" is required by signature rather than being fetched
-  internally (model draw helper updated; continue expanding this pattern).
+  internally (model draw helper updated; deferred lighting recording updated; continue expanding this pattern).
 
 ### 4.3 Deferred lighting call order tokens
 

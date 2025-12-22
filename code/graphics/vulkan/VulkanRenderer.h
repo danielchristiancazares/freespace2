@@ -158,7 +158,9 @@ class VulkanRenderer {
 		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
 		void endDeferredGeometry(vk::CommandBuffer cmd);
 		void bindDeferredGlobalDescriptors();
-		void recordDeferredLighting(graphics::vulkan::RecordingFrame& rec);
+		void recordDeferredLighting(const RenderCtx& render,
+			vk::Buffer uniformBuffer,
+			const std::vector<DeferredLight>& lights);
 
 			void createUploadCommandPool();
 			void createSubmitTimelineSemaphore();

@@ -48,6 +48,8 @@ validation-safety, and "foot-gun" APIs.
 - Dynamic rendering is started via an idempotent `VulkanRenderingSession::ensureRendering()` (session owns the active pass).
 - Frame/target boundaries always end any active pass internally (`endActivePass()` is no longer a no-op).
 - Draw paths consume a `RenderCtx` capability token from `VulkanRenderer::ensureRenderingStarted(frameCtx)` as proof that rendering is active.
+- Internal VulkanRenderer draw code (deferred lighting recording) also consumes `RenderCtx` rather than pulling a raw command buffer
+  from `RecordingFrame`.
 - Draw code can no longer grab the raw command buffer from `VulkanFrame`/`FrameCtx` as an escape hatch:
   `VulkanFrame::commandBuffer()` is private, and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
 
