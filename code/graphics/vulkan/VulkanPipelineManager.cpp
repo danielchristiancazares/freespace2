@@ -421,23 +421,14 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
   // Fail-fast: pipeline color attachment count/formats must match the creation request
   Assertion(!colorFormats.empty(), "colorFormats must not be empty");
   if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
-    // When using vertex attributes, require Location 0; log if Location 1 is missing.
+    // When using vertex attributes, require Location 0 (position). Other locations are shader-dependent
+    // and may legitimately be absent (e.g., Interface/NanoVG use locations 0 and 2 with no color).
     const VertexInputState& vertexInputState = getVertexInputState(layout);
     bool hasLoc0 = false;
-    bool hasLoc1 = false;
     for (const auto& a : vertexInputState.attributes) {
       if (a.location == 0) hasLoc0 = true;
-      if (a.location == 1) hasLoc1 = true;
     }
     Assertion(hasLoc0, "Vertex input pipeline created without Location 0 attribute");
-    if (!hasLoc1) {
-      vkprintf("VulkanPipelineManager: missing Location 1 attribute for vertex-input pipeline "
-               "(shaderType=%d variantFlags=%u layoutHash=%zu colorAttachments=%u)\n",
-               static_cast<int>(key.type),
-               key.variant_flags,
-               key.layout_hash,
-               key.color_attachment_count);
-    }
   }
 
   vk::PipelineDepthStencilStateCreateInfo depthStencil{};
