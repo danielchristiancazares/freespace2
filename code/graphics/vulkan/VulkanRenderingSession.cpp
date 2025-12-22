@@ -114,7 +114,12 @@ void VulkanRenderingSession::requestSwapchainTarget() {
 
 void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs) {
   endActivePass();
-  m_clearOps = clearNonColorBufs ? ClearOps::clearAll() : m_clearOps.withDepthStencilClear();
+  // Deferred geometry targets must not inherit swapchain clear/load state. If we "load" here we
+  // can accumulate stale G-buffer data (which then shows up as smearing/trails during deferred
+  // shading). The OpenGL backend preserves pre-deferred scene color by explicitly copying it
+  // into the emissive buffer; until we mirror that behavior, we hard-clear the full G-buffer.
+  (void)clearNonColorBufs; // parameter retained for API parity; Vulkan clears all G-buffer attachments currently.
+  m_clearOps = ClearOps::clearAll();
   m_target = std::make_unique<DeferredGBufferTarget>();
 }
 

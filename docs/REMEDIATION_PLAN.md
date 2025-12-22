@@ -146,6 +146,15 @@ Introduce `RenderCtx` (proves rendering is active):
 
 ---
 
+## 7) Deferred Lighting Baseline Correctness (DONE, With A Known Visual Gap)
+
+- Ambient deferred-light pass initializes background pixels (prevents undefined swapchain content when `PositionBuffer` is clear).
+- Deferred geometry clears the full G-buffer on entry (prevents stale accumulation when deferred begins after swapchain draws).
+- Known gap (future work): mirror OpenGL's "pre-deferred scene color -> emissive buffer" behavior so starfields/nebula/backgrounds
+  rendered before deferred begin survive into the deferred composite.
+
+---
+
 ## Milestone Summary
 
 | Milestone | Description | Status |

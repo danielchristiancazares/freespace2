@@ -81,6 +81,14 @@ validation-safety, and "foot-gun" APIs.
   (`code/graphics/vulkan/VulkanBufferManager.cpp`).
 - `updateBufferData(..., nullptr)` is treated as allocation-only (persistent mapping setup).
 
+### Deferred lighting no longer leaves undefined swapchain pixels
+
+- Removed temporary diagnostic output paths in `code/graphics/shaders/deferred.frag` that produced magenta output.
+- The ambient deferred-light pass now *initializes background pixels* (no geometry) so `loadOp=LOAD` + fragment discard
+  cannot manifest as "trails" / stale swapchain memory.
+- Deferred geometry always clears the full G-buffer on entry (prevents stale G-buffer accumulation when deferred starts
+  after an earlier swapchain draw).
+
 ## Medium
 
 No remaining medium items.
