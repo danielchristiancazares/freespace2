@@ -1,4 +1,5 @@
 #include "VulkanTextureManager.h"
+#include "VulkanPhaseContexts.h"
 
 #include "bmpman/bmpman.h"
 #include "bmpman/bm_internal.h"
@@ -573,8 +574,12 @@ void VulkanTextureManager::createDefaultSpecTexture()
   m_defaultSpecTextureHandle = kDefaultSpecTextureHandle;
 }
 
-void VulkanTextureManager::flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex)
+void VulkanTextureManager::flushPendingUploads(const UploadCtx& ctx)
 {
+  VulkanFrame& frame = ctx.frame;
+  vk::CommandBuffer cmd = ctx.cmd;
+  const uint32_t currentFrameIndex = ctx.currentFrameIndex;
+
   processPendingRetirements();
 
   // Resolve any pending bindless slot requests at the frame-start safe point (before descriptor sync).

@@ -17,6 +17,7 @@ namespace graphics {
 namespace vulkan {
 
 class VulkanTextureUploader;
+struct UploadCtx;
 
 // Helper for block-compressed images (BC1/BC3/BC7). Public for test coverage.
 inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
@@ -184,7 +185,7 @@ class VulkanTextureManager {
 		friend class VulkanTextureUploader;
 
 		// Flush pending uploads (upload phase only; records GPU work).
-		void flushPendingUploads(VulkanFrame& frame, vk::CommandBuffer cmd, uint32_t currentFrameIndex);
+		void flushPendingUploads(const UploadCtx& ctx);
 
 		void processPendingRetirements();
 		void retryPendingBindlessSlots();
