@@ -54,7 +54,7 @@ public:
 
 	void flushPendingUploads(const UploadCtx& ctx)
 	{
-		m_textures.flushPendingUploads(ctx.frame, ctx.cmd, ctx.currentFrameIndex);
+		m_textures.flushPendingUploads(ctx);
 	}
 
 private:
