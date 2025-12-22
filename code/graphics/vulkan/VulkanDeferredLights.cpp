@@ -71,10 +71,6 @@ void FullscreenLight::record(const DeferredDrawContext& ctx, vk::Buffer fullscre
     if (ctx.dynamicBlendEnable) {
         vk::Bool32 blendEnable = isAmbient ? VK_FALSE : VK_TRUE;
         ctx.cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
-        
-
-    } else {
-
     }
 
     pushLightDescriptors(ctx.cmd, ctx.layout, ctx.uniformBuffer, matrixOffset, lightOffset);
