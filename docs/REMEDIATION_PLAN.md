@@ -155,6 +155,23 @@ Introduce `RenderCtx` (proves rendering is active):
 
 ---
 
+## 8) Bitmap Render Targets + Dynamic State Bridging (DONE)
+
+The Vulkan backend must honor the engine's render-to-texture API (`bm_make_render_target` / `bm_set_render_target`) and
+engine-driven viewport/scissor changes (HTL target monitor, cockpit displays, envmap RTT, etc).
+
+- Implemented bmpman RTT API in Vulkan:
+  - `VulkanTextureManager::createRenderTarget()` creates a GPU-backed image + sample/attachment views.
+  - `VulkanRenderingSession` gained a `BitmapTarget` state to render into those images via dynamic rendering.
+  - Unbind transitions the render target to shader-read and generates mipmaps when requested.
+  - Render-target views are destroyed via the same serial-gated deferred release mechanism as other GPU resources.
+- Vulkan now honors engine dynamic state:
+  - Implemented `gf_set_viewport`.
+  - `gf_set_clip` / `gf_reset_clip` now apply dynamic scissor updates (so clip changes affect model draws).
+  - `VulkanRenderingSession::applyDynamicState()` no longer overwrites viewport at pass begin (viewport is owned by engine calls).
+
+---
+
 ## Milestone Summary
 
 | Milestone | Description | Status |

@@ -1,5 +1,6 @@
 #include "VulkanRenderingSession.h"
 #include "VulkanDebug.h"
+#include "VulkanTextureManager.h"
 #include "osapi/outwnd.h"
 #include <fstream>
 #include <chrono>
@@ -68,9 +69,11 @@ StageAccess stageAccessForLayout(vk::ImageLayout layout)
 } // namespace
 
 VulkanRenderingSession::VulkanRenderingSession(VulkanDevice& device,
-    VulkanRenderTargets& targets)
+    VulkanRenderTargets& targets,
+    VulkanTextureManager& textures)
     : m_device(device)
     , m_targets(targets)
+    , m_textures(textures)
 {
   m_swapchainLayouts.assign(m_device.swapchainImageCount(), vk::ImageLayout::eUndefined);
   m_target = std::make_unique<SwapchainWithDepthTarget>();
@@ -119,6 +122,13 @@ RenderTargetInfo VulkanRenderingSession::ensureRendering(vk::CommandBuffer cmd, 
 void VulkanRenderingSession::requestSwapchainTarget() {
   endActivePass();
   m_target = std::make_unique<SwapchainWithDepthTarget>();
+}
+
+void VulkanRenderingSession::requestBitmapTarget(int bitmapHandle, int face)
+{
+  endActivePass();
+  const auto fmt = m_textures.renderTargetFormat(bitmapHandle);
+  m_target = std::make_unique<BitmapTarget>(bitmapHandle, face, fmt);
 }
 
 void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive) {
@@ -296,10 +306,33 @@ void VulkanRenderingSession::GBufferEmissiveTarget::begin(VulkanRenderingSession
   s.beginGBufferEmissiveRenderingInternal(cmd);
 }
 
+VulkanRenderingSession::BitmapTarget::BitmapTarget(int handle, int face, vk::Format format)
+    : m_handle(handle), m_face(face), m_format(format)
+{
+}
+
+RenderTargetInfo
+VulkanRenderingSession::BitmapTarget::info(const VulkanDevice& /*device*/, const VulkanRenderTargets& /*targets*/) const
+{
+  RenderTargetInfo out{};
+  out.colorFormat = m_format;
+  out.colorAttachmentCount = 1;
+  out.depthFormat = vk::Format::eUndefined;
+  return out;
+}
+
+void VulkanRenderingSession::BitmapTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t /*imageIndex*/)
+{
+  s.beginBitmapRenderingInternal(cmd, m_handle, m_face);
+}
+
 // ---- Internal rendering methods ----
 
 void VulkanRenderingSession::beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
   const auto extent = m_device.swapchainExtent();
+
+  // Switching back to swapchain mid-frame requires re-establishing attachment layout.
+  transitionSwapchainToAttachment(cmd, imageIndex);
 
   // Depth may have been transitioned to shader-read during deferred lighting.
   transitionDepthToAttachment(cmd);
@@ -421,6 +454,9 @@ void VulkanRenderingSession::beginGBufferEmissiveRenderingInternal(vk::CommandBu
 void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
   const auto extent = m_device.swapchainExtent();
 
+  // Switching back to swapchain mid-frame requires re-establishing attachment layout.
+  transitionSwapchainToAttachment(cmd, imageIndex);
+
   vk::RenderingAttachmentInfo colorAttachment{};
   colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
   colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
@@ -437,6 +473,41 @@ void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandB
   renderingInfo.colorAttachmentCount = 1;
   renderingInfo.pColorAttachments = &colorAttachment;
   renderingInfo.pDepthAttachment = nullptr;  // No depth for deferred lighting
+
+  cmd.beginRendering(renderingInfo);
+
+  // Clear ops are one-shot; revert to load after consumption.
+  m_clearOps = ClearOps::loadAll();
+}
+
+void VulkanRenderingSession::beginBitmapRenderingInternal(vk::CommandBuffer cmd, int bitmapHandle, int face)
+{
+  Assertion(bitmapHandle >= 0, "beginBitmapRenderingInternal called with invalid bitmap handle %d", bitmapHandle);
+  Assertion(m_textures.hasRenderTarget(bitmapHandle), "beginBitmapRenderingInternal called for non-render-target bitmap %d",
+            bitmapHandle);
+
+  // Normalize face for 2D render targets.
+  const int clampedFace = (face < 0) ? 0 : face;
+
+  const auto extent = m_textures.renderTargetExtent(bitmapHandle);
+
+  // Transition the target to a writable attachment layout.
+  m_textures.transitionRenderTargetToAttachment(cmd, bitmapHandle);
+
+  vk::RenderingAttachmentInfo colorAttachment{};
+  colorAttachment.imageView = m_textures.renderTargetAttachmentView(bitmapHandle, clampedFace);
+  colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+  colorAttachment.loadOp = m_clearOps.color;
+  colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+  colorAttachment.clearValue = vk::ClearColorValue(m_clearColor);
+
+  vk::RenderingInfo renderingInfo{};
+  renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &colorAttachment;
+  renderingInfo.pDepthAttachment = nullptr;
+  renderingInfo.pStencilAttachment = nullptr;
 
   cmd.beginRendering(renderingInfo);
 
@@ -631,19 +702,8 @@ void VulkanRenderingSession::transitionSceneCopyToLayout(vk::CommandBuffer cmd, 
 // ---- Dynamic state ----
 
 void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd) {
-  const auto extent = m_device.swapchainExtent();
   const uint32_t attachmentCount = m_activeInfo.colorAttachmentCount;
   const bool hasDepthAttachment = (m_activeInfo.depthFormat != vk::Format::eUndefined);
-
-  // Vulkan Y-flip: set y=height and height=-height to match OpenGL coordinate system
-  vk::Viewport viewport;
-  viewport.x = 0.f;
-  viewport.y = static_cast<float>(extent.height);
-  viewport.width = static_cast<float>(extent.width);
-  viewport.height = -static_cast<float>(extent.height);
-  viewport.minDepth = 0.f;
-  viewport.maxDepth = 1.f;
-  cmd.setViewport(0, viewport);
 
   cmd.setCullMode(m_cullMode);
   cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip

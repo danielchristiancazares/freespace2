@@ -65,7 +65,7 @@ Swapchain recreation triggers `VulkanRenderTargets::resize()`.
 ### `VulkanRenderer` (Orchestration)
 
 Coordinates:
-- Initialization order: device → layouts → render targets → session → frames → managers
+- Initialization order: device → layouts → render targets → frames → managers → session
 - Frame ring (`kFramesInFlight` frames via `VulkanFrame`)
 - CPU/GPU sync via `VulkanFrame::wait_for_gpu()` fence
 - Frame lifecycle tracking: available/in-flight deques (renderer) + `std::optional<RecordingFrame>` (graphics backend)
@@ -85,11 +85,12 @@ Responsible for:
 - Image layout transitions (swapchain, depth, G-buffer) via `pipelineBarrier2`
 - Target switching:
   - `requestSwapchainTarget()` — swapchain + depth
+  - `requestBitmapTarget(bitmapHandle, face)` — bitmap render targets (bmpman RTT; cubemap faces supported)
   - `requestGBufferEmissiveTarget()` — G-buffer emissive-only (pre-deferred scene copy)
   - `beginDeferredPass(clearNonColorBufs, preserveEmissive)` — select G-buffer target + clear policy (emissive may be preserved)
   - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
 - Lazy render pass begin via `ensureRendering(cmd, imageIndex)`. The session owns the active pass and ends it automatically at frame/target boundaries.
-- Dynamic state application (`applyDynamicState()`) is performed when a pass begins after selecting the target.
+- Dynamic state application (`applyDynamicState()`) is performed when a pass begins after selecting the target (but does not override viewport/scissor; those are driven by engine calls).
 
 The render target’s “contract” (attachment formats + count) is exposed as `RenderTargetInfo` and is used to key pipelines.
 

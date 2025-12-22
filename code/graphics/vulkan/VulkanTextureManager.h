@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <cstddef>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -172,6 +173,23 @@ class VulkanTextureManager {
 		// Get texture descriptor info without frame/cmd (for already-resident textures)
 		vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey& samplerKey);
 
+		// ------------------------------------------------------------------------
+		// Bitmap render targets (bmpman RTT)
+		// ------------------------------------------------------------------------
+		// Creates a GPU-backed bitmap render target for the given bmpman base-frame handle.
+		// The image is cleared to black and transitioned to shader-read on creation.
+		bool createRenderTarget(int baseFrameHandle, uint32_t width, uint32_t height, int flags, uint32_t* outMipLevels);
+		bool hasRenderTarget(int baseFrameHandle) const;
+		vk::Extent2D renderTargetExtent(int baseFrameHandle) const;
+		vk::Format renderTargetFormat(int baseFrameHandle) const;
+		uint32_t renderTargetMipLevels(int baseFrameHandle) const;
+		vk::ImageView renderTargetAttachmentView(int baseFrameHandle, int face) const;
+
+		// Layout transitions and mip generation for render targets. These record GPU work into the provided cmd buffer.
+		void transitionRenderTargetToAttachment(vk::CommandBuffer cmd, int baseFrameHandle);
+		void transitionRenderTargetToShaderRead(vk::CommandBuffer cmd, int baseFrameHandle);
+		void generateRenderTargetMipmaps(vk::CommandBuffer cmd, int baseFrameHandle);
+
 	// Synthetic handle for fallback texture (won't collide with bmpman handles which are >= 0)
 	static constexpr int kFallbackTextureHandle = -1000;
 	// Synthetic handle for default white texture (won't collide with bmpman handles which are >= 0)
@@ -193,6 +211,20 @@ class VulkanTextureManager {
 		void onTextureResident(int textureHandle);
 		void retireTexture(int textureHandle, uint64_t retireSerial);
 
+		struct RenderTargetRecord {
+			vk::Extent2D extent{};
+			vk::Format format = vk::Format::eUndefined;
+			uint32_t mipLevels = 1;
+			uint32_t layers = 1;
+			bool isCubemap = false;
+			// Attachment views for rendering:
+			// - 2D target: faceViews[0]
+			// - Cubemap: faceViews[0..5]
+			std::array<vk::UniqueImageView, 6> faceViews{};
+		};
+
+		std::optional<RenderTargetRecord> tryTakeRenderTargetRecord(int baseFrameHandle);
+
 	vk::Device m_device;
 	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
 	vk::Queue m_transferQueue;
@@ -207,6 +239,7 @@ class VulkanTextureManager {
 	// - presence in m_bindlessSlots    => has a bindless slot assigned
 	std::unordered_map<int, ResidentTexture> m_residentTextures; // keyed by base frame (or synthetic handles)
 	std::unordered_map<int, UnavailableTexture> m_unavailableTextures; // keyed by base frame
+	std::unordered_map<int, RenderTargetRecord> m_renderTargets; // keyed by base frame (bmpman render targets)
 	std::unordered_map<int, uint32_t> m_bindlessSlots; // keyed by base frame
 	std::unordered_set<int> m_pendingBindlessSlots; // textures waiting for a bindless slot assignment (retry each frame start)
 	std::unordered_set<int> m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)

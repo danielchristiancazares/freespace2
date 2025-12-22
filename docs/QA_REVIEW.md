@@ -91,9 +91,25 @@ validation-safety, and "foot-gun" APIs.
 - Deferred geometry clears the non-emissive G-buffer attachments on entry and loads emissive (prevents stale G-buffer
   accumulation while preserving pre-deferred backgrounds).
 
+### Bitmap render targets are implemented (bm_make_render_target / bm_set_render_target)
+
+- Vulkan now implements the bmpman RTT API:
+  - `gf_bm_make_render_target` creates a GPU-backed image + image views and registers it with `VulkanTextureManager`.
+  - `gf_bm_set_render_target` switches the active `VulkanRenderingSession` target between swapchain and bitmap targets.
+- Leaving a bitmap render target transitions it to shader-read and generates its mip chain if requested.
+- Render-target attachment views participate in serial-gated deferred release, so they are not destroyed while GPU work is in flight.
+- Current parity note: render targets are color-only (no depth/stencil attachment), matching the current OpenGL RTT implementation.
+
+### Dynamic viewport/scissor updates are now honored
+
+- Vulkan implements `gf_set_viewport` and now keeps the dynamic scissor state in sync with `gr_set_clip` / `gr_reset_clip`.
+- `VulkanRenderingSession::applyDynamicState()` no longer overwrites viewport at render-pass begin, so engine-driven
+  viewport changes (e.g. HTL target monitor) remain effective.
+
 ## Medium
 
-No remaining medium items.
+- Vulkan shader coverage is still incomplete: `VulkanLayoutContracts` declares shader types that are not mapped in
+  `VulkanShaderManager`. If invoked, Vulkan will throw (fail-fast) rather than silently render incorrectly.
 
 ## Low
 

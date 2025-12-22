@@ -68,6 +68,12 @@ class VulkanRenderer {
 		vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
 		// Returns a valid bindless slot index. Invalid handles return slot 0 (fallback).
 		uint32_t getBindlessTextureIndex(int bitmapHandle);
+		// Recording-only: update dynamic viewport/scissor state without requiring an active rendering pass.
+		void setViewport(const FrameCtx& ctx, const vk::Viewport& viewport);
+		void setScissor(const FrameCtx& ctx, const vk::Rect2D& scissor);
+		// Bitmap render targets (bmpman RTT API)
+		bool createBitmapRenderTarget(int handle, int* width, int* height, int* bpp, int* mm_lvl, int flags);
+		bool setBitmapRenderTarget(const FrameCtx& ctx, int handle, int face);
 		void setModelUniformBinding(VulkanFrame& frame,
 			gr_buffer_handle handle,
 			size_t offset,

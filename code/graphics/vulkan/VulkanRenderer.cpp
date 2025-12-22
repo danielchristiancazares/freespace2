@@ -49,7 +49,6 @@ bool VulkanRenderer::initialize() {
   // Create renderer-specific resources
   createDescriptorResources();
   createRenderTargets();
-  createRenderingSession();
   createUploadCommandPool();
   createSubmitTimelineSemaphore();
   createFrames();
@@ -81,6 +80,9 @@ bool VulkanRenderer::initialize() {
     m_vulkanDevice->graphicsQueueIndex());
   m_textureBindings = std::make_unique<VulkanTextureBindings>(*m_textureManager);
   m_textureUploader = std::make_unique<VulkanTextureUploader>(*m_textureManager);
+
+  // Rendering session depends on the texture manager for bitmap render targets (RTT).
+  createRenderingSession();
 
   createDeferredLightingResources();
 
@@ -129,8 +131,9 @@ void VulkanRenderer::createRenderTargets() {
 }
 
 void VulkanRenderer::createRenderingSession() {
+  Assertion(m_textureManager != nullptr, "createRenderingSession requires a valid texture manager");
   m_renderingSession = std::make_unique<VulkanRenderingSession>(
-    *m_vulkanDevice, *m_renderTargets);
+    *m_vulkanDevice, *m_renderTargets, *m_textureManager);
 }
 
 void VulkanRenderer::createUploadCommandPool() {
@@ -857,6 +860,107 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(int bitmapHandle,
   const auto id = TextureId::tryFromBaseFrame(baseFrame);
   Assertion(id.has_value(), "Invalid base frame %d in getTextureDescriptor", baseFrame);
   return m_textureBindings->descriptor(*id, m_frameCounter, samplerKey);
+}
+
+void VulkanRenderer::setViewport(const FrameCtx& ctx, const vk::Viewport& viewport)
+{
+  Assertion(&ctx.renderer == this, "setViewport called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+    return;
+  }
+  cmd.setViewport(0, 1, &viewport);
+}
+
+void VulkanRenderer::setScissor(const FrameCtx& ctx, const vk::Rect2D& scissor)
+{
+  Assertion(&ctx.renderer == this, "setScissor called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+    return;
+  }
+  cmd.setScissor(0, 1, &scissor);
+}
+
+bool VulkanRenderer::createBitmapRenderTarget(int handle, int* width, int* height, int* bpp, int* mm_lvl, int flags)
+{
+  Assertion(m_textureManager != nullptr, "createBitmapRenderTarget called before texture manager initialization");
+  if (!width || !height || !bpp || !mm_lvl) {
+    return false;
+  }
+  if (handle < 0) {
+    return false;
+  }
+
+  uint32_t w = static_cast<uint32_t>(*width);
+  uint32_t h = static_cast<uint32_t>(*height);
+
+  // Cubemap faces must be square. Mirror OpenGL behavior: clamp to max dimension.
+  if ((flags & BMP_FLAG_CUBEMAP) && (w != h)) {
+    const uint32_t mx = (w > h) ? w : h;
+    w = mx;
+    h = mx;
+  }
+
+  // Hard clamp to device limits (fail-fast clamping, no silent overflow).
+  const auto& limits = m_vulkanDevice->properties().limits;
+  const uint32_t maxDim = (flags & BMP_FLAG_CUBEMAP) ? limits.maxImageDimensionCube : limits.maxImageDimension2D;
+  if (w > maxDim) {
+    w = maxDim;
+  }
+  if (h > maxDim) {
+    h = maxDim;
+  }
+
+  uint32_t mipLevels = 1;
+  if (!m_textureManager->createRenderTarget(handle, w, h, flags, &mipLevels)) {
+    return false;
+  }
+
+  *width = static_cast<int>(w);
+  *height = static_cast<int>(h);
+  // OpenGL parity: report 24bpp even though the underlying image is RGBA8.
+  *bpp = 24;
+  *mm_lvl = static_cast<int>(mipLevels);
+  return true;
+}
+
+bool VulkanRenderer::setBitmapRenderTarget(const FrameCtx& ctx, int handle, int face)
+{
+  Assertion(&ctx.renderer == this, "setBitmapRenderTarget called with FrameCtx from a different VulkanRenderer instance");
+  Assertion(m_renderingSession != nullptr, "setBitmapRenderTarget called before rendering session initialization");
+  Assertion(m_textureManager != nullptr, "setBitmapRenderTarget called before texture manager initialization");
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+    return false;
+  }
+
+  // bmpman updates gr_screen.rendering_to_texture *after* the graphics API callback returns, so this still reflects
+  // the previous target at this point.
+  const int prevTarget = gr_screen.rendering_to_texture;
+
+  // Switching targets requires ending any active dynamic rendering scope.
+  if (handle < 0) {
+    m_renderingSession->requestSwapchainTarget();
+  } else {
+    if (!m_textureManager->hasRenderTarget(handle)) {
+      return false;
+    }
+    m_renderingSession->requestBitmapTarget(handle, face);
+  }
+
+  // Leaving a bitmap render target: transition to shader-read and generate mipmaps if requested.
+  // (Skip when switching faces on the same cubemap.)
+  if (prevTarget >= 0 && prevTarget != handle) {
+    if (m_textureManager->renderTargetMipLevels(prevTarget) > 1) {
+      m_textureManager->generateRenderTargetMipmaps(cmd, prevTarget);
+    } else {
+      m_textureManager->transitionRenderTargetToShaderRead(cmd, prevTarget);
+    }
+  }
+
+  return true;
 }
 
 vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey)
