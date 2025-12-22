@@ -15,8 +15,10 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <set>
 #include <stdexcept>
+#include <unordered_map>
 
 #if SDL_VERSION_ATLEAST(2, 0, 6)
 #include <SDL_vulkan.h>
@@ -31,28 +33,181 @@ namespace {
 #if SDL_SUPPORTS_VULKAN
 const char* EngineName = "FreeSpaceOpen";
 
-const gameversion::version MinVulkanVersion(1, 4, 0, 0);
+	const gameversion::version MinVulkanVersion(1, 4, 0, 0);
 
-VkBool32 VKAPI_PTR debugReportCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-		VkDebugUtilsMessageTypeFlagsEXT messageTypes,
-		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-		void* /*pUserData*/) {
-		// Keep validation visible during Vulkan work; do not spam in non-debug builds.
-		const char* severity = "UNKNOWN";
-		if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-			severity = "ERROR";
-		} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-			severity = "WARN";
-		} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-			severity = "INFO";
-		} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
-			severity = "VERBOSE";
+	uint32_t fnv1a32(const char* str)
+	{
+		uint32_t hash = 2166136261u;
+		if (!str) {
+			return hash;
 		}
 
-		const char* msg = (pCallbackData && pCallbackData->pMessage) ? pCallbackData->pMessage : "<null>";
-		vkprintf("Validation [%s] (types=0x%x): %s\n", severity, static_cast<unsigned>(messageTypes), msg);
-		return VK_FALSE;
+		for (const unsigned char* p = reinterpret_cast<const unsigned char*>(str); *p; ++p) {
+			hash ^= *p;
+			hash *= 16777619u;
+		}
+		return hash;
 	}
+
+	enum class ValidationEmitKind { Skip, Normal, SuppressionNotice, Periodic };
+
+	ValidationEmitKind shouldEmitValidationMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity, uint32_t count)
+	{
+		const bool isError = (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0;
+		const uint32_t logFirst = isError ? 10u : 3u;
+		const uint32_t logEvery = isError ? 50u : 200u;
+
+		if (count <= logFirst) {
+			return ValidationEmitKind::Normal;
+		}
+		if (count == logFirst + 1) {
+			return ValidationEmitKind::SuppressionNotice;
+		}
+		if (count % logEvery == 0) {
+			return ValidationEmitKind::Periodic;
+		}
+		return ValidationEmitKind::Skip;
+	}
+
+	std::string formatValidationTypes(VkDebugUtilsMessageTypeFlagsEXT types)
+	{
+		std::string out;
+		auto add = [&out](const char* s) {
+			if (!out.empty()) {
+				out += "|";
+			}
+			out += s;
+		};
+
+		if (types & VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT) {
+			add("GENERAL");
+		}
+		if (types & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) {
+			add("VALIDATION");
+		}
+		if (types & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) {
+			add("PERFORMANCE");
+		}
+		if (out.empty()) {
+			out = "UNKNOWN";
+		}
+		return out;
+	}
+
+	void logValidationObjects(const VkDebugUtilsMessengerCallbackDataEXT* data)
+	{
+		if (!data || data->objectCount == 0 || data->pObjects == nullptr) {
+			return;
+		}
+
+		const uint32_t maxObjects = 8;
+		const uint32_t count = std::min(data->objectCount, maxObjects);
+		for (uint32_t i = 0; i < count; ++i) {
+			const auto& obj = data->pObjects[i];
+			const auto typeName = vk::to_string(static_cast<vk::ObjectType>(obj.objectType));
+			const char* name = (obj.pObjectName != nullptr) ? obj.pObjectName : "<unnamed>";
+			vkprintf("  object[%u]: type=%s handle=0x%llx name=%s\n",
+				i,
+				typeName.c_str(),
+				static_cast<unsigned long long>(obj.objectHandle),
+				name);
+		}
+		if (data->objectCount > maxObjects) {
+			vkprintf("  object[%u+]: %u more suppressed\n", maxObjects, data->objectCount - maxObjects);
+		}
+	}
+
+	void logValidationLabels(const VkDebugUtilsLabelEXT* labels, uint32_t count, const char* kind)
+	{
+		if (count == 0 || labels == nullptr || kind == nullptr) {
+			return;
+		}
+
+		const uint32_t maxLabels = 8;
+		const uint32_t n = std::min(count, maxLabels);
+		for (uint32_t i = 0; i < n; ++i) {
+			const char* name = (labels[i].pLabelName != nullptr) ? labels[i].pLabelName : "<unnamed>";
+			vkprintf("  %sLabel[%u]: %s\n", kind, i, name);
+		}
+		if (count > maxLabels) {
+			vkprintf("  %sLabel[%u+]: %u more suppressed\n", kind, maxLabels, count - maxLabels);
+		}
+	}
+
+	VkBool32 VKAPI_PTR debugReportCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+				VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+				const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+				void* /*pUserData*/) {
+				// Keep validation visible during Vulkan work, but avoid log spam from repeated warnings/errors.
+				static std::mutex s_mutex;
+				static std::unordered_map<uint64_t, uint32_t> s_counts;
+
+				const char* severity = "UNKNOWN";
+				if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+					severity = "ERROR";
+				} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+					severity = "WARN";
+				} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+					severity = "INFO";
+				} else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
+					severity = "VERBOSE";
+				}
+
+				const char* msg = (pCallbackData && pCallbackData->pMessage) ? pCallbackData->pMessage : "<null>";
+				const char* msgIdName = (pCallbackData && pCallbackData->pMessageIdName) ? pCallbackData->pMessageIdName : "<no-id-name>";
+				const int32_t msgIdNumber = pCallbackData ? pCallbackData->messageIdNumber : 0;
+
+				uint32_t count = 0;
+				ValidationEmitKind emit = ValidationEmitKind::Normal;
+				{
+					// Hash message id + type/severity so we can suppress repeated frame-to-frame spam.
+					uint32_t nameHash = fnv1a32(msgIdName);
+					nameHash ^= static_cast<uint32_t>(messageTypes) * 0x9e3779b1u;
+					nameHash ^= static_cast<uint32_t>(messageSeverity) * 0x85ebca6bu;
+					const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(msgIdNumber)) << 32) |
+						static_cast<uint64_t>(nameHash);
+
+					std::scoped_lock<std::mutex> lock(s_mutex);
+					count = ++s_counts[key];
+					emit = shouldEmitValidationMessage(messageSeverity, count);
+				}
+
+				if (emit == ValidationEmitKind::Skip) {
+					return VK_FALSE;
+				}
+
+				const std::string typeStr = formatValidationTypes(messageTypes);
+				if (emit == ValidationEmitKind::SuppressionNotice) {
+					vkprintf("Validation[%s] [%s] id=%d name=%s (repeated; suppressing further duplicates): %s\n",
+						severity,
+						typeStr.c_str(),
+						msgIdNumber,
+						msgIdName,
+						msg);
+				} else if (emit == ValidationEmitKind::Periodic) {
+					vkprintf("Validation[%s] [%s] id=%d name=%s (seen %u times): %s\n",
+						severity,
+						typeStr.c_str(),
+						msgIdNumber,
+						msgIdName,
+						count,
+						msg);
+				} else {
+					vkprintf("Validation[%s] [%s] id=%d name=%s: %s\n",
+						severity,
+						typeStr.c_str(),
+						msgIdNumber,
+						msgIdName,
+						msg);
+				}
+
+				logValidationObjects(pCallbackData);
+				if (pCallbackData) {
+					logValidationLabels(pCallbackData->pQueueLabels, pCallbackData->queueLabelCount, "Queue");
+					logValidationLabels(pCallbackData->pCmdBufLabels, pCallbackData->cmdBufLabelCount, "CmdBuf");
+				}
+				return VK_FALSE;
+			}
 #endif
 
 const SCP_vector<const char*> RequiredDeviceExtensions = {
