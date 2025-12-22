@@ -87,6 +87,14 @@ class VulkanRenderer {
 	// For debug asserts in draw path - lazy lookup since buffer may not exist at registration time
 	vk::Buffer getModelVertexHeapBuffer() const { return queryModelVertexHeapBuffer(); }
 		RenderCtx ensureRenderingStarted(const FrameCtx& ctx); // Recording-only (requires FrameCtx token)
+		// Recording-only: apply dynamic state before rendering begins (viewport/scissor/line width).
+		void applySetupFrameDynamicState(const FrameCtx& ctx,
+			const vk::Viewport& viewport,
+			const vk::Rect2D& scissor,
+			float lineWidth);
+		// Recording-only: debug labels (no render pass requirement).
+		void pushDebugGroup(const FrameCtx& ctx, const char* name);
+		void popDebugGroup(const FrameCtx& ctx);
 	vk::PipelineLayout getPipelineLayout() const { return m_descriptorLayouts->pipelineLayout(); }
 	vk::PipelineLayout getModelPipelineLayout() const { return m_descriptorLayouts->modelPipelineLayout(); }
 	size_t getMinUniformOffsetAlignment() const { return m_vulkanDevice->minUniformBufferOffsetAlignment(); }

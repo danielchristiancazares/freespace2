@@ -51,7 +51,9 @@ validation-safety, and "foot-gun" APIs.
 - Internal VulkanRenderer draw code (deferred lighting recording) also consumes `RenderCtx` rather than pulling a raw command buffer
   from `RecordingFrame`.
 - Draw code can no longer grab the raw command buffer from `VulkanFrame`/`FrameCtx` as an escape hatch:
-  `VulkanFrame::commandBuffer()` is private, and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
+  `VulkanFrame::commandBuffer()` is private, `RecordingFrame::cmd()` is private, and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
+- Recording-only operations that still need a command buffer (frame setup dynamic state, debug labels) go through `VulkanRenderer` methods
+  that require a `FrameCtx` token.
 
 ### Deferred lighting call order uses typestate tokens (no enum)
 

@@ -253,31 +253,28 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 // Called immediately after flip() via gr_setup_frame() per API contract.
     void gr_vulkan_setup_frame()
     {
-      auto& renderer = currentRenderer();
+  auto ctxBase = currentFrameCtx();
+  auto& renderer = ctxBase.renderer;
 
-  auto& rec = currentRecording();
-  VulkanFrame& frame = rec.ref();
+  VulkanFrame& frame = ctxBase.frame();
 
   // Reset per-frame uniform bindings (optional will be empty at frame start)
   frame.resetPerFrameBindings();
 
-    vk::CommandBuffer cmd = rec.cmd();
-    Assertion(cmd, "Frame has no valid command buffer");
+  // DO NOT start the render pass here - allow gr_clear to set clear flags first.
+  // The render pass will start lazily when the first draw or clear occurs.
 
-    // DO NOT start the render pass here - allow gr_clear to set clear flags first.
-    // The render pass will start lazily when the first draw or clear occurs.
-
-      // Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
+  // Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
     vk::Viewport viewport = createFullScreenViewport();
-    cmd.setViewport(0, 1, &viewport);
 
-    // Scissor: current clip region
+  // Scissor: current clip region
     vk::Rect2D scissor = createClipScissor();
-    cmd.setScissor(0, 1, &scissor);
 
-    // Line width: apply requested width, clamped to device limits
-    const auto& limits = renderer.vulkanDevice()->properties().limits;
-    cmd.setLineWidth(clampLineWidth(limits, g_requestedLineWidth));
+  // Line width: apply requested width, clamped to device limits
+  const auto& limits = renderer.vulkanDevice()->properties().limits;
+  const float lineWidth = clampLineWidth(limits, g_requestedLineWidth);
+
+  renderer.applySetupFrameDynamicState(ctxBase, viewport, scissor, lineWidth);
   }
 
 void gr_vulkan_delete_buffer(gr_buffer_handle handle)
@@ -1564,17 +1561,8 @@ void gr_vulkan_push_debug_group(const char* name)
   if (!g_backend || !g_backend->recording.has_value()) {
     return;  // No-op if not recording yet
   }
-  auto cmd = currentRecording().cmd();
-
-  vk::DebugUtilsLabelEXT label{};
-  label.pLabelName = name;
-  // Default color (white with alpha)
-  label.color[0] = 1.0f;
-  label.color[1] = 1.0f;
-  label.color[2] = 1.0f;
-  label.color[3] = 1.0f;
-
-  cmd.beginDebugUtilsLabelEXT(label);
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.pushDebugGroup(ctxBase, name);
 }
 
 void gr_vulkan_pop_debug_group()
@@ -1582,7 +1570,8 @@ void gr_vulkan_pop_debug_group()
   if (!g_backend || !g_backend->recording.has_value()) {
     return;  // No-op if not recording yet
   }
-  currentRecording().cmd().endDebugUtilsLabelEXT();
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.popDebugGroup(ctxBase);
 }
 
 int stub_create_query_object() { return -1; }

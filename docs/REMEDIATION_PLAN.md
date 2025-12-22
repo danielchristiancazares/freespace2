@@ -107,7 +107,9 @@ Introduce `RenderCtx` (proves rendering is active):
 - Only constructible by `VulkanRenderer` after starting/ensuring dynamic rendering.
 - Returned from `VulkanRenderer::ensureRenderingStarted(frameCtx)` and consumed by draw code as proof of phase.
 - Draw code cannot access the raw command buffer without `RenderCtx`:
-  `VulkanFrame::commandBuffer()` is private and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
+  `VulkanFrame::commandBuffer()` is private, `RecordingFrame::cmd()` is private, and `FrameCtx` no longer exposes `RecordingFrame` or `cmd()`.
+- Recording-only work that does not require an active render pass is routed through `VulkanRenderer` methods that require `FrameCtx`
+  (e.g., setup-frame dynamic state, debug labels).
 
 ### 4.2 Migrate draw APIs (PARTIAL)
 

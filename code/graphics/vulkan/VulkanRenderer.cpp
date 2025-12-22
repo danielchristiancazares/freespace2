@@ -471,6 +471,53 @@ RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
   return ensureRenderingStartedRecording(ctx.m_recording);
 }
 
+void VulkanRenderer::applySetupFrameDynamicState(const FrameCtx& ctx,
+  const vk::Viewport& viewport,
+  const vk::Rect2D& scissor,
+  float lineWidth)
+{
+  Assertion(&ctx.renderer == this,
+    "applySetupFrameDynamicState called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  Assertion(cmd, "applySetupFrameDynamicState called with null command buffer");
+
+  cmd.setViewport(0, 1, &viewport);
+  cmd.setScissor(0, 1, &scissor);
+  cmd.setLineWidth(lineWidth);
+}
+
+void VulkanRenderer::pushDebugGroup(const FrameCtx& ctx, const char* name)
+{
+  Assertion(name != nullptr, "pushDebugGroup called with null name");
+  Assertion(&ctx.renderer == this,
+    "pushDebugGroup called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+    return;
+  }
+
+  vk::DebugUtilsLabelEXT label{};
+  label.pLabelName = name;
+  // Default color (white with alpha)
+  label.color[0] = 1.0f;
+  label.color[1] = 1.0f;
+  label.color[2] = 1.0f;
+  label.color[3] = 1.0f;
+
+  cmd.beginDebugUtilsLabelEXT(label);
+}
+
+void VulkanRenderer::popDebugGroup(const FrameCtx& ctx)
+{
+  Assertion(&ctx.renderer == this,
+    "popDebugGroup called with FrameCtx from a different VulkanRenderer instance");
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+    return;
+  }
+  cmd.endDebugUtilsLabelEXT();
+}
+
 RenderCtx VulkanRenderer::ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec)
 {
   auto info = m_renderingSession->ensureRendering(rec.cmd(), rec.imageIndex);
