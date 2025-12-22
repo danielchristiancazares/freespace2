@@ -49,6 +49,11 @@ validation-safety, and "foot-gun" APIs.
 - Frame/target boundaries always end any active pass internally (`endActivePass()` is no longer a no-op).
 - Draw paths consume a `RenderCtx` capability token from `VulkanRenderer::ensureRenderingStarted()` as proof that rendering is active.
 
+### Deferred lighting call order uses typestate tokens (no enum)
+
+- Deferred lighting boundaries use move-only tokens (`DeferredGeometryCtx` -> `DeferredLightingCtx`) rather than a state enum.
+- The boundary API (`gr_vulkan_deferred_lighting_begin/end/finish`) stores those tokens and enforces correct call order.
+
 ## Medium
 
 ### Validation callback logging is basic
@@ -77,12 +82,6 @@ validation-safety, and "foot-gun" APIs.
 - Empty `else {}` in deferred lights (`code/graphics/vulkan/VulkanDeferredLights.cpp`).
 
 ## Tech Debt (Design Philosophy)
-
-### `DeferredBoundaryState` enum
-
-`VulkanRenderer` uses `enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish }`.
-
-Per `docs/DESIGN_PHILOSOPHY.md`, state enums should be replaced with typestate types or container membership.
 
 ### `MODEL_OFFSET_ABSENT` sentinel
 

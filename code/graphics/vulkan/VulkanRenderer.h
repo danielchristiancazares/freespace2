@@ -108,16 +108,12 @@ class VulkanRenderer {
 	const VulkanTextureManager* textureManager() const { return m_textureManager.get(); }
 
 		// Deferred rendering hooks
-		enum class DeferredBoundaryState { Idle, InGeometry, AwaitFinish };
-
-		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
-		void endDeferredGeometry(vk::CommandBuffer cmd);
-		void bindDeferredGlobalDescriptors();
 		void setPendingRenderTargetSwapchain();
-		void recordDeferredLighting(graphics::vulkan::RecordingFrame& rec);
-		void deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs);
-		void deferredLightingEnd(graphics::vulkan::RecordingFrame& rec);
-		void deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, const vk::Rect2D& restoreScissor);
+
+		// Typestate API: begin -> end -> finish (no state enum).
+		DeferredGeometryCtx deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs);
+		DeferredLightingCtx deferredLightingEnd(graphics::vulkan::RecordingFrame& rec, DeferredGeometryCtx&& geometry);
+		void deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, DeferredLightingCtx&& lighting, const vk::Rect2D& restoreScissor);
 		uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
 		uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
 		ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
@@ -151,12 +147,18 @@ class VulkanRenderer {
 	const VulkanDevice* vulkanDevice() const { return m_vulkanDevice.get(); }
 
   private:
-	static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
-	static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
-	static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
+		static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
+		static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
+		static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
 
-		void createUploadCommandPool();
-		void createSubmitTimelineSemaphore();
+		// Deferred implementation details (called by typestate wrapper API)
+		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
+		void endDeferredGeometry(vk::CommandBuffer cmd);
+		void bindDeferredGlobalDescriptors();
+		void recordDeferredLighting(graphics::vulkan::RecordingFrame& rec);
+
+			void createUploadCommandPool();
+			void createSubmitTimelineSemaphore();
 		void createDescriptorResources();
 		void createFrames();
 		void createVertexBuffer();
@@ -231,9 +233,7 @@ class VulkanRenderer {
 		std::unique_ptr<VulkanTextureBindings> m_textureBindings;
 		std::unique_ptr<VulkanTextureUploader> m_textureUploader;
 
-		DeferredBoundaryState m_deferredBoundaryState = DeferredBoundaryState::Idle;
-
-	// Model vertex heap handle - set via setModelVertexHeapHandle when ModelVertex heap is created.
+		// Model vertex heap handle - set via setModelVertexHeapHandle when ModelVertex heap is created.
 	// The actual VkBuffer is looked up lazily via queryModelVertexHeapBuffer() since the buffer
 	// may not exist at registration time (VulkanBufferManager defers buffer creation).
 	gr_buffer_handle m_modelVertexHeapHandle;

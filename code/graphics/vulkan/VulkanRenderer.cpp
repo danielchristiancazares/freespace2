@@ -262,9 +262,6 @@ uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame& frame) {
 }
 
 void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
-    "New frame started while deferred boundary state was not idle");
-  m_deferredBoundaryState = DeferredBoundaryState::Idle;
   Assertion(m_renderingSession != nullptr, "beginFrame requires an active rendering session");
 
   // Reset per-frame uniform bindings
@@ -489,30 +486,33 @@ void VulkanRenderer::setPendingRenderTargetSwapchain()
   m_renderingSession->requestSwapchainTarget();
 }
 
-void VulkanRenderer::deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
+DeferredGeometryCtx VulkanRenderer::deferredLightingBegin(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs)
 {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::Idle,
-    "deferredLightingBegin called while deferred boundary state was not idle");
-  
   beginDeferredLighting(rec, clearNonColorBufs);
-  m_deferredBoundaryState = DeferredBoundaryState::InGeometry;
+  return DeferredGeometryCtx{ m_frameCounter };
 }
 
-void VulkanRenderer::deferredLightingEnd(graphics::vulkan::RecordingFrame& rec)
+DeferredLightingCtx VulkanRenderer::deferredLightingEnd(graphics::vulkan::RecordingFrame& rec, DeferredGeometryCtx&& geometry)
 {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::InGeometry,
-    "deferredLightingEnd called while not in geometry state");
+  Assertion(geometry.frameIndex == m_frameCounter,
+    "deferredLightingEnd called with mismatched frameIndex (got %u, expected %u)",
+    geometry.frameIndex,
+    m_frameCounter);
   vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingEnd called with null command buffer");
 
   endDeferredGeometry(cmd);
-  m_deferredBoundaryState = DeferredBoundaryState::AwaitFinish;
+  return DeferredLightingCtx{ m_frameCounter };
 }
 
-void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& rec, const vk::Rect2D& restoreScissor)
+void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& rec,
+  DeferredLightingCtx&& lighting,
+  const vk::Rect2D& restoreScissor)
 {
-  Assertion(m_deferredBoundaryState == DeferredBoundaryState::AwaitFinish,
-    "deferredLightingFinish called while not awaiting finish");
+  Assertion(lighting.frameIndex == m_frameCounter,
+    "deferredLightingFinish called with mismatched frameIndex (got %u, expected %u)",
+    lighting.frameIndex,
+    m_frameCounter);
 
   bindDeferredGlobalDescriptors();
   recordDeferredLighting(rec);
@@ -522,7 +522,6 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& re
   cmd.setScissor(0, 1, &restoreScissor);
 
   setPendingRenderTargetSwapchain();
-  m_deferredBoundaryState = DeferredBoundaryState::Idle;
 }
 
 void VulkanRenderer::bindDeferredGlobalDescriptors() {
@@ -1215,7 +1214,7 @@ void VulkanRenderer::recordDeferredLighting(graphics::vulkan::RecordingFrame& re
       }
     }, light);
   }
-  // Note: render pass ends via RAII when target changes or frame ends
+  // Note: render pass ends at explicit session boundaries (target changes/frame end).
 }
 
 } // namespace vulkan

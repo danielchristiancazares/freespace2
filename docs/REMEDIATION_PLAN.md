@@ -109,8 +109,13 @@ Introduce `RenderCtx` (proves rendering is active):
 
 ### 4.2 Migrate draw APIs
 
-- Future tightening: thread `RenderCtx&` through internal draw helpers (and eventually backend entry points) so "rendering active"
-  is required by signature rather than being fetched internally.
+- In progress: thread `RenderCtx&` through internal draw helpers so "rendering active" is required by signature rather than being
+  fetched internally (model draw helper updated; expand to other draw paths).
+
+### 4.3 Deferred lighting call order tokens
+
+- Deferred lighting begin/end/finish uses move-only typestate tokens (`DeferredGeometryCtx` -> `DeferredLightingCtx`) instead of a
+  `DeferredBoundaryState` enum.
 
 ---
 
