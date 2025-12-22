@@ -101,6 +101,14 @@ SCP_string gr_stub_blob_screen()
 	return "";
 }
 
+void gr_stub_dump_envmap(const char* /*filename*/)
+{
+}
+
+void gr_stub_calculate_irrmap()
+{
+}
+
 void gr_stub_rect(int  /*x*/, int  /*y*/, int  /*w*/, int  /*h*/, int  /*resize_mode*/)
 {
 }
@@ -517,6 +525,8 @@ void gr_stub_init_function_pointers() {
 
 	gr_screen.gf_print_screen		= gr_stub_print_screen;
 	gr_screen.gf_blob_screen		= gr_stub_blob_screen;
+	gr_screen.gf_dump_envmap		= gr_stub_dump_envmap;
+	gr_screen.gf_calculate_irrmap	= gr_stub_calculate_irrmap;
 
 	gr_screen.gf_zbuffer_get		= gr_stub_zbuffer_get;
 	gr_screen.gf_zbuffer_set		= gr_stub_zbuffer_set;

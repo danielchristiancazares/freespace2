@@ -529,14 +529,18 @@ void stub_bm_create(bitmap_slot* /*slot*/) {}
 
 void gr_vulkan_bm_free_data(bitmap_slot* slot, bool release)
 {
-  if (!release) {
-    return; // CPU-only unload; keep GPU texture resident.
-  }
   if (slot == nullptr) {
     return;
   }
   if (g_backend == nullptr || g_backend->renderer == nullptr) {
     return;
+  }
+
+  const auto type = slot->entry.type;
+  const bool isRenderTarget = (type == BM_TYPE_RENDER_TARGET_STATIC) || (type == BM_TYPE_RENDER_TARGET_DYNAMIC);
+
+  if (!release && !isRenderTarget) {
+    return; // CPU-only unload; keep GPU texture resident.
   }
 
   // bmpman releases handles by setting their entry type to BM_TYPE_NONE and then reusing the
