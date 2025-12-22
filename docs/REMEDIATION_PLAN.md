@@ -123,15 +123,15 @@ Introduce `RenderCtx` (proves rendering is active):
 
 ---
 
-## 5) Performance Cleanup (NEXT)
+## 5) Performance Cleanup (DONE)
 
 ### 5.1 Frame-owned pass lifetime (DONE)
 
 - Per-draw `RenderScope` RAII removed; pass lifetime is session-owned and ends at target switches/frame end.
 
-### 5.2 Dirty-slot-only descriptor updates
+### 5.2 Dirty-slot-only descriptor updates (DONE)
 
-Track which bindless slots changed since last frame and write only dirty slots instead of rewriting the full array.
+- Model bindless descriptors are initialized once (full fallback fill) and then updated incrementally by dirty slot ranges.
 
 ---
 
@@ -152,4 +152,4 @@ Track which bindless slots changed since last frame and write only dirty slots i
 | 2 | Texture system: state-as-location, fallback-first, phase safety | DONE (UploadCtx) |
 | 3 | Bulletproof lifetime: serial-safe eviction, deferred retirement | DONE (baseline) |
 | 4 | Typestate enforcement: RenderCtx, compile-time phase checking | PARTIAL |
-| 5 | Performance: frame-owned passes, dirty-slot descriptors | PARTIAL |
+| 5 | Performance: frame-owned passes, dirty-slot descriptors | DONE |

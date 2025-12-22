@@ -850,9 +850,10 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
   frame.sceneUniformBinding = DynamicUniformBinding{ handle, dynOffset };
 }
 
-void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
-  vk::Buffer vertexHeapBuffer,
-  const std::vector<std::pair<uint32_t, int>>& textures) {
+void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex,
+  vk::DescriptorSet set,
+			vk::Buffer vertexHeapBuffer,
+			const std::vector<std::pair<uint32_t, int>>& textures) {
   std::vector<vk::WriteDescriptorSet> writes;
   writes.reserve(2);
 
@@ -886,25 +887,65 @@ void VulkanRenderer::updateModelDescriptors(vk::DescriptorSet set,
   const vk::DescriptorImageInfo fallbackInfo = m_textureManager->getTextureDescriptorInfo(fallbackHandle, samplerKey);
   Assertion(fallbackInfo.imageView, "Fallback texture must have a valid imageView");
 
-  std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> bindlessInfos{};
-  bindlessInfos.fill(fallbackInfo);
+  std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> desiredInfos{};
+  desiredInfos.fill(fallbackInfo);
 
   for (const auto& [arrayIndex, handle] : textures) {
     Assertion(arrayIndex < kMaxBindlessTextures,
       "updateModelDescriptors: slot index %u out of range (max %u)", arrayIndex, kMaxBindlessTextures);
     vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
     Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
-    bindlessInfos[arrayIndex] = info;
+    desiredInfos[arrayIndex] = info;
   }
 
-  vk::WriteDescriptorSet texturesWrite{};
-  texturesWrite.dstSet = set;
-  texturesWrite.dstBinding = 1;
-  texturesWrite.dstArrayElement = 0;
-  texturesWrite.descriptorCount = kMaxBindlessTextures;
-  texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-  texturesWrite.pImageInfo = bindlessInfos.data();
-  writes.push_back(texturesWrite);
+  auto sameInfo = [](const vk::DescriptorImageInfo& a, const vk::DescriptorImageInfo& b) {
+    return a.sampler == b.sampler && a.imageView == b.imageView && a.imageLayout == b.imageLayout;
+  };
+
+  Assertion(frameIndex < m_modelBindlessCache.size(),
+    "updateModelDescriptors called with invalid frameIndex %u (cache size %zu)",
+    frameIndex,
+    m_modelBindlessCache.size());
+  auto& cache = m_modelBindlessCache[frameIndex];
+
+  if (!cache.initialized) {
+    vk::WriteDescriptorSet texturesWrite{};
+    texturesWrite.dstSet = set;
+    texturesWrite.dstBinding = 1;
+    texturesWrite.dstArrayElement = 0;
+    texturesWrite.descriptorCount = kMaxBindlessTextures;
+    texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    texturesWrite.pImageInfo = desiredInfos.data();
+    writes.push_back(texturesWrite);
+
+    cache.infos = desiredInfos;
+    cache.initialized = true;
+  } else {
+    // Update only the slots that changed since last sync.
+    uint32_t i = 0;
+    while (i < kMaxBindlessTextures) {
+      if (sameInfo(cache.infos[i], desiredInfos[i])) {
+        ++i;
+        continue;
+      }
+
+      const uint32_t start = i;
+      while (i < kMaxBindlessTextures && !sameInfo(cache.infos[i], desiredInfos[i])) {
+        cache.infos[i] = desiredInfos[i];
+        ++i;
+      }
+      const uint32_t count = i - start;
+
+      vk::WriteDescriptorSet texturesWrite{};
+      texturesWrite.dstSet = set;
+      texturesWrite.dstBinding = 1;
+      texturesWrite.dstArrayElement = start;
+      texturesWrite.descriptorCount = count;
+      texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+      texturesWrite.pImageInfo = desiredInfos.data() + start;
+      writes.push_back(texturesWrite);
+    }
+  }
 
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
 }
@@ -930,7 +971,7 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
   textures.reserve(kMaxBindlessTextures);
   m_textureManager->appendResidentBindlessDescriptors(textures);
 
-  updateModelDescriptors(frame.modelDescriptorSet(), vertexHeapBuffer, textures);
+  updateModelDescriptors(frameIndex, frame.modelDescriptorSet(), vertexHeapBuffer, textures);
 }
 
 int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {

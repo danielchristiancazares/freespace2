@@ -76,9 +76,6 @@ class VulkanRenderer {
 		gr_buffer_handle handle,
 		size_t offset,
 		size_t size);
-	void updateModelDescriptors(vk::DescriptorSet set,
-			vk::Buffer vertexHeapBuffer,
-			const std::vector<std::pair<uint32_t, int>>& textures);
 
 	// Frame sync for model descriptors - called at frame start after fence wait
 	// vertexHeapBuffer must be valid (caller is responsible for checking)
@@ -170,6 +167,12 @@ class VulkanRenderer {
 			vk::Buffer uniformBuffer,
 			const std::vector<DeferredLight>& lights);
 
+		// Descriptor sync helpers (called from beginFrame).
+		void updateModelDescriptors(uint32_t frameIndex,
+			vk::DescriptorSet set,
+			vk::Buffer vertexHeapBuffer,
+			const std::vector<std::pair<uint32_t, int>>& textures);
+
 			void createUploadCommandPool();
 			void createSubmitTimelineSemaphore();
 		void createDescriptorResources();
@@ -250,6 +253,13 @@ class VulkanRenderer {
 	// The actual VkBuffer is looked up lazily via queryModelVertexHeapBuffer() since the buffer
 	// may not exist at registration time (VulkanBufferManager defers buffer creation).
 	gr_buffer_handle m_modelVertexHeapHandle;
+
+	// Per-frame cache of bindless descriptor contents so we can update only dirty slots.
+	struct ModelBindlessDescriptorCache {
+		bool initialized = false;
+		std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> infos{};
+	};
+	std::array<ModelBindlessDescriptorCache, kFramesInFlight> m_modelBindlessCache;
 
 	// Z-buffer mode tracking (for getZbufferMode)
 	gr_zbuffer_type m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;
