@@ -47,3 +47,32 @@ TEST(VulkanClipScissor, ApplyClipUpdatesScreenStateAndScissor)
 	EXPECT_EQ(scissor.height, 200u);
 }
 
+TEST(VulkanClipScissor, ClampClipScissorToFramebufferClampsNegativeOffsets)
+{
+	graphics::vulkan::ClipScissorRect in{};
+	in.x = -3;
+	in.y = -3;
+	in.width = 10;
+	in.height = 10;
+
+	const auto out = graphics::vulkan::clampClipScissorToFramebuffer(in, /*fbWidth=*/8, /*fbHeight=*/8);
+	EXPECT_EQ(out.x, 0);
+	EXPECT_EQ(out.y, 0);
+	EXPECT_EQ(out.width, 7u);  // [-3,7) intersect [0,8) => [0,7)
+	EXPECT_EQ(out.height, 7u);
+}
+
+TEST(VulkanClipScissor, ClampClipScissorToFramebufferClampsPastFramebufferEdge)
+{
+	graphics::vulkan::ClipScissorRect in{};
+	in.x = 6;
+	in.y = 6;
+	in.width = 10;
+	in.height = 10;
+
+	const auto out = graphics::vulkan::clampClipScissorToFramebuffer(in, /*fbWidth=*/8, /*fbHeight=*/8);
+	EXPECT_EQ(out.x, 6);
+	EXPECT_EQ(out.y, 6);
+	EXPECT_EQ(out.width, 2u);  // [6,16) intersect [0,8) => [6,8)
+	EXPECT_EQ(out.height, 2u);
+}

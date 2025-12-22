@@ -145,14 +145,15 @@ vk::Viewport createFullScreenViewport()
   return viewport;
 }
 
-  vk::Rect2D createClipScissor()
-  {
-    const auto clip = getClipScissorFromScreen(gr_screen);
-    vk::Rect2D scissor{};
-    scissor.offset = vk::Offset2D{clip.x, clip.y};
-    scissor.extent = vk::Extent2D{clip.width, clip.height};
-    return scissor;
-  }
+vk::Rect2D createClipScissor()
+{
+  auto clip = getClipScissorFromScreen(gr_screen);
+  clip = clampClipScissorToFramebuffer(clip, gr_screen.max_w, gr_screen.max_h);
+  vk::Rect2D scissor{};
+  scissor.offset = vk::Offset2D{clip.x, clip.y};
+  scissor.extent = vk::Extent2D{clip.width, clip.height};
+  return scissor;
+}
 
 vk::PrimitiveTopology convertPrimitiveType(primitive_type prim_type)
 {
@@ -350,6 +351,14 @@ SCP_string stub_blob_screen() { return {}; }
       gr_unsize_screen_pos(&gr_screen.clip_right_unscaled, &gr_screen.clip_bottom_unscaled);
       gr_unsize_screen_pos(&gr_screen.clip_width_unscaled, &gr_screen.clip_height_unscaled);
     }
+
+    // Keep Vulkan dynamic scissor in sync with the engine clip state for subsequent draws (including model draws
+    // which do not currently set scissor themselves).
+    if (g_backend && g_backend->recording.has_value()) {
+      auto ctxBase = currentFrameCtx();
+      vk::Rect2D scissor = createClipScissor();
+      ctxBase.renderer.setScissor(ctxBase, scissor);
+    }
   }
 
 void stub_restore_screen(int /*id*/) {}
@@ -421,6 +430,34 @@ void gr_vulkan_update_transform_buffer(void* data, size_t size)
   void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode)
   {
     applyClipToScreen(x, y, w, h, resize_mode);
+
+    // Apply the updated clip as dynamic scissor state.
+    if (g_backend && g_backend->recording.has_value()) {
+      auto ctxBase = currentFrameCtx();
+      vk::Rect2D scissor = createClipScissor();
+      ctxBase.renderer.setScissor(ctxBase, scissor);
+    }
+  }
+
+  void gr_vulkan_set_viewport(int x, int y, int width, int height)
+  {
+    // Called by the matrix stack when entering/exiting HTL projection. Implement OpenGL-style viewport semantics:
+    // (x,y) is the lower-left corner in screen coordinates.
+    if (!g_backend || !g_backend->recording.has_value()) {
+      return;
+    }
+    auto ctxBase = currentFrameCtx();
+
+    vk::Viewport viewport{};
+    viewport.x = static_cast<float>(x);
+    // Vulkan viewport origin is top-left; with negative height Y-flip, viewport.y is the bottom edge.
+    viewport.y = static_cast<float>(gr_screen.max_h - y);
+    viewport.width = static_cast<float>(width);
+    viewport.height = -static_cast<float>(height);
+    viewport.minDepth = 0.f;
+    viewport.maxDepth = 1.f;
+
+    ctxBase.renderer.setViewport(ctxBase, viewport);
   }
 
 int stub_set_color_buffer(int /*mode*/) { return 0; }
@@ -520,16 +557,49 @@ void stub_update_texture(int /*bitmap_handle*/, int /*bpp*/, const ubyte* /*data
 
 void stub_get_bitmap_from_texture(void* /*data_out*/, int /*bitmap_num*/) {}
 
-int stub_bm_make_render_target(int /*n*/, int* /*width*/, int* /*height*/, int* /*bpp*/, int* /*mm_lvl*/, int /*flags*/)
+int gr_vulkan_bm_make_render_target(int n, int* width, int* height, int* bpp, int* mm_lvl, int flags)
 {
-  return 0;
+  if (g_backend == nullptr || g_backend->renderer == nullptr) {
+    return 0;
+  }
+  return g_backend->renderer->createBitmapRenderTarget(n, width, height, bpp, mm_lvl, flags) ? 1 : 0;
 }
 
-int stub_bm_set_render_target(int /*n*/, int /*face*/) { return 0; }
+int gr_vulkan_bm_set_render_target(int n, int face)
+{
+  if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
+    return 0;
+  }
+  auto ctxBase = currentFrameCtx();
+  return ctxBase.renderer.setBitmapRenderTarget(ctxBase, n, face) ? 1 : 0;
+}
 
 void stub_bm_create(bitmap_slot* /*slot*/) {}
 
-void stub_bm_free_data(bitmap_slot* /*slot*/, bool /*release*/) {}
+void gr_vulkan_bm_free_data(bitmap_slot* slot, bool release)
+{
+  if (slot == nullptr) {
+    return;
+  }
+  if (g_backend == nullptr || g_backend->renderer == nullptr) {
+    return;
+  }
+
+  const auto type = slot->entry.type;
+  const bool isRenderTarget = (type == BM_TYPE_RENDER_TARGET_STATIC) || (type == BM_TYPE_RENDER_TARGET_DYNAMIC);
+
+  if (!release && !isRenderTarget) {
+    return; // CPU-only unload; keep GPU texture resident.
+  }
+
+  // bmpman releases handles by setting their entry type to BM_TYPE_NONE and then reusing the
+  // integer handle later. Ensure Vulkan-side caches drop the mapping immediately.
+  const int handle = slot->entry.handle;
+  if (handle < 0) {
+    return;
+  }
+  g_backend->renderer->releaseBitmap(handle);
+}
 
 void stub_bm_init(bitmap_slot* /*slot*/) {}
 
@@ -1690,6 +1760,7 @@ void init_function_pointers()
   // Clipping
   gr_screen.gf_set_clip = gr_vulkan_set_clip;
   gr_screen.gf_reset_clip = gr_vulkan_reset_clip;
+  gr_screen.gf_set_viewport = gr_vulkan_set_viewport;
 
   // Depth/cull state
   gr_screen.gf_set_cull = [](int cull) -> int {
@@ -1709,6 +1780,13 @@ void init_function_pointers()
   gr_screen.gf_preload = [](int bitmap_num, int is_aabitmap) -> int {
     return currentRenderer().preloadTexture(bitmap_num, is_aabitmap != 0);
   };
+
+  // Bitmap lifetime (bmpman)
+  gr_screen.gf_bm_free_data = gr_vulkan_bm_free_data;
+
+  // Bitmap render targets (RTT)
+  gr_screen.gf_bm_make_render_target = gr_vulkan_bm_make_render_target;
+  gr_screen.gf_bm_set_render_target = gr_vulkan_bm_set_render_target;
 
   // Buffer management
   gr_screen.gf_create_buffer = gr_vulkan_create_buffer;

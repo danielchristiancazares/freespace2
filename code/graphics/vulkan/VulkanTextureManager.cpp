@@ -3,6 +3,7 @@
 
 #include "bmpman/bmpman.h"
 #include "bmpman/bm_internal.h"
+#include "osapi/outwnd.h"
 
 #include <stdexcept>
 #include <cstring>
@@ -69,6 +70,54 @@ inline bool isBuiltinTextureHandle(int handle)
 inline bool isDynamicBindlessSlot(uint32_t slot)
 {
   return slot >= kBindlessFirstDynamicTextureSlot && slot < kMaxBindlessTextures;
+}
+
+struct StageAccess {
+  vk::PipelineStageFlags2 stageMask{};
+  vk::AccessFlags2 accessMask{};
+};
+
+StageAccess stageAccessForLayout(vk::ImageLayout layout)
+{
+  StageAccess out{};
+  switch (layout) {
+  case vk::ImageLayout::eUndefined:
+    out.stageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+    out.accessMask = {};
+    break;
+  case vk::ImageLayout::eColorAttachmentOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    out.accessMask = vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite;
+    break;
+  case vk::ImageLayout::eShaderReadOnlyOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+    out.accessMask = vk::AccessFlagBits2::eShaderRead;
+    break;
+  case vk::ImageLayout::eTransferSrcOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
+    out.accessMask = vk::AccessFlagBits2::eTransferRead;
+    break;
+  case vk::ImageLayout::eTransferDstOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
+    out.accessMask = vk::AccessFlagBits2::eTransferWrite;
+    break;
+  default:
+    out.stageMask = vk::PipelineStageFlagBits2::eAllCommands;
+    out.accessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+    break;
+  }
+  return out;
+}
+
+uint32_t mipLevelsForExtent(uint32_t w, uint32_t h)
+{
+  uint32_t levels = 1;
+  uint32_t size = (w > h) ? w : h;
+  while (size > 1) {
+    size >>= 1;
+    ++levels;
+  }
+  return levels;
 }
 
 } // namespace
@@ -1023,11 +1072,55 @@ void VulkanTextureManager::deleteTexture(int bitmapHandle)
   m_pendingRetirements.insert(base);
 }
 
+void VulkanTextureManager::releaseBitmap(int bitmapHandle)
+{
+  int base = bm_get_base_frame(bitmapHandle, nullptr);
+  if (base < 0) {
+    return;
+  }
+  if (isBuiltinTextureHandle(base)) {
+    return;
+  }
+
+  // Hard lifecycle boundary: bmpman may reuse this handle immediately after release.
+  // Drop all cache state for this handle now; GPU lifetime safety is handled via deferred release.
+  m_unavailableTextures.erase(base);
+  m_pendingBindlessSlots.erase(base);
+  m_pendingRetirements.erase(base);
+  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), base);
+  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+
+  // If the texture is resident, retire it immediately (releasing any bindless slot mapping).
+  auto it = m_residentTextures.find(base);
+  if (it != m_residentTextures.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.lastUsedSerial);
+    retireTexture(base, retireSerial);
+    return;
+  }
+
+  // If we somehow have a render-target record without a resident texture, still defer its view destruction.
+  if (auto rt = tryTakeRenderTargetRecord(base); rt.has_value()) {
+    const uint64_t retireSerial = m_safeRetireSerial;
+    m_deferredReleases.enqueue(retireSerial, [rt = std::move(rt)]() mutable { (void)rt; });
+  }
+
+  // Non-resident: drop any bindless slot assignment so the slot can be reused.
+  auto slotIt = m_bindlessSlots.find(base);
+  if (slotIt != m_bindlessSlots.end()) {
+    const uint32_t slot = slotIt->second;
+    m_bindlessSlots.erase(slotIt);
+    if (isDynamicBindlessSlot(slot)) {
+      m_freeBindlessSlots.push_back(slot);
+    }
+  }
+}
+
 void VulkanTextureManager::cleanup()
 {
   m_deferredReleases.clear();
   m_residentTextures.clear();
   m_unavailableTextures.clear();
+  m_renderTargets.clear();
   m_bindlessSlots.clear();
   m_pendingBindlessSlots.clear();
   m_pendingRetirements.clear();
@@ -1116,7 +1209,12 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
   m_residentTextures.erase(it); // Drop cache state immediately; in-flight GPU users are protected by deferred release.
 
   VulkanTexture gpu = std::move(record.gpu);
-  m_deferredReleases.enqueue(retireSerial, [gpu = std::move(gpu)]() mutable {});
+  auto rt = tryTakeRenderTargetRecord(textureHandle);
+  m_deferredReleases.enqueue(retireSerial, [gpu = std::move(gpu), rt = std::move(rt)]() mutable {
+    // Capture moved resources in the deferred-release closure to guarantee they are destroyed only after retireSerial.
+    (void)gpu;
+    (void)rt;
+  });
 }
 
 void VulkanTextureManager::collect(uint64_t completedSerial)
@@ -1174,6 +1272,420 @@ void VulkanTextureManager::queueTextureUploadBaseFrame(int baseFrame, uint32_t c
   if (!isUploadQueued(baseFrame)) {
     m_pendingUploads.push_back(baseFrame);
   }
+}
+
+std::optional<VulkanTextureManager::RenderTargetRecord> VulkanTextureManager::tryTakeRenderTargetRecord(int baseFrameHandle)
+{
+  auto it = m_renderTargets.find(baseFrameHandle);
+  if (it == m_renderTargets.end()) {
+    return std::nullopt;
+  }
+  RenderTargetRecord rec = std::move(it->second);
+  m_renderTargets.erase(it);
+  return rec;
+}
+
+bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t width, uint32_t height, int flags, uint32_t* outMipLevels)
+{
+  if (baseFrameHandle < 0 || width == 0 || height == 0 || outMipLevels == nullptr) {
+    return false;
+  }
+
+  // Render targets are created explicitly. bmpman handles are reused after release, so we must be
+  // robust to the case where stale GPU state still exists for this handle.
+  m_unavailableTextures.erase(baseFrameHandle);
+  m_pendingBindlessSlots.erase(baseFrameHandle);
+  m_pendingRetirements.erase(baseFrameHandle);
+  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrameHandle);
+  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+
+  if (auto it = m_residentTextures.find(baseFrameHandle); it != m_residentTextures.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.lastUsedSerial);
+    mprintf(("VulkanTextureManager: Recreating texture handle %d as render target (retireSerial=%llu)\n",
+             baseFrameHandle,
+             static_cast<unsigned long long>(retireSerial)));
+    retireTexture(baseFrameHandle, retireSerial);
+  }
+
+  const bool isCubemap = (flags & BMP_FLAG_CUBEMAP) != 0;
+  const bool wantsMips = (flags & BMP_FLAG_RENDER_TARGET_MIPMAP) != 0;
+
+  const uint32_t layers = isCubemap ? 6u : 1u;
+  const uint32_t mipLevels = wantsMips ? mipLevelsForExtent(width, height) : 1u;
+  *outMipLevels = mipLevels;
+
+  // Match the engine's common uncompressed texture format (BGRA8).
+  constexpr vk::Format format = vk::Format::eB8G8R8A8Unorm;
+
+  vk::ImageCreateInfo imageInfo{};
+  imageInfo.flags = isCubemap ? vk::ImageCreateFlagBits::eCubeCompatible : vk::ImageCreateFlags{};
+  imageInfo.imageType = vk::ImageType::e2D;
+  imageInfo.format = format;
+  imageInfo.extent = vk::Extent3D(width, height, 1);
+  imageInfo.mipLevels = mipLevels;
+  imageInfo.arrayLayers = layers;
+  imageInfo.samples = vk::SampleCountFlagBits::e1;
+  imageInfo.tiling = vk::ImageTiling::eOptimal;
+  imageInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
+                    vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
+  imageInfo.sharingMode = vk::SharingMode::eExclusive;
+  imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+  ResidentTexture record{};
+  record.gpu.image = m_device.createImageUnique(imageInfo);
+  auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
+  vk::MemoryAllocateInfo allocInfo{};
+  allocInfo.allocationSize = imgReqs.size;
+  allocInfo.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+  record.gpu.memory = m_device.allocateMemoryUnique(allocInfo);
+  m_device.bindImageMemory(record.gpu.image.get(), record.gpu.memory.get(), 0);
+
+  record.gpu.width = width;
+  record.gpu.height = height;
+  record.gpu.layers = layers;
+  record.gpu.mipLevels = mipLevels;
+  record.gpu.format = format;
+  record.gpu.sampler = m_defaultSampler.get();
+
+  // Sample view: treat everything as a 2D array in the standard (non-model) shader path.
+  vk::ImageViewCreateInfo viewInfo{};
+  viewInfo.image = record.gpu.image.get();
+  viewInfo.viewType = vk::ImageViewType::e2DArray;
+  viewInfo.format = format;
+  viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  viewInfo.subresourceRange.baseMipLevel = 0;
+  viewInfo.subresourceRange.levelCount = mipLevels;
+  viewInfo.subresourceRange.baseArrayLayer = 0;
+  viewInfo.subresourceRange.layerCount = layers;
+  record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
+
+  RenderTargetRecord rt{};
+  rt.extent = vk::Extent2D(width, height);
+  rt.format = format;
+  rt.mipLevels = mipLevels;
+  rt.layers = layers;
+  rt.isCubemap = isCubemap;
+
+  // Attachment views: one per face (cubemap) or just face 0 (2D target).
+  const uint32_t faceCount = isCubemap ? 6u : 1u;
+  for (uint32_t face = 0; face < faceCount; ++face) {
+    vk::ImageViewCreateInfo faceViewInfo{};
+    faceViewInfo.image = record.gpu.image.get();
+    faceViewInfo.viewType = vk::ImageViewType::e2D;
+    faceViewInfo.format = format;
+    faceViewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    faceViewInfo.subresourceRange.baseMipLevel = 0;
+    faceViewInfo.subresourceRange.levelCount = 1;
+    faceViewInfo.subresourceRange.baseArrayLayer = face;
+    faceViewInfo.subresourceRange.layerCount = 1;
+    rt.faceViews[face] = m_device.createImageViewUnique(faceViewInfo);
+  }
+
+  // Initialize the image contents to black (alpha=1) and transition to shader-read.
+  vk::CommandPoolCreateInfo poolInfo{};
+  poolInfo.queueFamilyIndex = m_transferQueueIndex;
+  poolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
+  auto pool = m_device.createCommandPoolUnique(poolInfo);
+
+  vk::CommandBufferAllocateInfo cmdAlloc{};
+  cmdAlloc.commandPool = pool.get();
+  cmdAlloc.level = vk::CommandBufferLevel::ePrimary;
+  cmdAlloc.commandBufferCount = 1;
+  auto cmd = m_device.allocateCommandBuffers(cmdAlloc).front();
+
+  vk::CommandBufferBeginInfo beginInfo{};
+  beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+  cmd.begin(beginInfo);
+
+  vk::ImageMemoryBarrier2 toClear{};
+  toClear.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+  toClear.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+  toClear.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+  toClear.oldLayout = vk::ImageLayout::eUndefined;
+  toClear.newLayout = vk::ImageLayout::eTransferDstOptimal;
+  toClear.image = record.gpu.image.get();
+  toClear.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  toClear.subresourceRange.baseMipLevel = 0;
+  toClear.subresourceRange.levelCount = mipLevels;
+  toClear.subresourceRange.baseArrayLayer = 0;
+  toClear.subresourceRange.layerCount = layers;
+
+  vk::DependencyInfo depToClear{};
+  depToClear.imageMemoryBarrierCount = 1;
+  depToClear.pImageMemoryBarriers = &toClear;
+  cmd.pipelineBarrier2(depToClear);
+
+  vk::ClearColorValue clearValue(std::array<float, 4>{0.f, 0.f, 0.f, 1.f});
+  vk::ImageSubresourceRange clearRange{};
+  clearRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  clearRange.baseMipLevel = 0;
+  clearRange.levelCount = mipLevels;
+  clearRange.baseArrayLayer = 0;
+  clearRange.layerCount = layers;
+  cmd.clearColorImage(record.gpu.image.get(), vk::ImageLayout::eTransferDstOptimal, &clearValue, 1, &clearRange);
+
+  vk::ImageMemoryBarrier2 toShader{};
+  toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+  toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+  toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+  toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+  toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+  toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  toShader.image = record.gpu.image.get();
+  toShader.subresourceRange = clearRange;
+
+  vk::DependencyInfo depToShader{};
+  depToShader.imageMemoryBarrierCount = 1;
+  depToShader.pImageMemoryBarriers = &toShader;
+  cmd.pipelineBarrier2(depToShader);
+
+  cmd.end();
+
+  vk::SubmitInfo submitInfo{};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &cmd;
+  m_transferQueue.submit(submitInfo, nullptr);
+  m_transferQueue.waitIdle();
+
+  record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  record.lastUsedFrame = m_currentFrameIndex;
+
+  m_renderTargets.emplace(baseFrameHandle, std::move(rt));
+  m_residentTextures.emplace(baseFrameHandle, std::move(record));
+  onTextureResident(baseFrameHandle);
+
+  return true;
+}
+
+bool VulkanTextureManager::hasRenderTarget(int baseFrameHandle) const
+{
+  return m_renderTargets.find(baseFrameHandle) != m_renderTargets.end();
+}
+
+vk::Extent2D VulkanTextureManager::renderTargetExtent(int baseFrameHandle) const
+{
+  auto it = m_renderTargets.find(baseFrameHandle);
+  Assertion(it != m_renderTargets.end(), "renderTargetExtent called for unknown render target handle %d", baseFrameHandle);
+  return it->second.extent;
+}
+
+vk::Format VulkanTextureManager::renderTargetFormat(int baseFrameHandle) const
+{
+  auto it = m_renderTargets.find(baseFrameHandle);
+  if (it == m_renderTargets.end()) {
+    return vk::Format::eUndefined;
+  }
+  return it->second.format;
+}
+
+uint32_t VulkanTextureManager::renderTargetMipLevels(int baseFrameHandle) const
+{
+  auto it = m_renderTargets.find(baseFrameHandle);
+  if (it == m_renderTargets.end()) {
+    return 1;
+  }
+  return it->second.mipLevels;
+}
+
+vk::ImageView VulkanTextureManager::renderTargetAttachmentView(int baseFrameHandle, int face) const
+{
+  auto it = m_renderTargets.find(baseFrameHandle);
+  Assertion(it != m_renderTargets.end(), "renderTargetAttachmentView called for unknown render target handle %d", baseFrameHandle);
+
+  const auto& rt = it->second;
+  const int clampedFace = (face < 0) ? 0 : face;
+  if (!rt.isCubemap) {
+    Assertion(clampedFace == 0, "Non-cubemap render target %d requested invalid face %d", baseFrameHandle, clampedFace);
+    return rt.faceViews[0].get();
+  }
+  Assertion(clampedFace >= 0 && clampedFace < 6, "Cubemap render target %d requested invalid face %d", baseFrameHandle, clampedFace);
+  return rt.faceViews[static_cast<size_t>(clampedFace)].get();
+}
+
+void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer cmd, int baseFrameHandle)
+{
+  auto it = m_residentTextures.find(baseFrameHandle);
+  Assertion(it != m_residentTextures.end(), "transitionRenderTargetToAttachment called for unknown texture handle %d", baseFrameHandle);
+  auto& tex = it->second.gpu;
+
+  const auto newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+  if (tex.currentLayout == newLayout) {
+    return;
+  }
+
+  vk::ImageMemoryBarrier2 barrier{};
+  const auto src = stageAccessForLayout(tex.currentLayout);
+  const auto dst = stageAccessForLayout(newLayout);
+  barrier.srcStageMask = src.stageMask;
+  barrier.srcAccessMask = src.accessMask;
+  barrier.dstStageMask = dst.stageMask;
+  barrier.dstAccessMask = dst.accessMask;
+  barrier.oldLayout = tex.currentLayout;
+  barrier.newLayout = newLayout;
+  barrier.image = tex.image.get();
+  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  barrier.subresourceRange.baseMipLevel = 0;
+  barrier.subresourceRange.levelCount = tex.mipLevels;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount = tex.layers;
+
+  vk::DependencyInfo dep{};
+  dep.imageMemoryBarrierCount = 1;
+  dep.pImageMemoryBarriers = &barrier;
+  cmd.pipelineBarrier2(dep);
+
+  tex.currentLayout = newLayout;
+}
+
+void VulkanTextureManager::transitionRenderTargetToShaderRead(vk::CommandBuffer cmd, int baseFrameHandle)
+{
+  auto it = m_residentTextures.find(baseFrameHandle);
+  Assertion(it != m_residentTextures.end(), "transitionRenderTargetToShaderRead called for unknown texture handle %d", baseFrameHandle);
+  auto& tex = it->second.gpu;
+
+  const auto newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  if (tex.currentLayout == newLayout) {
+    return;
+  }
+
+  vk::ImageMemoryBarrier2 barrier{};
+  const auto src = stageAccessForLayout(tex.currentLayout);
+  const auto dst = stageAccessForLayout(newLayout);
+  barrier.srcStageMask = src.stageMask;
+  barrier.srcAccessMask = src.accessMask;
+  barrier.dstStageMask = dst.stageMask;
+  barrier.dstAccessMask = dst.accessMask;
+  barrier.oldLayout = tex.currentLayout;
+  barrier.newLayout = newLayout;
+  barrier.image = tex.image.get();
+  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  barrier.subresourceRange.baseMipLevel = 0;
+  barrier.subresourceRange.levelCount = tex.mipLevels;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount = tex.layers;
+
+  vk::DependencyInfo dep{};
+  dep.imageMemoryBarrierCount = 1;
+  dep.pImageMemoryBarriers = &barrier;
+  cmd.pipelineBarrier2(dep);
+
+  tex.currentLayout = newLayout;
+}
+
+void VulkanTextureManager::generateRenderTargetMipmaps(vk::CommandBuffer cmd, int baseFrameHandle)
+{
+  auto it = m_residentTextures.find(baseFrameHandle);
+  Assertion(it != m_residentTextures.end(), "generateRenderTargetMipmaps called for unknown texture handle %d", baseFrameHandle);
+  auto& tex = it->second.gpu;
+
+  if (tex.mipLevels <= 1) {
+    transitionRenderTargetToShaderRead(cmd, baseFrameHandle);
+    return;
+  }
+
+  // Transition the entire image to transfer src, then iteratively blit down the mip chain.
+  {
+    const auto newLayout = vk::ImageLayout::eTransferSrcOptimal;
+    vk::ImageMemoryBarrier2 barrier{};
+    const auto src = stageAccessForLayout(tex.currentLayout);
+    const auto dst = stageAccessForLayout(newLayout);
+    barrier.srcStageMask = src.stageMask;
+    barrier.srcAccessMask = src.accessMask;
+    barrier.dstStageMask = dst.stageMask;
+    barrier.dstAccessMask = dst.accessMask;
+    barrier.oldLayout = tex.currentLayout;
+    barrier.newLayout = newLayout;
+    barrier.image = tex.image.get();
+    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = tex.mipLevels;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = tex.layers;
+
+    vk::DependencyInfo dep{};
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &barrier;
+    cmd.pipelineBarrier2(dep);
+
+    tex.currentLayout = newLayout;
+  }
+
+  int32_t mipW = static_cast<int32_t>(tex.width);
+  int32_t mipH = static_cast<int32_t>(tex.height);
+
+  for (uint32_t level = 1; level < tex.mipLevels; ++level) {
+    const int32_t nextW = (mipW > 1) ? (mipW / 2) : 1;
+    const int32_t nextH = (mipH > 1) ? (mipH / 2) : 1;
+
+    // Make dst mip writable.
+    vk::ImageMemoryBarrier2 toDst{};
+    toDst.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    toDst.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
+    toDst.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    toDst.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    toDst.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+    toDst.newLayout = vk::ImageLayout::eTransferDstOptimal;
+    toDst.image = tex.image.get();
+    toDst.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    toDst.subresourceRange.baseMipLevel = level;
+    toDst.subresourceRange.levelCount = 1;
+    toDst.subresourceRange.baseArrayLayer = 0;
+    toDst.subresourceRange.layerCount = tex.layers;
+
+    vk::DependencyInfo depToDst{};
+    depToDst.imageMemoryBarrierCount = 1;
+    depToDst.pImageMemoryBarriers = &toDst;
+    cmd.pipelineBarrier2(depToDst);
+
+    vk::ImageBlit blit{};
+    blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    blit.srcSubresource.mipLevel = level - 1;
+    blit.srcSubresource.baseArrayLayer = 0;
+    blit.srcSubresource.layerCount = tex.layers;
+    blit.srcOffsets[0] = vk::Offset3D(0, 0, 0);
+    blit.srcOffsets[1] = vk::Offset3D(mipW, mipH, 1);
+
+    blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    blit.dstSubresource.mipLevel = level;
+    blit.dstSubresource.baseArrayLayer = 0;
+    blit.dstSubresource.layerCount = tex.layers;
+    blit.dstOffsets[0] = vk::Offset3D(0, 0, 0);
+    blit.dstOffsets[1] = vk::Offset3D(nextW, nextH, 1);
+
+    cmd.blitImage(tex.image.get(),
+                  vk::ImageLayout::eTransferSrcOptimal,
+                  tex.image.get(),
+                  vk::ImageLayout::eTransferDstOptimal,
+                  1,
+                  &blit,
+                  vk::Filter::eLinear);
+
+    // Promote dst mip to transfer src for the next iteration.
+    vk::ImageMemoryBarrier2 toSrc{};
+    toSrc.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    toSrc.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    toSrc.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    toSrc.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+    toSrc.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    toSrc.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+    toSrc.image = tex.image.get();
+    toSrc.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    toSrc.subresourceRange.baseMipLevel = level;
+    toSrc.subresourceRange.levelCount = 1;
+    toSrc.subresourceRange.baseArrayLayer = 0;
+    toSrc.subresourceRange.layerCount = tex.layers;
+
+    vk::DependencyInfo depToSrc{};
+    depToSrc.imageMemoryBarrierCount = 1;
+    depToSrc.pImageMemoryBarriers = &toSrc;
+    cmd.pipelineBarrier2(depToSrc);
+
+    mipW = nextW;
+    mipH = nextH;
+  }
+
+  // Transition the whole image to shader-read for sampling.
+  transitionRenderTargetToShaderRead(cmd, baseFrameHandle);
 }
 
 } // namespace vulkan
