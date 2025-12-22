@@ -78,18 +78,15 @@ void VulkanFrame::wait_for_gpu()
 
 void VulkanFrame::reset()
 {
-	using ResetReturn = decltype(m_device.resetCommandPool(m_commandPool.get()));
-	constexpr bool returnsVoid = std::is_same_v<ResetReturn, void>;
-
-	auto reset_pool = [](auto& dev, VkCommandPool pool, std::true_type) {
-		dev.resetCommandPool(pool);
-		return vk::Result::eSuccess;
-	};
-
-	vk::Result poolResult = reset_pool(m_device, m_commandPool.get(), std::integral_constant<bool, returnsVoid>{});
+#ifdef VULKAN_HPP_NO_EXCEPTIONS
+	const auto poolResult = m_device.resetCommandPool(m_commandPool.get());
 	if (poolResult != vk::Result::eSuccess) {
 		throw std::runtime_error("Failed to reset command pool for Vulkan frame");
 	}
+#else
+	// Throws vk::SystemError on failure when exceptions are enabled.
+	m_device.resetCommandPool(m_commandPool.get());
+#endif
 	m_uniformRing.reset();
 	m_vertexRing.reset();
 	m_stagingRing.reset();
