@@ -3,20 +3,27 @@
 #include "graphics/2d.h"
 
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace graphics {
 namespace vulkan {
 
 VulkanBufferManager::VulkanBufferManager(vk::Device device,
-	const vk::PhysicalDeviceMemoryProperties& memoryProps,
-	vk::Queue transferQueue,
-	uint32_t transferQueueIndex)
-	: m_device(device)
-	, m_memoryProperties(memoryProps)
-	, m_transferQueue(transferQueue)
-	, m_transferQueueIndex(transferQueueIndex)
+		const vk::PhysicalDeviceMemoryProperties& memoryProps,
+		vk::Queue transferQueue,
+		uint32_t transferQueueIndex)
+		: m_device(device)
+		, m_memoryProperties(memoryProps)
+		, m_transferQueue(transferQueue)
+		, m_transferQueueIndex(transferQueueIndex)
 {
+	// Used for synchronous staging uploads to device-local buffers (Static usage hint).
+	vk::CommandPoolCreateInfo poolInfo{};
+	poolInfo.queueFamilyIndex = transferQueueIndex;
+	poolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient | vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
+	m_transferCommandPool = m_device.createCommandPoolUnique(poolInfo);
+	Assertion(m_transferCommandPool, "Failed to create Vulkan transfer command pool");
 }
 
 uint32_t VulkanBufferManager::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const
@@ -49,9 +56,8 @@ vk::MemoryPropertyFlags VulkanBufferManager::getMemoryProperties(BufferUsageHint
 {
 	switch (usage) {
 	case BufferUsageHint::Static:
-		// For now, use host-visible for Static to allow updates
-		// TODO: Use device-local + staging buffer for better performance
-		return vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent;
+		// Prefer device-local memory; updates are handled via staging uploads when needed.
+		return vk::MemoryPropertyFlagBits::eDeviceLocal;
 	case BufferUsageHint::Dynamic:
 	case BufferUsageHint::Streaming:
 	case BufferUsageHint::PersistentMapping:
@@ -60,6 +66,106 @@ vk::MemoryPropertyFlags VulkanBufferManager::getMemoryProperties(BufferUsageHint
 		UNREACHABLE("Unhandled usage hint!");
 		return vk::MemoryPropertyFlags();
 	}
+}
+
+void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer& buffer, vk::DeviceSize dstOffset, vk::DeviceSize size, const void* data)
+{
+	Assertion(buffer.buffer, "uploadToDeviceLocal called with null destination buffer");
+	Assertion(data != nullptr, "uploadToDeviceLocal called with null data");
+	Assertion(m_transferCommandPool, "uploadToDeviceLocal requires a valid transfer command pool");
+	Assertion(size > 0, "uploadToDeviceLocal requires size > 0");
+	Assertion(dstOffset + size <= buffer.size, "uploadToDeviceLocal range exceeds destination buffer size");
+
+	// Create a transient staging buffer for this upload.
+	vk::BufferCreateInfo stagingInfo{};
+	stagingInfo.size = size;
+	stagingInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
+	stagingInfo.sharingMode = vk::SharingMode::eExclusive;
+
+	auto stagingBuffer = m_device.createBufferUnique(stagingInfo);
+	auto stagingReqs = m_device.getBufferMemoryRequirements(stagingBuffer.get());
+
+	vk::MemoryAllocateInfo stagingAlloc{};
+	stagingAlloc.allocationSize = stagingReqs.size;
+	stagingAlloc.memoryTypeIndex = findMemoryType(stagingReqs.memoryTypeBits,
+		vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+	auto stagingMemory = m_device.allocateMemoryUnique(stagingAlloc);
+	m_device.bindBufferMemory(stagingBuffer.get(), stagingMemory.get(), 0);
+
+	void* mapped = m_device.mapMemory(stagingMemory.get(), 0, size);
+	std::memcpy(mapped, data, static_cast<size_t>(size));
+	m_device.unmapMemory(stagingMemory.get());
+
+	// Record copy into a one-time command buffer and wait for completion.
+	vk::CommandBufferAllocateInfo allocInfo{};
+	allocInfo.commandPool = m_transferCommandPool.get();
+	allocInfo.level = vk::CommandBufferLevel::ePrimary;
+	allocInfo.commandBufferCount = 1;
+	const auto cmdBuffers = m_device.allocateCommandBuffers(allocInfo);
+	Assertion(!cmdBuffers.empty(), "Failed to allocate transfer command buffer");
+	vk::CommandBuffer cmd = cmdBuffers[0];
+
+	vk::CommandBufferBeginInfo beginInfo{};
+	beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+	cmd.begin(beginInfo);
+
+	vk::BufferCopy copy{};
+	copy.srcOffset = 0;
+	copy.dstOffset = dstOffset;
+	copy.size = size;
+	cmd.copyBuffer(stagingBuffer.get(), buffer.buffer.get(), 1, &copy);
+
+	// Make transfer writes visible to later reads in subsequent submissions.
+	vk::PipelineStageFlags2 dstStage = vk::PipelineStageFlagBits2::eAllCommands;
+	vk::AccessFlags2 dstAccess = vk::AccessFlagBits2::eMemoryRead;
+	switch (buffer.type) {
+	case BufferType::Vertex:
+		dstStage = vk::PipelineStageFlagBits2::eVertexInput | vk::PipelineStageFlagBits2::eVertexShader;
+		dstAccess = vk::AccessFlagBits2::eVertexAttributeRead | vk::AccessFlagBits2::eShaderRead;
+		break;
+	case BufferType::Index:
+		dstStage = vk::PipelineStageFlagBits2::eVertexInput;
+		dstAccess = vk::AccessFlagBits2::eIndexRead;
+		break;
+	case BufferType::Uniform:
+		dstStage = vk::PipelineStageFlagBits2::eVertexShader | vk::PipelineStageFlagBits2::eFragmentShader;
+		dstAccess = vk::AccessFlagBits2::eUniformRead;
+		break;
+	default:
+		break;
+	}
+
+	vk::BufferMemoryBarrier2 barrier{};
+	barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	barrier.dstStageMask = dstStage;
+	barrier.dstAccessMask = dstAccess;
+	barrier.buffer = buffer.buffer.get();
+	barrier.offset = dstOffset;
+	barrier.size = size;
+
+	vk::DependencyInfo depInfo{};
+	depInfo.bufferMemoryBarrierCount = 1;
+	depInfo.pBufferMemoryBarriers = &barrier;
+	cmd.pipelineBarrier2(depInfo);
+
+	cmd.end();
+
+	vk::FenceCreateInfo fenceInfo{};
+	auto fence = m_device.createFenceUnique(fenceInfo);
+
+	vk::SubmitInfo submit{};
+	submit.commandBufferCount = 1;
+	submit.pCommandBuffers = &cmd;
+	m_transferQueue.submit(submit, fence.get());
+
+	const vk::Fence fenceHandle = fence.get();
+	const auto waitResult = m_device.waitForFences(1, &fenceHandle, VK_TRUE, std::numeric_limits<uint64_t>::max());
+	Assertion(waitResult == vk::Result::eSuccess, "Failed waiting for buffer upload fence");
+
+	// Safe after fence wait.
+	m_device.resetCommandPool(m_transferCommandPool.get());
 }
 
 gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageHint usage)
@@ -108,16 +214,19 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 
 	auto& buffer = m_buffers[handle.value()];
 
+	if (data == nullptr) {
+		// Allocation-only (used by persistent mapping). Caller will write later via mapBuffer().
+		return;
+	}
+
 	// Upload data
 	if (buffer.mapped) {
 		// Host-visible: direct copy
 		memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
 		// Host-coherent memory doesn't need explicit flush
 	} else {
-		// Device-local: need staging buffer (TODO: implement staging buffer upload)
-		// For now, this is an error - device-local buffers need staging
-		// In practice, Static buffers should use staging, Dynamic/Streaming should be host-visible
-		UNREACHABLE("Cannot update device-local buffer without staging buffer!");
+		// Device-local: stage and copy.
+		uploadToDeviceLocal(buffer, 0, static_cast<vk::DeviceSize>(size), data);
 	}
 }
 
@@ -135,7 +244,7 @@ void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t
 	}
 
 	if (!buffer.mapped) {
-		UNREACHABLE("Cannot update buffer offset without mapped memory!");
+		uploadToDeviceLocal(buffer, static_cast<vk::DeviceSize>(offset), static_cast<vk::DeviceSize>(size), data);
 		return;
 	}
 
@@ -232,8 +341,10 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 	buffer.memory = m_device.allocateMemoryUnique(allocInfo);
 	m_device.bindBufferMemory(buffer.buffer.get(), buffer.memory.get(), 0);
 
-	// Map if host-visible (all our usage hints use host-visible memory)
-	buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
+	buffer.mapped = nullptr;
+	if (getMemoryProperties(buffer.usage) & vk::MemoryPropertyFlagBits::eHostVisible) {
+		buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
+	}
 
 	buffer.size = size;
 }
@@ -246,7 +357,7 @@ vk::Buffer VulkanBufferManager::ensureBuffer(gr_buffer_handle handle, vk::Device
 
 	auto& buffer = m_buffers[handle.value()];
 
-	if (!buffer.buffer || buffer.size < static_cast<size_t>(minSize)) {
+	if (!buffer.buffer || buffer.size < minSize) {
 		resizeBuffer(handle, static_cast<size_t>(minSize));
 	}
 
