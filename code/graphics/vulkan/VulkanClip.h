@@ -2,6 +2,7 @@
 
 #include "graphics/2d.h"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace graphics::vulkan {
@@ -21,6 +22,39 @@ inline ClipScissorRect getClipScissorFromScreen(const ::screen& screen)
 	rect.width = static_cast<uint32_t>(screen.clip_width);
 	rect.height = static_cast<uint32_t>(screen.clip_height);
 	return rect;
+}
+
+// Vulkan requires scissor offsets to be non-negative. Some engine paths (e.g., HUD jitter) can
+// temporarily produce negative clip origins. Clamp to the current framebuffer extent.
+inline ClipScissorRect clampClipScissorToFramebuffer(const ClipScissorRect& in, int32_t fbWidth, int32_t fbHeight)
+{
+	ClipScissorRect out{};
+
+	const int64_t fbW = std::max<int64_t>(0, fbWidth);
+	const int64_t fbH = std::max<int64_t>(0, fbHeight);
+
+	// Treat the input as a half-open box [x0,x1) x [y0,y1) and intersect with [0,fbW) x [0,fbH).
+	int64_t x0 = in.x;
+	int64_t y0 = in.y;
+	int64_t x1 = x0 + static_cast<int64_t>(in.width);
+	int64_t y1 = y0 + static_cast<int64_t>(in.height);
+
+	auto clampI64 = [](int64_t v, int64_t lo, int64_t hi) { return std::max(lo, std::min(v, hi)); };
+	x0 = clampI64(x0, 0, fbW);
+	y0 = clampI64(y0, 0, fbH);
+	x1 = clampI64(x1, 0, fbW);
+	y1 = clampI64(y1, 0, fbH);
+
+	int64_t w = x1 - x0;
+	int64_t h = y1 - y0;
+	if (w < 0) w = 0;
+	if (h < 0) h = 0;
+
+	out.x = static_cast<int32_t>(x0);
+	out.y = static_cast<int32_t>(y0);
+	out.width = static_cast<uint32_t>(w);
+	out.height = static_cast<uint32_t>(h);
+	return out;
 }
 
 // Updates global gr_screen clip state using the engine's clip semantics (offset + width/height, with clip_{left,top}
@@ -109,4 +143,3 @@ inline void applyClipToScreen(int x, int y, int w, int h, int resize_mode)
 }
 
 } // namespace graphics::vulkan
-
