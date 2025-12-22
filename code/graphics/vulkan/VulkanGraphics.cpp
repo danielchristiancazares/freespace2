@@ -644,12 +644,13 @@ void gr_vulkan_render_model(model_material* material_info,
   }
 
   pcs.stride            = static_cast<uint32_t>(bufferp->stride);
-  pcs.posOffset         = MODEL_OFFSET_ABSENT;
-  pcs.normalOffset      = MODEL_OFFSET_ABSENT;
-  pcs.texCoordOffset    = MODEL_OFFSET_ABSENT;
-  pcs.tangentOffset     = MODEL_OFFSET_ABSENT;
-  pcs.boneIndicesOffset = MODEL_OFFSET_ABSENT;
-  pcs.boneWeightsOffset = MODEL_OFFSET_ABSENT;
+  pcs.vertexAttribMask  = 0;
+  pcs.posOffset         = 0;
+  pcs.normalOffset      = 0;
+  pcs.texCoordOffset    = 0;
+  pcs.tangentOffset     = 0;
+  pcs.boneIndicesOffset = 0;
+  pcs.boneWeightsOffset = 0;
 
   // Extract offsets from vertex layout
   for (size_t i = 0; i < bufferp->layout.get_num_vertex_components(); ++i) {
@@ -657,15 +658,19 @@ void gr_vulkan_render_model(model_material* material_info,
     switch (comp->format_type) {
     case vertex_format_data::POSITION3:
       pcs.posOffset = static_cast<uint32_t>(comp->offset);
+      pcs.vertexAttribMask |= MODEL_ATTRIB_POS;
       break;
     case vertex_format_data::NORMAL:
       pcs.normalOffset = static_cast<uint32_t>(comp->offset);
+      pcs.vertexAttribMask |= MODEL_ATTRIB_NORMAL;
       break;
     case vertex_format_data::TEX_COORD2:
       pcs.texCoordOffset = static_cast<uint32_t>(comp->offset);
+      pcs.vertexAttribMask |= MODEL_ATTRIB_TEXCOORD;
       break;
     case vertex_format_data::TANGENT:
       pcs.tangentOffset = static_cast<uint32_t>(comp->offset);
+      pcs.vertexAttribMask |= MODEL_ATTRIB_TANGENT;
       break;
     default:
       break;

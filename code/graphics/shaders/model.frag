@@ -18,6 +18,7 @@ layout(push_constant) uniform ModelPushConstants
 {
 	uint vertexOffset;        // unused in fragment stage
 	uint stride;              // unused in fragment stage
+	uint vertexAttribMask;    // unused in fragment stage (layout must match vertex stage)
 	uint posOffset;
 	uint normalOffset;
 	uint texCoordOffset;

@@ -19,12 +19,13 @@ layout(push_constant) uniform ModelPushConstants
 {
 	uint vertexOffset;        // byte offset into vertex heap for this draw
 	uint stride;              // byte stride between vertices
-	uint posOffset;           // byte offset of position (vec3)
-	uint normalOffset;        // byte offset of normal (vec3)
-	uint texCoordOffset;      // byte offset of texcoord (vec2)
-	uint tangentOffset;       // byte offset of tangent (vec4)
-	uint boneIndicesOffset;   // byte offset of bone indices (vec4/ivec4) or 0xFFFFFFFF when absent
-	uint boneWeightsOffset;   // byte offset of bone weights (vec4) or 0xFFFFFFFF when absent
+	uint vertexAttribMask;    // MODEL_ATTRIB_* bits from VulkanModelTypes.h
+	uint posOffset;           // byte offset of position (vec3) - valid if vertexAttribMask has MODEL_ATTRIB_POS
+	uint normalOffset;        // byte offset of normal (vec3) - valid if vertexAttribMask has MODEL_ATTRIB_NORMAL
+	uint texCoordOffset;      // byte offset of texcoord (vec2) - valid if vertexAttribMask has MODEL_ATTRIB_TEXCOORD
+	uint tangentOffset;       // byte offset of tangent (vec4) - valid if vertexAttribMask has MODEL_ATTRIB_TANGENT
+	uint boneIndicesOffset;   // byte offset of bone indices (vec4/ivec4)
+	uint boneWeightsOffset;   // byte offset of bone weights (vec4)
 	uint baseMapIndex;        // texture indices for bindless sampling
 	uint glowMapIndex;
 	uint normalMapIndex;
@@ -33,16 +34,21 @@ layout(push_constant) uniform ModelPushConstants
 	uint flags;               // bitfield for variant flags
 } pcs;
 
-const uint OFFSET_ABSENT = 0xFFFFFFFFu;
+const uint MODEL_ATTRIB_POS = 1u << 0;
+const uint MODEL_ATTRIB_NORMAL = 1u << 1;
+const uint MODEL_ATTRIB_TEXCOORD = 1u << 2;
+const uint MODEL_ATTRIB_TANGENT = 1u << 3;
+const uint MODEL_ATTRIB_BONEINDICES = 1u << 4;
+const uint MODEL_ATTRIB_BONEWEIGHTS = 1u << 5;
 
 layout(location = 0) out vec3 vPosition;
 layout(location = 1) out vec3 vNormal;
 layout(location = 2) out vec2 vTexCoord;
 layout(location = 3) out vec4 vTangent;
 
-bool hasOffset(uint offset)
+bool hasAttrib(uint bit)
 {
-	return offset != OFFSET_ABSENT;
+	return (pcs.vertexAttribMask & bit) != 0u;
 }
 
 uint wordIndex(uint byteBase, uint byteOffset)
@@ -72,17 +78,17 @@ void main()
 {
 	uint byteBase = pcs.vertexOffset + uint(gl_VertexIndex) * pcs.stride;
 
-	vec3 position = hasOffset(pcs.posOffset) ? loadVec3(byteBase, pcs.posOffset) : vec3(0.0);
-	vec3 normal = hasOffset(pcs.normalOffset) ? loadVec3(byteBase, pcs.normalOffset) : vec3(0.0, 0.0, 1.0);
-	if (hasOffset(pcs.normalOffset)) {
+	vec3 position = hasAttrib(MODEL_ATTRIB_POS) ? loadVec3(byteBase, pcs.posOffset) : vec3(0.0);
+	vec3 normal = hasAttrib(MODEL_ATTRIB_NORMAL) ? loadVec3(byteBase, pcs.normalOffset) : vec3(0.0, 0.0, 1.0);
+	if (hasAttrib(MODEL_ATTRIB_NORMAL)) {
 		float lenSq = dot(normal, normal);
 		if (lenSq > 0.0) {
 			normal = normalize(normal);
 		}
 	}
 
-	vec2 texCoord = hasOffset(pcs.texCoordOffset) ? loadVec2(byteBase, pcs.texCoordOffset) : vec2(0.0);
-	vec4 tangent = hasOffset(pcs.tangentOffset) ? loadVec4(byteBase, pcs.tangentOffset) : vec4(0.0, 0.0, 1.0, 1.0);
+	vec2 texCoord = hasAttrib(MODEL_ATTRIB_TEXCOORD) ? loadVec2(byteBase, pcs.texCoordOffset) : vec2(0.0);
+	vec4 tangent = hasAttrib(MODEL_ATTRIB_TANGENT) ? loadVec4(byteBase, pcs.tangentOffset) : vec4(0.0, 0.0, 1.0, 1.0);
 
 	// Bone data, texture indices, matrixIndex, and flags are currently unused in this stage.
 	// They are kept in the push constant block for future skinning/instancing/bindless sampling logic.

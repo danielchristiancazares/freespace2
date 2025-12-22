@@ -141,6 +141,7 @@ Introduce `RenderCtx` (proves rendering is active):
 2) Validation callback logs include message id/name and object/label context, with duplicate suppression (via `vkprintf`).
 3) `VulkanFrame::reset()` handles both exceptions-enabled and `VULKAN_HPP_NO_EXCEPTIONS` builds.
 4) Removed dead `VulkanShaderReflection.cpp` TU (it duplicated the header and provided no definitions).
+5) Removed `MODEL_OFFSET_ABSENT` sentinel; model vertex attribute presence is explicit via a `vertexAttribMask` push constant.
 
 ---
 

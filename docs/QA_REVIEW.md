@@ -70,6 +70,11 @@ validation-safety, and "foot-gun" APIs.
 - Deferred lighting boundaries use move-only tokens (`DeferredGeometryCtx` -> `DeferredLightingCtx`) rather than a state enum.
 - The boundary API (`gr_vulkan_deferred_lighting_begin/end/finish`) stores those tokens and enforces correct call order.
 
+### Model vertex attribute presence uses a mask (no sentinel)
+
+- Removed `MODEL_OFFSET_ABSENT`; `ModelPushConstants` now includes `vertexAttribMask` and shaders only consume offsets when the
+  corresponding bit is present.
+
 ## Medium
 
 No remaining medium items.
@@ -81,13 +86,3 @@ No remaining medium items.
 - Static buffers are host-visible with TODO for staging/device-local (`code/graphics/vulkan/VulkanBufferManager.cpp`).
 - Deferred shader pipeline caching is TODO (`code/graphics/vulkan/VulkanRenderer.cpp`).
 - Empty `else {}` in deferred lights (`code/graphics/vulkan/VulkanDeferredLights.cpp`).
-
-## Tech Debt (Design Philosophy)
-
-### `MODEL_OFFSET_ABSENT` sentinel
-
-`VulkanModelTypes.h` defines `MODEL_OFFSET_ABSENT = 0xFFFFFFFFu`.
-
-Used only for absent vertex attribute offsets. Model material texture indices are now always valid: the engine reserves
-well-known bindless slots for default textures (base=white, normal=flat, spec=dielectric), so shaders no longer need an
-\"absent texture\" sentinel for model materials.
