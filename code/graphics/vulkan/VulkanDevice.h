@@ -98,6 +98,7 @@ class VulkanDevice {
 	vk::Image swapchainImage(uint32_t index) const;
 	vk::ImageView swapchainImageView(uint32_t index) const;
 	uint32_t swapchainImageCount() const;
+	vk::ImageUsageFlags swapchainUsage() const { return m_swapchainUsage; }
 
 	//--------------------------------------------------------------------------
 	// Device properties and capabilities
@@ -170,6 +171,7 @@ class VulkanDevice {
 	vk::UniqueSwapchainKHR m_swapchain;
 	vk::Format m_swapchainFormat = vk::Format::eUndefined;
 	vk::Extent2D m_swapchainExtent;
+	vk::ImageUsageFlags m_swapchainUsage{};
 	SCP_vector<vk::Image> m_swapchainImages;
 	SCP_vector<vk::UniqueImageView> m_swapchainImageViews;
 
