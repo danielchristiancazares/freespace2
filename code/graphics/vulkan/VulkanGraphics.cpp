@@ -143,14 +143,15 @@ vk::Viewport createFullScreenViewport()
   return viewport;
 }
 
-  vk::Rect2D createClipScissor()
-  {
-    const auto clip = getClipScissorFromScreen(gr_screen);
-    vk::Rect2D scissor{};
-    scissor.offset = vk::Offset2D{clip.x, clip.y};
-    scissor.extent = vk::Extent2D{clip.width, clip.height};
-    return scissor;
-  }
+vk::Rect2D createClipScissor()
+{
+  auto clip = getClipScissorFromScreen(gr_screen);
+  clip = clampClipScissorToFramebuffer(clip, gr_screen.max_w, gr_screen.max_h);
+  vk::Rect2D scissor{};
+  scissor.offset = vk::Offset2D{clip.x, clip.y};
+  scissor.extent = vk::Extent2D{clip.width, clip.height};
+  return scissor;
+}
 
 vk::PrimitiveTopology convertPrimitiveType(primitive_type prim_type)
 {
@@ -526,7 +527,26 @@ int gr_vulkan_bm_set_render_target(int n, int face)
 
 void stub_bm_create(bitmap_slot* /*slot*/) {}
 
-void stub_bm_free_data(bitmap_slot* /*slot*/, bool /*release*/) {}
+void gr_vulkan_bm_free_data(bitmap_slot* slot, bool release)
+{
+  if (!release) {
+    return; // CPU-only unload; keep GPU texture resident.
+  }
+  if (slot == nullptr) {
+    return;
+  }
+  if (g_backend == nullptr || g_backend->renderer == nullptr) {
+    return;
+  }
+
+  // bmpman releases handles by setting their entry type to BM_TYPE_NONE and then reusing the
+  // integer handle later. Ensure Vulkan-side caches drop the mapping immediately.
+  const int handle = slot->entry.handle;
+  if (handle < 0) {
+    return;
+  }
+  g_backend->renderer->releaseBitmap(handle);
+}
 
 void stub_bm_init(bitmap_slot* /*slot*/) {}
 
@@ -1693,6 +1713,9 @@ void init_function_pointers()
   gr_screen.gf_preload = [](int bitmap_num, int is_aabitmap) -> int {
     return currentRenderer().preloadTexture(bitmap_num, is_aabitmap != 0);
   };
+
+  // Bitmap lifetime (bmpman)
+  gr_screen.gf_bm_free_data = gr_vulkan_bm_free_data;
 
   // Bitmap render targets (RTT)
   gr_screen.gf_bm_make_render_target = gr_vulkan_bm_make_render_target;

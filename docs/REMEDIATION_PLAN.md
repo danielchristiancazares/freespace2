@@ -169,6 +169,12 @@ engine-driven viewport/scissor changes (HTL target monitor, cockpit displays, en
   - Implemented `gf_set_viewport`.
   - `gf_set_clip` / `gf_reset_clip` now apply dynamic scissor updates (so clip changes affect model draws).
   - `VulkanRenderingSession::applyDynamicState()` no longer overwrites viewport at pass begin (viewport is owned by engine calls).
+- bmpman handle reuse is safe:
+  - Implemented `gf_bm_free_data(slot, release=true)` to immediately drop Vulkan-side mappings when bmpman releases a bitmap handle.
+  - `VulkanTextureManager::createRenderTarget()` retires any stale mapping for a reused handle rather than failing.
+- Vulkan scissor is spec-valid:
+  - Clip-derived scissor rectangles are clamped to the framebuffer extent so Vulkan never records a negative scissor offset
+    (engine paths like HUD jitter can temporarily produce negative clip origins).
 
 ---
 

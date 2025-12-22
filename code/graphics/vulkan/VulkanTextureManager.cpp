@@ -1070,6 +1070,49 @@ void VulkanTextureManager::deleteTexture(int bitmapHandle)
   m_pendingRetirements.insert(base);
 }
 
+void VulkanTextureManager::releaseBitmap(int bitmapHandle)
+{
+  int base = bm_get_base_frame(bitmapHandle, nullptr);
+  if (base < 0) {
+    return;
+  }
+  if (isBuiltinTextureHandle(base)) {
+    return;
+  }
+
+  // Hard lifecycle boundary: bmpman may reuse this handle immediately after release.
+  // Drop all cache state for this handle now; GPU lifetime safety is handled via deferred release.
+  m_unavailableTextures.erase(base);
+  m_pendingBindlessSlots.erase(base);
+  m_pendingRetirements.erase(base);
+  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), base);
+  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+
+  // If the texture is resident, retire it immediately (releasing any bindless slot mapping).
+  auto it = m_residentTextures.find(base);
+  if (it != m_residentTextures.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.lastUsedSerial);
+    retireTexture(base, retireSerial);
+    return;
+  }
+
+  // If we somehow have a render-target record without a resident texture, still defer its view destruction.
+  if (auto rt = tryTakeRenderTargetRecord(base); rt.has_value()) {
+    const uint64_t retireSerial = m_safeRetireSerial;
+    m_deferredReleases.enqueue(retireSerial, [rt = std::move(rt)]() mutable { (void)rt; });
+  }
+
+  // Non-resident: drop any bindless slot assignment so the slot can be reused.
+  auto slotIt = m_bindlessSlots.find(base);
+  if (slotIt != m_bindlessSlots.end()) {
+    const uint32_t slot = slotIt->second;
+    m_bindlessSlots.erase(slotIt);
+    if (isDynamicBindlessSlot(slot)) {
+      m_freeBindlessSlots.push_back(slot);
+    }
+  }
+}
+
 void VulkanTextureManager::cleanup()
 {
   m_deferredReleases.clear();
@@ -1246,10 +1289,20 @@ bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t widt
     return false;
   }
 
-  // Render targets are created explicitly. Refuse to stomp an existing resident mapping.
-  if (m_residentTextures.find(baseFrameHandle) != m_residentTextures.end()) {
-    mprintf(("VulkanTextureManager: Refusing to recreate existing texture handle %d as render target.\n", baseFrameHandle));
-    return false;
+  // Render targets are created explicitly. bmpman handles are reused after release, so we must be
+  // robust to the case where stale GPU state still exists for this handle.
+  m_unavailableTextures.erase(baseFrameHandle);
+  m_pendingBindlessSlots.erase(baseFrameHandle);
+  m_pendingRetirements.erase(baseFrameHandle);
+  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrameHandle);
+  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+
+  if (auto it = m_residentTextures.find(baseFrameHandle); it != m_residentTextures.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.lastUsedSerial);
+    mprintf(("VulkanTextureManager: Recreating texture handle %d as render target (retireSerial=%llu)\n",
+             baseFrameHandle,
+             static_cast<unsigned long long>(retireSerial)));
+    retireTexture(baseFrameHandle, retireSerial);
   }
 
   const bool isCubemap = (flags & BMP_FLAG_CUBEMAP) != 0;

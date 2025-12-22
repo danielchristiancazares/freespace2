@@ -106,6 +106,19 @@ validation-safety, and "foot-gun" APIs.
 - `VulkanRenderingSession::applyDynamicState()` no longer overwrites viewport at render-pass begin, so engine-driven
   viewport changes (e.g. HTL target monitor) remain effective.
 
+### Vulkan scissor rects are always spec-valid (no negative offsets)
+
+- Some engine paths can produce negative clip origins (e.g., HUD jitter). Vulkan requires `vkCmdSetScissor` offsets to be
+  non-negative, so Vulkan clamps the clip scissor to the current framebuffer extent before issuing `vkCmdSetScissor`
+  (`code/graphics/vulkan/VulkanClip.h`).
+
+### bmpman handle reuse is safe (GPU cache drops on release)
+
+- Vulkan implements the `gr_bm_free_data(slot, release=true)` hook to immediately drop any Vulkan-side mapping for that
+  bitmap handle, preventing stale-GPU-state collisions when bmpman reuses freed handles for new allocations (notably RTT).
+- `VulkanTextureManager::createRenderTarget()` is robust to stale state and will retire any existing mapping for that handle
+  rather than failing.
+
 ## Medium
 
 - Vulkan shader coverage is still incomplete: `VulkanLayoutContracts` declares shader types that are not mapped in

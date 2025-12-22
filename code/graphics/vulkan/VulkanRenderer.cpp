@@ -535,7 +535,8 @@ void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec
 
   // Preserve the current clip scissor across the internal fullscreen copy pass. Model draw paths
   // don't currently set scissor themselves.
-  const auto clip = getClipScissorFromScreen(gr_screen);
+  auto clip = getClipScissorFromScreen(gr_screen);
+  clip = clampClipScissorToFramebuffer(clip, gr_screen.max_w, gr_screen.max_h);
   vk::Rect2D restoreScissor{};
   restoreScissor.offset = vk::Offset2D{clip.x, clip.y};
   restoreScissor.extent = vk::Extent2D{clip.width, clip.height};
@@ -1191,6 +1192,13 @@ int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {
     return m_textureManager->preloadTexture(bitmapHandle, isAABitmap) ? 1 : 0;
   }
   return 0;
+}
+
+void VulkanRenderer::releaseBitmap(int bitmapHandle)
+{
+  if (m_textureManager && bitmapHandle >= 0) {
+    m_textureManager->releaseBitmap(bitmapHandle);
+  }
 }
 
 void VulkanRenderer::immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder) {

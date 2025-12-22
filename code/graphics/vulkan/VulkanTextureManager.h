@@ -141,6 +141,10 @@ class VulkanTextureManager {
 	// Delete texture for a bitmap handle (base frame)
 	void deleteTexture(int bitmapHandle);
 
+	// Called by bmpman when a bitmap handle is being released (slot will become BM_TYPE_NONE).
+	// This must drop any GPU mapping immediately so handle reuse cannot collide.
+	void releaseBitmap(int bitmapHandle);
+
 		// Cleanup all resources
 		void cleanup();
 

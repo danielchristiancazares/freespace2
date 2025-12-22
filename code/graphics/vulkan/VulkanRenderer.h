@@ -144,6 +144,7 @@ class VulkanRenderer {
 	void* mapBuffer(gr_buffer_handle handle);
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
 	int preloadTexture(int bitmapHandle, bool isAABitmap);
+	void releaseBitmap(int bitmapHandle);
 
 	// Model vertex heap registration (called from GPUMemoryHeap when ModelVertex heap is created)
 	void setModelVertexHeapHandle(gr_buffer_handle handle);
