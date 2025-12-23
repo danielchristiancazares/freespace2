@@ -906,6 +906,305 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx& ctx)
   m_pendingUploads.swap(remaining);
 }
 
+bool VulkanTextureManager::updateTexture(const UploadCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height)
+{
+  if (bitmapHandle < 0 || data == nullptr || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  int numFrames = 1;
+  const int baseFrame = bm_get_base_frame(bitmapHandle, &numFrames);
+  if (baseFrame < 0) {
+    return false;
+  }
+  // Never update the synthetic default/fallback textures.
+  if (isBuiltinTextureHandle(baseFrame)) {
+    return false;
+  }
+
+  // Multi-layer texture arrays require a layer index for updates which the gr_update_texture() API doesn't provide.
+  // Note: bm_is_texture_array() returns true for single-frame textures too; only reject actual multi-layer arrays.
+  const bool isArray = bm_is_texture_array(baseFrame);
+  const uint32_t layers = isArray ? static_cast<uint32_t>(numFrames) : 1u;
+  if (layers != 1u) {
+    return false;
+  }
+
+  // Permanently unavailable textures do not retry.
+  if (m_unavailableTextures.find(baseFrame) != m_unavailableTextures.end()) {
+    return false;
+  }
+
+  VulkanFrame& frame = ctx.frame;
+  vk::CommandBuffer cmd = ctx.cmd;
+  const uint32_t currentFrameIndex = ctx.currentFrameIndex;
+
+  const uint32_t w = static_cast<uint32_t>(width);
+  const uint32_t h = static_cast<uint32_t>(height);
+
+  // Ensure a resident texture exists for this handle. Dynamic updates rely on an existing VkImage.
+  auto it = m_residentTextures.find(baseFrame);
+  if (it == m_residentTextures.end()) {
+    // Don't overwrite bmpman render targets.
+    if (hasRenderTarget(baseFrame)) {
+      return false;
+    }
+
+    ushort flags = 0;
+    bm_get_info(baseFrame, nullptr, nullptr, &flags, nullptr, nullptr);
+
+    auto* bmp0 = bm_lock(baseFrame, 32, flags);
+    if (!bmp0) {
+      return false;
+    }
+
+    const vk::Format format = selectFormat(*bmp0);
+    const uint32_t bw = static_cast<uint32_t>(bmp0->w);
+    const uint32_t bh = static_cast<uint32_t>(bmp0->h);
+    bm_unlock(baseFrame);
+
+    if (isBlockCompressedFormat(format)) {
+      return false;
+    }
+
+    if (bw != w || bh != h) {
+      return false;
+    }
+
+    vk::ImageCreateInfo imageInfo;
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.format = format;
+    imageInfo.extent = vk::Extent3D(w, h, 1);
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
+    imageInfo.tiling = vk::ImageTiling::eOptimal;
+    imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+    ResidentTexture record{};
+    record.gpu.image = m_device.createImageUnique(imageInfo);
+    auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
+    vk::MemoryAllocateInfo imgAlloc;
+    imgAlloc.allocationSize = imgReqs.size;
+    imgAlloc.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    record.gpu.memory = m_device.allocateMemoryUnique(imgAlloc);
+    m_device.bindImageMemory(record.gpu.image.get(), record.gpu.memory.get(), 0);
+
+    vk::ImageViewCreateInfo viewInfo;
+    viewInfo.image = record.gpu.image.get();
+    viewInfo.viewType = vk::ImageViewType::e2DArray;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
+
+    record.gpu.sampler = m_defaultSampler.get();
+    record.gpu.width = w;
+    record.gpu.height = h;
+    record.gpu.layers = 1;
+    record.gpu.mipLevels = 1;
+    record.gpu.format = format;
+    record.gpu.currentLayout = vk::ImageLayout::eUndefined;
+
+    record.lastUsedFrame = currentFrameIndex;
+    record.lastUsedSerial = m_safeRetireSerial;
+
+    it = m_residentTextures.emplace(baseFrame, std::move(record)).first;
+    onTextureResident(baseFrame);
+  }
+
+  auto& record = it->second;
+  auto& tex = record.gpu;
+
+  if (tex.width != w || tex.height != h || tex.layers != 1) {
+    return false;
+  }
+
+  // Streaming updates are expected to be uncompressed (raw pixels or masks).
+  if (isBlockCompressedFormat(tex.format)) {
+    return false;
+  }
+
+  // Determine source bytes-per-pixel.
+  // - bpp != 8: bpp matches the source pixel format (in bits-per-pixel).
+  // - bpp == 8: this is a mask-update mode. Most callers pass 1 byte/pixel mask data, but user textures (e.g. APNG)
+  //   may pass full-color source while requesting an 8bpp upload/conversion.
+  uint32_t srcBytesPerPixel = 0;
+  if (bpp == 8) {
+    const auto* entry = bm_get_entry(bitmapHandle);
+    if (!entry) {
+      return false;
+    }
+    // bm.bpp is mutable (set by bm_lock) and can change under our feet. true_bpp is stable and describes the bitmap's
+    // declared pixel format (or bm_create's bpp for BM_TYPE_USER).
+    //
+    // For non-user bitmaps, treat bpp==8 as "caller provided a 1 byte/pixel mask" since streaming paths lock source
+    // frames as BMP_AABITMAP and pass the resulting 8-bit buffer.
+    if (entry->type == BM_TYPE_USER || entry->type == BM_TYPE_3D) {
+      srcBytesPerPixel = std::max<uint32_t>(1u, static_cast<uint32_t>(entry->bm.true_bpp) >> 3);
+    } else {
+      srcBytesPerPixel = 1u;
+    }
+  } else {
+    srcBytesPerPixel = std::max<uint32_t>(1u, static_cast<uint32_t>(bpp) >> 3);
+  }
+
+  const size_t uploadSize = calculateLayerSize(w, h, tex.format);
+  auto allocOpt = frame.stagingBuffer().try_allocate(static_cast<vk::DeviceSize>(uploadSize));
+  if (!allocOpt) {
+    return false;
+  }
+  auto& alloc = *allocOpt;
+
+  auto* dst = static_cast<uint8_t*>(alloc.mapped);
+  const auto* src = reinterpret_cast<const uint8_t*>(data);
+
+  auto computeMask = [&](const uint8_t* px) -> uint8_t {
+    if (srcBytesPerPixel <= 1) {
+      return px[0];
+    }
+
+    uint32_t lum = 0;
+    const uint32_t rgbCount = std::min<uint32_t>(3u, srcBytesPerPixel);
+    for (uint32_t k = 0; k < rgbCount; ++k) {
+      lum += px[k];
+    }
+    lum /= rgbCount;
+
+    if (srcBytesPerPixel >= 4) {
+      const uint32_t a = px[3];
+      lum = (lum * a + 127u) / 255u;
+    }
+
+    return static_cast<uint8_t>(lum);
+  };
+
+  const bool maskUpdate = (bpp == 8);
+  if (tex.format == vk::Format::eR8Unorm) {
+    if (maskUpdate && srcBytesPerPixel == 1) {
+      std::memcpy(dst, src, uploadSize);
+    } else {
+      // Convert to a single-channel mask (luma, optionally alpha-modulated if source has alpha).
+      const size_t pixelCount = static_cast<size_t>(w) * h;
+      for (size_t i = 0; i < pixelCount; ++i) {
+        dst[i] = computeMask(src + i * srcBytesPerPixel);
+      }
+    }
+  } else if (tex.format == vk::Format::eB8G8R8A8Unorm) {
+    if (maskUpdate) {
+      // Expand to BGRA8 with the mask in the red channel (OpenGL parity for GL_RED uploads).
+      const size_t pixelCount = static_cast<size_t>(w) * h;
+      for (size_t i = 0; i < pixelCount; ++i) {
+        const uint8_t mask = computeMask(src + i * srcBytesPerPixel);
+        dst[i * 4 + 0] = 0;    // B
+        dst[i * 4 + 1] = 0;    // G
+        dst[i * 4 + 2] = mask; // R
+        dst[i * 4 + 3] = 255;  // A
+      }
+    } else if (srcBytesPerPixel == 4) {
+      std::memcpy(dst, src, uploadSize);
+    } else if (srcBytesPerPixel == 3) {
+      // Expand to BGRA8.
+      for (uint32_t i = 0; i < w * h; ++i) {
+        dst[i * 4 + 0] = src[i * 3 + 0];
+        dst[i * 4 + 1] = src[i * 3 + 1];
+        dst[i * 4 + 2] = src[i * 3 + 2];
+        dst[i * 4 + 3] = 255;
+      }
+    } else if (srcBytesPerPixel == 2) {
+      // 16bpp textures in bmpman use A1R5G5B5 packing (see Gr_t_* masks in code/graphics/2d.cpp).
+      // Expand to BGRA8 to match eB8G8R8A8Unorm.
+      auto* src16 = reinterpret_cast<const uint16_t*>(src);
+      for (uint32_t i = 0; i < w * h; ++i) {
+        const uint16_t pixel = src16[i];
+        const uint8_t b = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
+        const uint8_t g = static_cast<uint8_t>(((pixel >> 5) & 0x1F) * 255 / 31);
+        const uint8_t r = static_cast<uint8_t>(((pixel >> 10) & 0x1F) * 255 / 31);
+        const uint8_t a = (pixel & 0x8000) ? 255u : 0u;
+
+        dst[i * 4 + 0] = b;
+        dst[i * 4 + 1] = g;
+        dst[i * 4 + 2] = r;
+        dst[i * 4 + 3] = a;
+      }
+    } else if (srcBytesPerPixel == 1) {
+      // Treat as a mask; place it in red to match alphaTexture sampling (.r).
+      for (uint32_t i = 0; i < w * h; ++i) {
+        const uint8_t mask = src[i];
+        dst[i * 4 + 0] = 0;
+        dst[i * 4 + 1] = 0;
+        dst[i * 4 + 2] = mask;
+        dst[i * 4 + 3] = 255;
+      }
+    } else {
+      return false;
+    }
+  } else {
+    // Unexpected format for dynamic updates.
+    return false;
+  }
+
+  // Transition to transfer dst.
+  vk::ImageMemoryBarrier2 toTransfer{};
+  const auto srcAccess = stageAccessForLayout(tex.currentLayout);
+  toTransfer.srcStageMask = srcAccess.stageMask;
+  toTransfer.srcAccessMask = srcAccess.accessMask;
+  toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+  toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+  toTransfer.oldLayout = tex.currentLayout;
+  toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
+  toTransfer.image = tex.image.get();
+  toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  toTransfer.subresourceRange.baseMipLevel = 0;
+  toTransfer.subresourceRange.levelCount = 1;
+  toTransfer.subresourceRange.baseArrayLayer = 0;
+  toTransfer.subresourceRange.layerCount = 1;
+
+  vk::DependencyInfo depToTransfer{};
+  depToTransfer.imageMemoryBarrierCount = 1;
+  depToTransfer.pImageMemoryBarriers = &toTransfer;
+  cmd.pipelineBarrier2(depToTransfer);
+
+  // Copy staging -> image.
+  vk::BufferImageCopy region{};
+  region.bufferOffset = alloc.offset;
+  region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.imageSubresource.mipLevel = 0;
+  region.imageSubresource.baseArrayLayer = 0;
+  region.imageSubresource.layerCount = 1;
+  region.imageExtent = vk::Extent3D(w, h, 1);
+  region.imageOffset = vk::Offset3D(0, 0, 0);
+  cmd.copyBufferToImage(frame.stagingBuffer().buffer(),
+    tex.image.get(),
+    vk::ImageLayout::eTransferDstOptimal,
+    1,
+    &region);
+
+  // Barrier back to shader read.
+  vk::ImageMemoryBarrier2 toShader{};
+  toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+  toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+  toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+  toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+  toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+  toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  toShader.image = tex.image.get();
+  toShader.subresourceRange = toTransfer.subresourceRange;
+
+  vk::DependencyInfo depToShader{};
+  depToShader.imageMemoryBarrierCount = 1;
+  depToShader.pImageMemoryBarriers = &toShader;
+  cmd.pipelineBarrier2(depToShader);
+
+  tex.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  record.lastUsedFrame = currentFrameIndex;
+  record.lastUsedSerial = m_safeRetireSerial;
+
+  return true;
+}
+
 bool VulkanTextureManager::isUploadQueued(int baseFrame) const
 {
   return std::find(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrame) != m_pendingUploads.end();
