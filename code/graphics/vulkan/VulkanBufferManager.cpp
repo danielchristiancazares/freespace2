@@ -307,9 +307,14 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 
 	auto& buffer = m_buffers[handle.value()];
 
-	// If size is the same, nothing to do
+	// OpenGL treats "resize to same size" as an orphaning hint (new storage) which is relied upon by
+	// `gr_reset_immediate_buffer()` to avoid CPU overwriting data still in use by the GPU across frames.
+	// Mirror that behavior for host-visible dynamic/streaming buffers. For other usages, a same-size resize
+	// is a no-op.
 	if (size == buffer.size) {
-		return;
+		if (buffer.usage != BufferUsageHint::Dynamic && buffer.usage != BufferUsageHint::Streaming) {
+			return;
+		}
 	}
 
 	// Retire the old buffer if it exists
