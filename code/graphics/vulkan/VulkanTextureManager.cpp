@@ -441,15 +441,21 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap)
         dst[i * 4 + 3] = 255;
       }
     } else if (!compressed && !singleChannel && frameBmp->bpp == 16) {
-      // 16bpp (5-6-5 RGB) - expand to BGRA to match eB8G8R8A8Unorm format
+      // 16bpp textures in bmpman use A1R5G5B5 packing (see Gr_t_* masks in code/graphics/2d.cpp).
+      // Expand to BGRA8 to match eB8G8R8A8Unorm.
       auto* src = reinterpret_cast<uint16_t*>(frameBmp->data);
       auto* dst = static_cast<uint8_t*>(mapped) + offset;
       for (uint32_t i = 0; i < width * height; ++i) {
-        uint16_t pixel = src[i];
-        dst[i * 4 + 0] = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);          // B
-        dst[i * 4 + 1] = static_cast<uint8_t>(((pixel >> 5) & 0x3F) * 255 / 63);   // G
-        dst[i * 4 + 2] = static_cast<uint8_t>(((pixel >> 11) & 0x1F) * 255 / 31);  // R
-        dst[i * 4 + 3] = 255;                                                       // A
+        const uint16_t pixel = src[i];
+        const uint8_t b = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
+        const uint8_t g = static_cast<uint8_t>(((pixel >> 5) & 0x1F) * 255 / 31);
+        const uint8_t r = static_cast<uint8_t>(((pixel >> 10) & 0x1F) * 255 / 31);
+        const uint8_t a = (pixel & 0x8000) ? 255u : 0u;
+
+        dst[i * 4 + 0] = b;
+        dst[i * 4 + 1] = g;
+        dst[i * 4 + 2] = r;
+        dst[i * 4 + 3] = a;
       }
     } else if (!compressed && singleChannel) {
       std::memcpy(static_cast<uint8_t*>(mapped) + offset,
@@ -769,15 +775,21 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx& ctx)
           dst[i * 4 + 3] = 255;
         }
       } else if (!compressed && !singleChannel && frameBmp->bpp == 16) {
-        // 16bpp (5-6-5 RGB) - expand to BGRA to match eB8G8R8A8Unorm format
+        // 16bpp textures in bmpman use A1R5G5B5 packing (see Gr_t_* masks in code/graphics/2d.cpp).
+        // Expand to BGRA8 to match eB8G8R8A8Unorm.
         auto* src = reinterpret_cast<uint16_t*>(frameBmp->data);
         auto* dst = static_cast<uint8_t*>(alloc.mapped);
         for (uint32_t i = 0; i < width * height; ++i) {
-          uint16_t pixel = src[i];
-          dst[i * 4 + 0] = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);          // B
-          dst[i * 4 + 1] = static_cast<uint8_t>(((pixel >> 5) & 0x3F) * 255 / 63);   // G
-          dst[i * 4 + 2] = static_cast<uint8_t>(((pixel >> 11) & 0x1F) * 255 / 31);  // R
-          dst[i * 4 + 3] = 255;                                                       // A
+          const uint16_t pixel = src[i];
+          const uint8_t b = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
+          const uint8_t g = static_cast<uint8_t>(((pixel >> 5) & 0x1F) * 255 / 31);
+          const uint8_t r = static_cast<uint8_t>(((pixel >> 10) & 0x1F) * 255 / 31);
+          const uint8_t a = (pixel & 0x8000) ? 255u : 0u;
+
+          dst[i * 4 + 0] = b;
+          dst[i * 4 + 1] = g;
+          dst[i * 4 + 2] = r;
+          dst[i * 4 + 3] = a;
         }
       } else if (!compressed && singleChannel) {
         std::memcpy(alloc.mapped, reinterpret_cast<uint8_t*>(frameBmp->data), layerSize);
