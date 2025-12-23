@@ -25,10 +25,14 @@ void main()
 {
 	vec4 baseColor = texture(baseMap, vec3(fragTexCoord, float(baseMapIndex)));
 
-	if (alphaThreshold > baseColor.a) discard;
+	// AA bitmaps (fonts, etc.) are uploaded as single-channel (R8) textures where the mask lives in .r.
+	// Don't use .a in that case (it will be 1.0 for R8).
+	float coverage = (alphaTexture == 1) ? baseColor.r : baseColor.a;
+	if (alphaThreshold > coverage) discard;
 
 	// Convert texture from sRGB if needed
-	baseColor.rgb = (srgb == 1) ? srgb_to_linear(baseColor.rgb) : baseColor.rgb;
+	// For alpha textures, baseColor is a mask, not color data, so don't apply sRGB conversion to it.
+	baseColor.rgb = (srgb == 1 && alphaTexture == 0) ? srgb_to_linear(baseColor.rgb) : baseColor.rgb;
 
 	// Uniform color (no vertex color multiplication)
 	vec4 blendColor = (srgb == 1) ? vec4(srgb_to_linear(color.rgb), color.a) : color;

@@ -1001,7 +1001,9 @@ void gr_vulkan_render_primitives(material* material_info,
   int textureHandle = material_info->is_textured() ? material_info->get_texture_map(TM_BASE_TYPE) : -1;
 
   int baseMapIndex = (textureHandle >= 0) ? bm_get_array_index(textureHandle) : 0;
-  int alphaTexture = (material_info->get_texture_type() == material::TEX_TYPE_AABITMAP) ? 1 : 0;
+  // material::get_texture_type() returns a TCACHE_TYPE_* value, not material::texture_type.
+  // Use the TCACHE_TYPE_* constant here so AA-bitmaps (font/HUD alpha masks) are handled correctly.
+  int alphaTexture = (material_info->get_texture_type() == TCACHE_TYPE_AABITMAP) ? 1 : 0;
   int noTexturing = material_info->is_textured() ? 0 : 1;
   float intensity = material_info->get_color_scale();
 
