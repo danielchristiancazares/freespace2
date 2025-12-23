@@ -1857,6 +1857,11 @@ bool initialize(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 
   // Initialize all function pointers now that renderer is available
   init_function_pointers();
+
+  // Initialize global matrix state (notably gr_texture_matrix used by ModelUniforms::textureMatrix).
+  // OpenGL does this in gr_opengl_init(); Vulkan needs the same initialization.
+  gr_reset_matrices();
+  gr_setup_viewport();
   return true;
 }
 
