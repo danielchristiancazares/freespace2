@@ -1217,6 +1217,29 @@ int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {
   return 0;
 }
 
+void VulkanRenderer::updateTexture(const FrameCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height)
+{
+  if (!m_textureManager || !m_textureUploader) {
+    return;
+  }
+  if (bitmapHandle < 0 || data == nullptr || width <= 0 || height <= 0) {
+    return;
+  }
+
+  // Transfer operations are invalid inside dynamic rendering.
+  if (m_renderingSession) {
+    m_renderingSession->suspendRendering();
+  }
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+    return;
+  }
+
+  UploadCtx uploadCtx{ ctx.m_recording.ref(), cmd, m_frameCounter };
+  (void)m_textureUploader->updateTexture(uploadCtx, bitmapHandle, bpp, data, width, height);
+}
+
 void VulkanRenderer::releaseBitmap(int bitmapHandle)
 {
   if (m_textureManager && bitmapHandle >= 0) {

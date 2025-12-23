@@ -144,6 +144,8 @@ class VulkanRenderer {
 	void* mapBuffer(gr_buffer_handle handle);
 	void flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size);
 	int preloadTexture(int bitmapHandle, bool isAABitmap);
+	// Recording-only: uploads new pixel data into an existing bitmap texture (streaming anims, NanoVG, etc.).
+	void updateTexture(const FrameCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height);
 	void releaseBitmap(int bitmapHandle);
 
 	// Model vertex heap registration (called from GPUMemoryHeap when ModelVertex heap is created)

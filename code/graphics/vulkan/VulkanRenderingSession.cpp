@@ -424,6 +424,9 @@ void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd
 
   // Clear flags are one-shot; reset after we consume them
   m_clearOps = ClearOps::loadAll();
+  // beginDeferredPass() sets G-buffer attachment load ops to CLEAR. If we suspend rendering mid-pass (e.g. for
+  // transfers/texture updates), restarting dynamic rendering must preserve the existing contents.
+  m_gbufferLoadOps.fill(vk::AttachmentLoadOp::eLoad);
 }
 
 void VulkanRenderingSession::beginGBufferEmissiveRenderingInternal(vk::CommandBuffer cmd)
