@@ -1,5 +1,10 @@
 # Type-Driven Design: A Philosophy
 
+## How to Read This Document
+
+Absorb the principle, not the syntax. The examples exist to illustrate; not copy outright. If you find yourself arguing that an example has a technical flaw while ignoring what it demonstrates, you have missed the point.
+The principle behind every pattern: make invalid states unrepresentable. If you understand this, you can derive the correct implementation for any situation. If you're looking for escape hatches in example code, you don't understand it yet.
+
 ## The Core Idea
 
 **Use the type system to make wrong code unwritable.** Don't rely on programmer discipline, runtime checks, or documentation. If invalid code compiles, the types are wrong.
