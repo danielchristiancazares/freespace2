@@ -210,9 +210,21 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle)
 void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size, const void* data)
 {
 	Assertion(size > 0, "Buffer size must be > 0 in updateBufferData");
-	ensureBuffer(handle, static_cast<vk::DeviceSize>(size));
-
 	auto& buffer = m_buffers[handle.value()];
+
+	// Match OpenGL semantics:
+	// - gr_update_buffer_data() maps to glBufferData(), which recreates storage (orphaning) for non-persistent buffers.
+	// - The engine relies on this for Dynamic/Streaming buffers to avoid overwriting GPU-in-flight data with
+	//   multiple frames in flight.
+	if (buffer.usage == BufferUsageHint::Dynamic || buffer.usage == BufferUsageHint::Streaming) {
+		// Always recreate storage (even if size is unchanged).
+		resizeBuffer(handle, size);
+	} else {
+		ensureBuffer(handle, static_cast<vk::DeviceSize>(size));
+	}
+
+	// refresh reference after potential resize
+	auto& updatedBuffer = m_buffers[handle.value()];
 
 	if (data == nullptr) {
 		// Allocation-only (used by persistent mapping). Caller will write later via mapBuffer().
@@ -220,13 +232,13 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 	}
 
 	// Upload data
-	if (buffer.mapped) {
+	if (updatedBuffer.mapped) {
 		// Host-visible: direct copy
-		memcpy(static_cast<char*>(buffer.mapped), static_cast<const char*>(data), size);
+		memcpy(static_cast<char*>(updatedBuffer.mapped), static_cast<const char*>(data), size);
 		// Host-coherent memory doesn't need explicit flush
 	} else {
 		// Device-local: stage and copy.
-		uploadToDeviceLocal(buffer, 0, static_cast<vk::DeviceSize>(size), data);
+		uploadToDeviceLocal(updatedBuffer, 0, static_cast<vk::DeviceSize>(size), data);
 	}
 }
 
