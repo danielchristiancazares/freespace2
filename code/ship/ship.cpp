@@ -10136,13 +10136,67 @@ void ship_do_weapon_thruster_frame( weapon *weaponp, object *objp, float frameti
 
 
 // Repair damaged subsystems for a ship, called for each ship once per frame.
-// TODO: optimize by only calling ever N seconds and keeping track of elapsed time
-//
 // NOTE: need to update current_hits in the sp->subsys_list element, and the sp->subsys_info[]
 // element.
 #define SHIP_REPAIR_SUBSYSTEM_RATE 0.01f // percent repair per second for a subsystem
+
+// Optimization: Run repair logic every 8th frame.
+// While the UPDATE FREQUENCY scales with FPS (e.g. 7.5Hz at 60FPS, 15Hz at 120FPS),
+// the REPAIR AMOUNT is time-compensated to ensure consistent HP/sec regardless of framerate.
+static const int REPAIR_INTERVAL_MASK = 0x07;
+static const int REPAIR_INTERVAL = 8;
+
 static void ship_auto_repair_frame(int shipnum, float frametime)
 {
+	static float internal_clock = 0.0f;
+	static int last_frame_seen = -1;
+	static float bucket_last_visit_time[REPAIR_INTERVAL] = {0.0f};
+	static float bucket_captured_dt[REPAIR_INTERVAL] = {0.0f};
+	static int bucket_captured_frame[REPAIR_INTERVAL] = {-1, -1, -1, -1, -1, -1, -1, -1};
+
+	// 1. Update Global Clock (once per frame)
+	if (Framecount != last_frame_seen) {
+		internal_clock += frametime;
+		last_frame_seen = Framecount;
+
+		// Periodic precision reset (every ~2.7 hours at 1.0 time scale)
+		if (internal_clock > 10000.0f) {
+			internal_clock -= 10000.0f;
+			for (int i = 0; i < REPAIR_INTERVAL; ++i) {
+				bucket_last_visit_time[i] -= 10000.0f;
+			}
+		}
+	}
+
+	// 2. Schedule: Group ships into 8 buckets based on ID
+	int bucket = shipnum & REPAIR_INTERVAL_MASK;
+	
+	// Only process the bucket scheduled for this frame
+	// Note: Framecount & MASK works because REPAIR_INTERVAL is a power of 2
+	if ((Framecount & REPAIR_INTERVAL_MASK) != bucket) {
+		return;
+	}
+
+	// 3. Capture DT for this bucket (once per frame per bucket)
+	// We need to calculate the time delta since this bucket was last visited.
+	// This ensures that even with variable framerates, the integration is correct.
+	if (bucket_captured_frame[bucket] != Framecount) {
+		// First ship in this bucket for this frame updates the bucket timer
+		float dt = internal_clock - bucket_last_visit_time[bucket];
+		
+		// Sanity check: if dt is invalid (first run, or weirdness), fallback to approximation
+		if (dt <= 0.0f || dt > 5.0f) { 
+			dt = frametime * (float)REPAIR_INTERVAL;
+		}
+		
+		bucket_captured_dt[bucket] = dt;
+		bucket_last_visit_time[bucket] = internal_clock;
+		bucket_captured_frame[bucket] = Framecount;
+	}
+
+	// Use the accumulated time for this interval
+	float effective_frametime = bucket_captured_dt[bucket];
+
 	ship_subsys		*ssp;
 	ship_subsys_info	*ssip;
 	ship			*sp;
@@ -10168,7 +10222,7 @@ static void ship_auto_repair_frame(int shipnum, float frametime)
 	// Repair the hull...or maybe unrepair?
 	if (sip->hull_repair_rate != 0.0f)
 	{
-		float repaired_delta = sp->ship_max_hull_strength * sip->hull_repair_rate * frametime;
+		float repaired_delta = sp->ship_max_hull_strength * sip->hull_repair_rate * effective_frametime;
 		float repair_threshold_strength = sp->ship_max_hull_strength * sip->hull_repair_max;
 
 		if ((objp->hull_strength + repaired_delta) < repair_threshold_strength) {
@@ -10225,7 +10279,7 @@ static void ship_auto_repair_frame(int shipnum, float frametime)
 
 			// do incremental repair on the subsystem
 			// check for overflow of current_hits
-			float repaired_delta = ssp->max_hits * real_repair_rate * frametime;
+			float repaired_delta = ssp->max_hits * real_repair_rate * effective_frametime;
 			float repair_threshold_hits = ssp->max_hits * sip->subsys_repair_max;
 
 			if ((ssp->current_hits + repaired_delta) < repair_threshold_hits) {
@@ -10239,7 +10293,7 @@ static void ship_auto_repair_frame(int shipnum, float frametime)
 
 			// aggregate repair
 			if (!(ssp->flags[Ship::Subsystem_Flags::No_aggregate])) {
-				ssip->aggregate_current_hits += ssip->aggregate_max_hits * real_repair_rate * frametime;
+				ssip->aggregate_current_hits += ssip->aggregate_max_hits * real_repair_rate * effective_frametime;
 				if ( ssip->aggregate_current_hits > ssip->aggregate_max_hits ) {
 					ssip->aggregate_current_hits = ssip->aggregate_max_hits;
 				}
