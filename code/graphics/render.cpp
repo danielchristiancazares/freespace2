@@ -581,6 +581,7 @@ static void gr_string_old(float sx,
 	float y = sy;
 
 	material render_mat;
+	render_mat.set_shader_type(SDR_TYPE_DEFAULT_MATERIAL);  // Explicitly use default-material shader for vertex color support
 	render_mat.set_blend_mode(ALPHA_BLEND_ALPHA_BLEND_ALPHA);
 	render_mat.set_depth_mode(ZBUFFER_TYPE_NONE);
 	render_mat.set_texture_map(TM_BASE_TYPE, fontData->bitmap_id);
