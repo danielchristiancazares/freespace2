@@ -30,6 +30,10 @@ public:
   RenderTargetInfo ensureRendering(vk::CommandBuffer cmd, uint32_t imageIndex);
   bool renderingActive() const { return m_activePass.has_value(); }
 
+  // Ends dynamic rendering if currently active. Does not change the selected render target.
+  // This is required for transfer operations such as texture updates which are invalid inside rendering.
+  void suspendRendering() { endActivePass(); }
+
   // Boundary-facing state transitions (no "pending", no dual state)
   void requestSwapchainTarget();                  // swapchain + depth
   void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
