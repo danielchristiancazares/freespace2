@@ -208,6 +208,8 @@ class VulkanTextureManager {
 
 		// Flush pending uploads (upload phase only; records GPU work).
 		void flushPendingUploads(const UploadCtx& ctx);
+		// Update the contents of an existing bitmap texture (upload phase only; records GPU work).
+		bool updateTexture(const UploadCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height);
 
 		void processPendingRetirements();
 		void retryPendingBindlessSlots();
