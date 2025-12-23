@@ -1,7 +1,10 @@
 #version 460 core
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(set = 0, binding = 1) uniform sampler2D textures[];
+#include "gamma.sdr"
+
+// The Vulkan backend uploads textures as 2D arrays (layer 0 for non-array textures).
+layout(set = 0, binding = 1) uniform sampler2DArray textures[];
 
 layout(location = 0) in vec3 vPosition;
 layout(location = 1) in vec3 vNormal;
@@ -38,7 +41,8 @@ void main()
 {
 	// Base color
 	// Slot 0 is fallback; slots 1..3 are well-known defaults, so indices are always valid.
-	vec4 baseColor = texture(textures[nonuniformEXT(pcs.baseMapIndex)], vTexCoord);
+	vec4 baseColor = texture(textures[nonuniformEXT(pcs.baseMapIndex)], vec3(vTexCoord, 0.0));
+	baseColor.rgb = srgb_to_linear(baseColor.rgb);
 
 	// Normal mapping: normal map is tangent-space; convert to view-space using the per-vertex TBN.
 	vec3 N = vNormal;
@@ -56,16 +60,20 @@ void main()
 	vec3 B = cross(N, T) * handedness;
 	mat3 TBN = mat3(T, B, N);
 
-	vec3 nmap = texture(textures[nonuniformEXT(pcs.normalMapIndex)], vTexCoord).xyz * 2.0 - 1.0;
+	// Normal maps are typically stored as DXT5nm (X in A, Y in G).
+	vec4 nSample = texture(textures[nonuniformEXT(pcs.normalMapIndex)], vec3(vTexCoord, 0.0));
+	vec2 nXY = nSample.ag * 2.0 - 1.0;
+	vec3 nmap = vec3(nXY, clamp(sqrt(max(0.0, 1.0 - dot(nXY, nXY))), 0.0001, 1.0));
 	vec3 shadingNormal = TBN * nmap;
 	float sLenSq = dot(shadingNormal, shadingNormal);
 	shadingNormal = (sLenSq > 0.0) ? (shadingNormal * inversesqrt(sLenSq)) : N;
 
 	// Specular
-	vec4 specSample = texture(textures[nonuniformEXT(pcs.specMapIndex)], vTexCoord);
+	vec4 specSample = texture(textures[nonuniformEXT(pcs.specMapIndex)], vec3(vTexCoord, 0.0));
 
 	// Emissive/glow
-	vec4 emissive = texture(textures[nonuniformEXT(pcs.glowMapIndex)], vTexCoord);
+	vec4 emissive = texture(textures[nonuniformEXT(pcs.glowMapIndex)], vec3(vTexCoord, 0.0));
+	emissive.rgb = srgb_to_linear(emissive.rgb);
 
 	outColor = baseColor;
 	outNormal = vec4(shadingNormal, 1.0);
