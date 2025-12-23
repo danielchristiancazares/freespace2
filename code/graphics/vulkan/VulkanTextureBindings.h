@@ -57,6 +57,11 @@ public:
 		m_textures.flushPendingUploads(ctx);
 	}
 
+	bool updateTexture(const UploadCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height)
+	{
+		return m_textures.updateTexture(ctx, bitmapHandle, bpp, data, width, height);
+	}
+
 private:
 	VulkanTextureManager& m_textures;
 };

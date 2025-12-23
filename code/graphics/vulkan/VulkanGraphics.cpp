@@ -553,7 +553,14 @@ void stub_draw_sphere(material* /*material_def*/, float /*rad*/) {}
 
 void stub_clear_states() {}
 
-void stub_update_texture(int /*bitmap_handle*/, int /*bpp*/, const ubyte* /*data*/, int /*width*/, int /*height*/) {}
+void gr_vulkan_update_texture(int bitmap_handle, int bpp, const ubyte* data, int width, int height)
+{
+  if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
+    return;
+  }
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.updateTexture(ctxBase, bitmap_handle, bpp, data, width, height);
+}
 
 void stub_get_bitmap_from_texture(void* /*data_out*/, int /*bitmap_num*/) {}
 
@@ -914,7 +921,7 @@ void gr_vulkan_render_primitives(material* material_info,
 
   // Use the shader type requested by the material
   shader_type shaderType = material_info->get_shader_type();
-
+  
   // Instrumentation: detect shader/layout mismatches that will cause validation warnings
   // DEFAULT_MATERIAL shader expects vertex color at location 1
   if (shaderType == SDR_TYPE_DEFAULT_MATERIAL) {
@@ -1782,6 +1789,9 @@ void init_function_pointers()
   gr_screen.gf_preload = [](int bitmap_num, int is_aabitmap) -> int {
     return currentRenderer().preloadTexture(bitmap_num, is_aabitmap != 0);
   };
+
+  // Dynamic texture updates (streaming anims, NanoVG texture atlas, etc.)
+  gr_screen.gf_update_texture = gr_vulkan_update_texture;
 
   // Bitmap lifetime (bmpman)
   gr_screen.gf_bm_free_data = gr_vulkan_bm_free_data;

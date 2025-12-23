@@ -374,7 +374,6 @@ void HudGaugeDirectives::render(float  /*frametime*/, bool config)
 
 		// blit the text
 		gr_set_color_fast(c);
-		
 		renderString(ox + line_x_offset, oy, EG_OBJ1 + i, buf, scale, config);
 		
 		Training_obj_num_display_lines++;
