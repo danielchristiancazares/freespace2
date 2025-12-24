@@ -7,9 +7,6 @@
 #include "VulkanTextureManager.h"
 
 #include "bmpman/bmpman.h"
-#include <fstream>
-#include <chrono>
-#include <cstring>
 
 namespace graphics {
 namespace vulkan {
@@ -24,40 +21,12 @@ public:
 		uint32_t currentFrameIndex,
 		const VulkanTextureManager::SamplerKey& samplerKey)
 	{
-		const int fallbackHandle = m_textures.getFallbackTextureHandle();
-		Assertion(fallbackHandle != -1, "Fallback texture must be initialized");
-
 		auto info = m_textures.getTextureDescriptorInfo(id.baseFrame(), samplerKey);
 		if (info.imageView) {
 			m_textures.markTextureUsedBaseFrame(id.baseFrame(), currentFrameIndex);
 		} else {
-			// #region agent log
-			{
-				const int baseFrame = id.baseFrame();
-				const char* filename = bm_get_filename(baseFrame);
-				const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::system_clock::now().time_since_epoch()).count();
-				std::ofstream logFile(R"(c:\Users\danie\Documents\freespace2\.cursor\debug.log)", std::ios::app);
-				if (logFile.is_open()) {
-					logFile << "{\"id\":\"log_" << now << "_" << baseFrame << "\",\"timestamp\":" << now
-						<< ",\"location\":\"VulkanTextureBindings.h:34\",\"message\":\"Fallback texture path taken\","
-						<< "\"data\":{\"handle\":" << baseFrame << ",\"filename\":\"";
-					if (filename) {
-						for (const char* p = filename; *p; ++p) {
-							if (*p == '"' || *p == '\\') logFile << '\\';
-							logFile << *p;
-						}
-					} else {
-						logFile << "<unknown>";
-					}
-					logFile << "\",\"currentFrameIndex\":" << currentFrameIndex << "},\"sessionId\":\"debug-session\","
-						<< "\"runId\":\"run1\",\"hypothesisId\":\"H3\"}\n";
-					logFile.close();
-				}
-			}
-			// #endregion
 			m_textures.queueTextureUploadBaseFrame(id.baseFrame(), currentFrameIndex, samplerKey);
-			info = m_textures.getTextureDescriptorInfo(fallbackHandle, samplerKey);
+			info = m_textures.fallbackDescriptor(samplerKey);
 		}
 
 		Assertion(info.imageView, "TextureBindings::descriptor must return a valid imageView");
