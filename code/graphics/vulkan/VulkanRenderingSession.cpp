@@ -5,23 +5,65 @@
 namespace graphics {
 namespace vulkan {
 
-VulkanRenderingSession::VulkanRenderingSession(VulkanDevice& device,
-	VulkanRenderTargets& targets,
-	VulkanDescriptorLayouts& descriptorLayouts)
-	: m_device(device)
-	, m_targets(targets)
-	, m_descriptorLayouts(descriptorLayouts)
+namespace {
+
+struct StageAccess {
+	vk::PipelineStageFlags2 stageMask{};
+	vk::AccessFlags2 accessMask{};
+};
+
+StageAccess stageAccessForLayout(vk::ImageLayout layout)
 {
+	StageAccess out{};
+	switch (layout) {
+	case vk::ImageLayout::eUndefined:
+		out.stageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+		out.accessMask = {};
+		break;
+	case vk::ImageLayout::eColorAttachmentOptimal:
+		out.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+		out.accessMask = vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite;
+		break;
+	case vk::ImageLayout::eDepthAttachmentOptimal:
+		out.stageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
+		out.accessMask = vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+		break;
+	case vk::ImageLayout::eShaderReadOnlyOptimal:
+		out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+		out.accessMask = vk::AccessFlagBits2::eShaderRead;
+		break;
+	case vk::ImageLayout::ePresentSrcKHR:
+		out.stageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+		out.accessMask = {};
+		break;
+	default:
+		out.stageMask = vk::PipelineStageFlagBits2::eAllCommands;
+		out.accessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+		break;
+	}
+	return out;
+}
+
+} // namespace
+
+VulkanRenderingSession::VulkanRenderingSession(VulkanDevice& device,
+		VulkanRenderTargets& targets)
+		: m_device(device)
+		, m_targets(targets)
+{
+	m_swapchainLayouts.assign(m_device.swapchainImageCount(), vk::ImageLayout::eUndefined);
 	m_target = std::make_unique<SwapchainWithDepthTarget>();
 }
 
-void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex, vk::DescriptorSet globalDescriptorSet) {
-	m_globalDescriptorSet = globalDescriptorSet;
+	void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex) {
+		if (m_swapchainLayouts.size() != m_device.swapchainImageCount()) {
+			m_swapchainLayouts.assign(m_device.swapchainImageCount(), vk::ImageLayout::eUndefined);
+		}
 
-	endActivePass();
-	m_target = std::make_unique<SwapchainWithDepthTarget>();
+		endActivePass();
+		m_target = std::make_unique<SwapchainWithDepthTarget>();
 
-	m_shouldClearColor = true;
+		m_shouldClearColor = true;
 	m_shouldClearDepth = true;
 
 	// Transition swapchain and depth to attachment layouts
@@ -42,7 +84,7 @@ VulkanRenderingSession::ensureRenderingActive(vk::CommandBuffer cmd, uint32_t im
 		m_activeInfo = m_target->info(m_device, m_targets);
 		m_target->begin(*this, cmd, imageIndex);
 		m_activePass.emplace(cmd);
-		applyDynamicState(cmd, m_globalDescriptorSet);
+		applyDynamicState(cmd);
 	}
 	return m_activeInfo;
 }
@@ -76,6 +118,10 @@ void VulkanRenderingSession::endActivePass() {
 
 void VulkanRenderingSession::requestClear() {
 	m_shouldClearColor = true;
+	m_shouldClearDepth = true;
+}
+
+void VulkanRenderingSession::requestDepthClear() {
 	m_shouldClearDepth = true;
 }
 
@@ -132,6 +178,9 @@ void VulkanRenderingSession::SwapchainNoDepthTarget::begin(VulkanRenderingSessio
 void VulkanRenderingSession::beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex) {
 	const auto extent = m_device.swapchainExtent();
 
+	// Depth may have been transitioned to shader-read during deferred lighting.
+	transitionDepthToAttachment(cmd);
+
 	vk::RenderingAttachmentInfo colorAttachment{};
 	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
 	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
@@ -166,6 +215,7 @@ void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd
 
 	// Transition G-buffer images to color attachment optimal
 	transitionGBufferToAttachment(cmd);
+	transitionDepthToAttachment(cmd);
 
 	// Setup color attachments for G-buffer
 	std::array<vk::RenderingAttachmentInfo, VulkanRenderTargets::kGBufferCount> colorAttachments{};
@@ -205,9 +255,10 @@ void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandB
 	vk::RenderingAttachmentInfo colorAttachment{};
 	colorAttachment.imageView = m_device.swapchainImageView(imageIndex);
 	colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-	// Don't clear - ambient light will overwrite with blend-off, then subsequent lights add
-	colorAttachment.loadOp = vk::AttachmentLoadOp::eDontCare;
+	// Clear required: deferred lighting may discard background pixels, leaving undefined content
+	colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
 	colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	colorAttachment.clearValue = vk::ClearColorValue(m_clearColor);
 
 	vk::RenderingInfo renderingInfo{};
 	renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
@@ -222,11 +273,14 @@ void VulkanRenderingSession::beginSwapchainRenderingNoDepthInternal(vk::CommandB
 // ---- Layout transitions ----
 
 void VulkanRenderingSession::transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	Assertion(imageIndex < m_swapchainLayouts.size(),
+		"imageIndex %u out of bounds (swapchain has %zu images)", imageIndex, m_swapchainLayouts.size());
+
 	vk::ImageMemoryBarrier2 toRender{};
 	toRender.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
 	toRender.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 	toRender.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-	toRender.oldLayout = vk::ImageLayout::eUndefined;
+	toRender.oldLayout = m_swapchainLayouts[imageIndex];
 	toRender.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
 	toRender.image = m_device.swapchainImage(imageIndex);
 	toRender.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -237,16 +291,22 @@ void VulkanRenderingSession::transitionSwapchainToAttachment(vk::CommandBuffer c
 	depInfo.imageMemoryBarrierCount = 1;
 	depInfo.pImageMemoryBarriers = &toRender;
 	cmd.pipelineBarrier2(depInfo);
+
+	m_swapchainLayouts[imageIndex] = vk::ImageLayout::eColorAttachmentOptimal;
 }
 
 void VulkanRenderingSession::transitionDepthToAttachment(vk::CommandBuffer cmd) {
 	vk::ImageMemoryBarrier2 toDepth{};
-	toDepth.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-	toDepth.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests;
-	toDepth.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
-		vk::AccessFlagBits2::eDepthStencilAttachmentRead;
-	toDepth.oldLayout = m_targets.isDepthInitialized() ? vk::ImageLayout::eDepthAttachmentOptimal : vk::ImageLayout::eUndefined;
-	toDepth.newLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	const auto oldLayout = m_targets.depthLayout();
+	const auto newLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+	const auto src = stageAccessForLayout(oldLayout);
+	const auto dst = stageAccessForLayout(newLayout);
+	toDepth.srcStageMask = src.stageMask;
+	toDepth.srcAccessMask = src.accessMask;
+	toDepth.dstStageMask = dst.stageMask;
+	toDepth.dstAccessMask = dst.accessMask;
+	toDepth.oldLayout = oldLayout;
+	toDepth.newLayout = newLayout;
 	toDepth.image = m_targets.depthImage();
 	toDepth.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
 	toDepth.subresourceRange.levelCount = 1;
@@ -256,17 +316,19 @@ void VulkanRenderingSession::transitionDepthToAttachment(vk::CommandBuffer cmd) 
 	depInfo.imageMemoryBarrierCount = 1;
 	depInfo.pImageMemoryBarriers = &toDepth;
 	cmd.pipelineBarrier2(depInfo);
-
-	m_targets.markDepthInitialized();
+	m_targets.setDepthLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionSwapchainToPresent(vk::CommandBuffer cmd, uint32_t imageIndex) {
+	Assertion(imageIndex < m_swapchainLayouts.size(),
+		"imageIndex %u out of bounds (swapchain has %zu images)", imageIndex, m_swapchainLayouts.size());
+
 	vk::ImageMemoryBarrier2 toPresent{};
 	toPresent.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 	toPresent.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
 	toPresent.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
 	toPresent.dstAccessMask = {};
-	toPresent.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
+	toPresent.oldLayout = m_swapchainLayouts[imageIndex];
 	toPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;
 	toPresent.image = m_device.swapchainImage(imageIndex);
 	toPresent.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -277,16 +339,23 @@ void VulkanRenderingSession::transitionSwapchainToPresent(vk::CommandBuffer cmd,
 	depInfo.imageMemoryBarrierCount = 1;
 	depInfo.pImageMemoryBarriers = &toPresent;
 	cmd.pipelineBarrier2(depInfo);
+
+	m_swapchainLayouts[imageIndex] = vk::ImageLayout::ePresentSrcKHR;
 }
 
 void VulkanRenderingSession::transitionGBufferToAttachment(vk::CommandBuffer cmd) {
 	std::array<vk::ImageMemoryBarrier2, VulkanRenderTargets::kGBufferCount> barriers{};
 	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
-		barriers[i].srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-		barriers[i].dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-		barriers[i].dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-		barriers[i].oldLayout = vk::ImageLayout::eUndefined;
-		barriers[i].newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		const auto oldLayout = m_targets.gbufferLayout(i);
+		const auto newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		const auto src = stageAccessForLayout(oldLayout);
+		const auto dst = stageAccessForLayout(newLayout);
+		barriers[i].srcStageMask = src.stageMask;
+		barriers[i].srcAccessMask = src.accessMask;
+		barriers[i].dstStageMask = dst.stageMask;
+		barriers[i].dstAccessMask = dst.accessMask;
+		barriers[i].oldLayout = oldLayout;
+		barriers[i].newLayout = newLayout;
 		barriers[i].image = m_targets.gbufferImage(i);
 		barriers[i].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
 		barriers[i].subresourceRange.levelCount = 1;
@@ -297,18 +366,26 @@ void VulkanRenderingSession::transitionGBufferToAttachment(vk::CommandBuffer cmd
 	dep.imageMemoryBarrierCount = VulkanRenderTargets::kGBufferCount;
 	dep.pImageMemoryBarriers = barriers.data();
 	cmd.pipelineBarrier2(dep);
+
+	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
+		m_targets.setGBufferLayout(i, vk::ImageLayout::eColorAttachmentOptimal);
+	}
 }
 
 void VulkanRenderingSession::transitionGBufferToShaderRead(vk::CommandBuffer cmd) {
 	std::array<vk::ImageMemoryBarrier2, VulkanRenderTargets::kGBufferCount + 1> barriers{};
 
 	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
-		barriers[i].srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-		barriers[i].srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-		barriers[i].dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-		barriers[i].dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-		barriers[i].oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		barriers[i].newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		const auto oldLayout = m_targets.gbufferLayout(i);
+		const auto newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		const auto src = stageAccessForLayout(oldLayout);
+		const auto dst = stageAccessForLayout(newLayout);
+		barriers[i].srcStageMask = src.stageMask;
+		barriers[i].srcAccessMask = src.accessMask;
+		barriers[i].dstStageMask = dst.stageMask;
+		barriers[i].dstAccessMask = dst.accessMask;
+		barriers[i].oldLayout = oldLayout;
+		barriers[i].newLayout = newLayout;
 		barriers[i].image = m_targets.gbufferImage(i);
 		barriers[i].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
 		barriers[i].subresourceRange.levelCount = 1;
@@ -317,12 +394,16 @@ void VulkanRenderingSession::transitionGBufferToShaderRead(vk::CommandBuffer cmd
 
 	// Depth transition
 	auto& bd = barriers[VulkanRenderTargets::kGBufferCount];
-	bd.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests;
-	bd.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-	bd.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-	bd.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-	bd.oldLayout = vk::ImageLayout::eDepthAttachmentOptimal;
-	bd.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	const auto oldDepthLayout = m_targets.depthLayout();
+	const auto newDepthLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	const auto srcDepth = stageAccessForLayout(oldDepthLayout);
+	const auto dstDepth = stageAccessForLayout(newDepthLayout);
+	bd.srcStageMask = srcDepth.stageMask;
+	bd.srcAccessMask = srcDepth.accessMask;
+	bd.dstStageMask = dstDepth.stageMask;
+	bd.dstAccessMask = dstDepth.accessMask;
+	bd.oldLayout = oldDepthLayout;
+	bd.newLayout = newDepthLayout;
 	bd.image = m_targets.depthImage();
 	bd.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
 	bd.subresourceRange.levelCount = 1;
@@ -332,11 +413,16 @@ void VulkanRenderingSession::transitionGBufferToShaderRead(vk::CommandBuffer cmd
 	dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
 	dep.pImageMemoryBarriers = barriers.data();
 	cmd.pipelineBarrier2(dep);
+
+	for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
+		m_targets.setGBufferLayout(i, vk::ImageLayout::eShaderReadOnlyOptimal);
+	}
+	m_targets.setDepthLayout(newDepthLayout);
 }
 
 // ---- Dynamic state ----
 
-void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::DescriptorSet globalDescriptorSet) {
+void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd) {
 	const auto extent = m_device.swapchainExtent();
 	const uint32_t attachmentCount = m_activeInfo.colorAttachmentCount;
 
@@ -380,10 +466,6 @@ void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd, vk::Descri
 			cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
 		}
 	}
-
-	// Bind global descriptor set
-	cmd.bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics, m_descriptorLayouts.pipelineLayout(), 1, 1, &globalDescriptorSet, 0, nullptr);
 }
 
 } // namespace vulkan
