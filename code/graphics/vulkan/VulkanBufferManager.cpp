@@ -244,7 +244,11 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 
 void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t offset, size_t size, const void* data)
 {
-	Assertion(size > 0, "Buffer size must be > 0 in updateBufferDataOffset");
+	// OpenGL allows 0-byte glBufferSubData calls; the engine may issue these in edge cases
+	// (e.g., building an empty uniform buffer when nothing is visible). Treat as a no-op.
+	if (size == 0) {
+		return;
+	}
 	const vk::DeviceSize required = static_cast<vk::DeviceSize>(offset + size);
 	ensureBuffer(handle, required);
 
