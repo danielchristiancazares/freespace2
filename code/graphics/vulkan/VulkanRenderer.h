@@ -33,6 +33,7 @@ namespace vulkan {
 
 class VulkanTextureBindings;
 class VulkanTextureUploader;
+class VulkanMovieManager;
 struct FrameCtx;
 
 // Light volume mesh for deferred rendering
@@ -118,6 +119,8 @@ class VulkanRenderer {
 	const VulkanBufferManager* bufferManager() const { return m_bufferManager.get(); }
 	VulkanTextureManager* textureManager() { return m_textureManager.get(); }
 	const VulkanTextureManager* textureManager() const { return m_textureManager.get(); }
+	VulkanMovieManager* movieManager() { return m_movieManager.get(); }
+	const VulkanMovieManager* movieManager() const { return m_movieManager.get(); }
 
 		// Deferred rendering hooks
 		void setPendingRenderTargetSwapchain();
@@ -147,6 +150,23 @@ class VulkanRenderer {
 	// Recording-only: uploads new pixel data into an existing bitmap texture (streaming anims, NanoVG, etc.).
 	void updateTexture(const FrameCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height);
 	void releaseBitmap(int bitmapHandle);
+	MovieTextureHandle createMovieTexture(uint32_t width, uint32_t height, MovieColorSpace colorspace, MovieColorRange range);
+	void uploadMovieTexture(const FrameCtx& ctx,
+		MovieTextureHandle handle,
+		const ubyte* y,
+		int yStride,
+		const ubyte* u,
+		int uStride,
+		const ubyte* v,
+		int vStride);
+	void drawMovieTexture(const FrameCtx& ctx,
+		MovieTextureHandle handle,
+		float x1,
+		float y1,
+		float x2,
+		float y2,
+		float alpha);
+	void releaseMovieTexture(MovieTextureHandle handle);
 
 	// Model vertex heap registration (called from GPUMemoryHeap when ModelVertex heap is created)
 	void setModelVertexHeapHandle(gr_buffer_handle handle);
@@ -231,6 +251,7 @@ class VulkanRenderer {
 	std::unique_ptr<VulkanPipelineManager> m_pipelineManager;
 		std::unique_ptr<VulkanBufferManager> m_bufferManager;
 		std::unique_ptr<VulkanTextureManager> m_textureManager;
+		std::unique_ptr<VulkanMovieManager> m_movieManager;
 
 		std::array<std::unique_ptr<VulkanFrame>, kFramesInFlight> m_frames;
 		// Frames ready for CPU reuse (already waited/reset); completedSerial is the latest known safe serial.

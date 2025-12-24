@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "globalincs/pstypes.h"
+#include "graphics/MovieTypes.h"
 #include "utils/boost/syncboundedqueue.h"
 
 namespace cutscene {
@@ -48,14 +49,18 @@ enum class FramePixelFormat {
 	BGRA
 };
 
-struct MovieProperties {
-	FrameSize size;
+	struct MovieProperties {
+		FrameSize size;
 
-	float fps = -1.0f;
-	float duration = 0.0f;
+		float fps = -1.0f;
+		float duration = 0.0f;
 
-	FramePixelFormat pixelFormat = FramePixelFormat::Invalid;
-};
+		FramePixelFormat pixelFormat = FramePixelFormat::Invalid;
+
+		// Color metadata for correct YCbCr conversion selection (best-effort; defaults chosen when unknown).
+		MovieColorSpace colorSpace = MovieColorSpace::BT709;
+		MovieColorRange colorRange = MovieColorRange::Narrow;
+	};
 
 struct AudioFrame {
 	SCP_vector<short> audioData;
@@ -67,8 +72,8 @@ struct AudioFrame {
 typedef std::unique_ptr<AudioFrame> AudioFramePtr;
 
 struct SubtitleFrame {
-    double displayStartTime = -1.0;
-    double displayEndTime = -1.0;
+	double displayStartTime = -1.0;
+	double displayEndTime = -1.0;
 
 	SCP_string text;
 };

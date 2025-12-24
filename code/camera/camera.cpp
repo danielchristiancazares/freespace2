@@ -61,7 +61,7 @@ static SCP_string fov_display(float val)
 {
 	auto degrees = fl_degrees(val);
 	SCP_string out;
-	sprintf(out, u8"%.1f\u00B0", degrees);
+	sprintf(out, "%.1f\u00B0", degrees);
 	return out;
 }
 
@@ -79,8 +79,8 @@ auto FovOption = options::OptionBuilder<float>("Graphics.FOV",
 					 .category(std::make_pair("Graphics", 1825))
 					 .range(0.436332f, 1.5708f)
 					 .change_listener([](const float& val, bool) {
-					      VIEWER_ZOOM_DEFAULT = val;
-					      return true;
+						  VIEWER_ZOOM_DEFAULT = val;
+						  return true;
 					 })
 					 .display(fov_display)
 					 .default_func([]() { return fov_default; })
@@ -97,10 +97,10 @@ auto CockpitFOVToggleOption = options::OptionBuilder<bool>("Graphics.CockpitFOVT
 					 .category(std::make_pair("Graphics", 1825))
 					 .default_val(false)
 					 .change_listener([](bool val, bool) {
-					      if (!val) {
-					           COCKPIT_ZOOM_DEFAULT = VIEWER_ZOOM_DEFAULT;
-					      }
-					      return true; // This option will always persist so we never return false
+						  if (!val) {
+							   COCKPIT_ZOOM_DEFAULT = VIEWER_ZOOM_DEFAULT;
+						  }
+						  return true; // This option will always persist so we never return false
 					 })
 					 .level(options::ExpertLevel::Advanced)
 					 .bind_to(&Use_cockpit_fov)
@@ -113,12 +113,12 @@ auto CockpitFovOption = options::OptionBuilder<float>("Graphics.CockpitFOV",
 					 .category(std::make_pair("Graphics", 1825))
 					 .range(0.436332f, 1.5708f)
 					 .change_listener([](const float& val, bool) {
-					      if (Use_cockpit_fov){
-					           COCKPIT_ZOOM_DEFAULT = val;
+						  if (Use_cockpit_fov){
+							   COCKPIT_ZOOM_DEFAULT = val;
 						  } else {
 							  COCKPIT_ZOOM_DEFAULT = VIEWER_ZOOM_DEFAULT;
 						  }
-					      return true;
+						  return true;
 					 })
 					 .display(fov_display)
 					 .default_val(fov_default)

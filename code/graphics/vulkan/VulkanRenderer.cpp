@@ -6,6 +6,7 @@
 #include "VulkanFrameCaps.h"
 #include "VulkanFrameFlow.h"
 #include "VulkanTextureBindings.h"
+#include "VulkanMovieManager.h"
 #include "graphics/util/uniform_structs.h"
 
 #include "def_files/def_files.h"
@@ -43,7 +44,7 @@ VulkanRenderer::~VulkanRenderer() = default;
 bool VulkanRenderer::initialize() {
   // Initialize the device layer (instance, surface, physical device, logical device, swapchain)
   if (!m_vulkanDevice->initialize()) {
-    return false;
+	return false;
   }
 
   // Create renderer-specific resources
@@ -57,27 +58,31 @@ bool VulkanRenderer::initialize() {
   const SCP_string shaderRoot = "code/graphics/shaders/compiled";
   m_shaderManager = std::make_unique<VulkanShaderManager>(m_vulkanDevice->device(), shaderRoot);
 
+  m_movieManager = std::make_unique<VulkanMovieManager>(*m_vulkanDevice, *m_shaderManager);
+  constexpr uint32_t kMaxMovieTextures = 8;
+  m_movieManager->initialize(kMaxMovieTextures);
+
   m_pipelineManager = std::make_unique<VulkanPipelineManager>(m_vulkanDevice->device(),
-    m_descriptorLayouts->pipelineLayout(),
-    m_descriptorLayouts->modelPipelineLayout(),
-    m_descriptorLayouts->deferredPipelineLayout(),
-    m_vulkanDevice->pipelineCache(),
-    m_vulkanDevice->supportsExtendedDynamicState(),
-    m_vulkanDevice->supportsExtendedDynamicState2(),
-    m_vulkanDevice->supportsExtendedDynamicState3(),
-    m_vulkanDevice->extDyn3Caps(),
-    m_vulkanDevice->supportsVertexAttributeDivisor(),
-    m_vulkanDevice->features13().dynamicRendering == VK_TRUE);
+	m_descriptorLayouts->pipelineLayout(),
+	m_descriptorLayouts->modelPipelineLayout(),
+	m_descriptorLayouts->deferredPipelineLayout(),
+	m_vulkanDevice->pipelineCache(),
+	m_vulkanDevice->supportsExtendedDynamicState(),
+	m_vulkanDevice->supportsExtendedDynamicState2(),
+	m_vulkanDevice->supportsExtendedDynamicState3(),
+	m_vulkanDevice->extDyn3Caps(),
+	m_vulkanDevice->supportsVertexAttributeDivisor(),
+	m_vulkanDevice->features13().dynamicRendering == VK_TRUE);
 
   m_bufferManager = std::make_unique<VulkanBufferManager>(m_vulkanDevice->device(),
-    m_vulkanDevice->memoryProperties(),
-    m_vulkanDevice->graphicsQueue(),
-    m_vulkanDevice->graphicsQueueIndex());
+	m_vulkanDevice->memoryProperties(),
+	m_vulkanDevice->graphicsQueue(),
+	m_vulkanDevice->graphicsQueueIndex());
 
   m_textureManager = std::make_unique<VulkanTextureManager>(m_vulkanDevice->device(),
-    m_vulkanDevice->memoryProperties(),
-    m_vulkanDevice->graphicsQueue(),
-    m_vulkanDevice->graphicsQueueIndex());
+	m_vulkanDevice->memoryProperties(),
+	m_vulkanDevice->graphicsQueue(),
+	m_vulkanDevice->graphicsQueueIndex());
   m_textureBindings = std::make_unique<VulkanTextureBindings>(*m_textureManager);
   m_textureUploader = std::make_unique<VulkanTextureUploader>(*m_textureManager);
 
@@ -104,24 +109,24 @@ void VulkanRenderer::createFrames() {
   const auto& props = m_vulkanDevice->properties();
   m_availableFrames.clear();
   for (size_t i = 0; i < kFramesInFlight; ++i) {
-    vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
-    Assertion(modelSet, "Failed to allocate model descriptor set for frame %zu", i);
+	vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
+	Assertion(modelSet, "Failed to allocate model descriptor set for frame %zu", i);
 
-    m_frames[i] = std::make_unique<VulkanFrame>(
-      m_vulkanDevice->device(),
-      static_cast<uint32_t>(i),
-      m_vulkanDevice->graphicsQueueIndex(),
-      m_vulkanDevice->memoryProperties(),
-      UNIFORM_RING_SIZE,
-      props.limits.minUniformBufferOffsetAlignment,
-      VERTEX_RING_SIZE,
-      m_vulkanDevice->vertexBufferAlignment(),
-      STAGING_RING_SIZE,
-      props.limits.optimalBufferCopyOffsetAlignment,
-      modelSet);
+	m_frames[i] = std::make_unique<VulkanFrame>(
+	  m_vulkanDevice->device(),
+	  static_cast<uint32_t>(i),
+	  m_vulkanDevice->graphicsQueueIndex(),
+	  m_vulkanDevice->memoryProperties(),
+	  UNIFORM_RING_SIZE,
+	  props.limits.minUniformBufferOffsetAlignment,
+	  VERTEX_RING_SIZE,
+	  m_vulkanDevice->vertexBufferAlignment(),
+	  STAGING_RING_SIZE,
+	  props.limits.optimalBufferCopyOffsetAlignment,
+	  modelSet);
 
-    // Newly created frames haven't been submitted yet; completedSerial is whatever we last observed.
-    m_availableFrames.push_back(AvailableFrame{ m_frames[i].get(), m_completedSerial });
+	// Newly created frames haven't been submitted yet; completedSerial is whatever we last observed.
+	m_availableFrames.push_back(AvailableFrame{ m_frames[i].get(), m_completedSerial });
   }
 }
 
@@ -133,7 +138,7 @@ void VulkanRenderer::createRenderTargets() {
 void VulkanRenderer::createRenderingSession() {
   Assertion(m_textureManager != nullptr, "createRenderingSession requires a valid texture manager");
   m_renderingSession = std::make_unique<VulkanRenderingSession>(
-    *m_vulkanDevice, *m_renderTargets, *m_textureManager);
+	*m_vulkanDevice, *m_renderTargets, *m_textureManager);
 }
 
 void VulkanRenderer::createUploadCommandPool() {
@@ -157,13 +162,13 @@ void VulkanRenderer::createSubmitTimelineSemaphore() {
 uint64_t VulkanRenderer::queryCompletedSerial() const
 {
   if (!m_submitTimeline) {
-    return m_completedSerial;
+	return m_completedSerial;
   }
 
 #if defined(VULKAN_HPP_NO_EXCEPTIONS)
   auto rv = m_vulkanDevice->device().getSemaphoreCounterValue(m_submitTimeline.get());
   if (rv.result != vk::Result::eSuccess) {
-    return m_completedSerial;
+	return m_completedSerial;
   }
   return rv.value;
 #else
@@ -174,7 +179,7 @@ uint64_t VulkanRenderer::queryCompletedSerial() const
 void VulkanRenderer::maybeRunVulkanStress()
 {
   if (!Cmdline_vk_stress) {
-    return;
+	return;
   }
 
   Assertion(m_bufferManager != nullptr, "Vulkan stress mode requires an initialized buffer manager");
@@ -185,31 +190,31 @@ void VulkanRenderer::maybeRunVulkanStress()
   constexpr size_t kMinUpdateSize = 256;
 
   if (m_stressScratch.empty()) {
-    m_stressScratch.resize(kScratchSize, 0xA5);
+	m_stressScratch.resize(kScratchSize, 0xA5);
   }
   if (m_stressBuffers.empty()) {
-    m_stressBuffers.reserve(kBufferCount);
-    for (size_t i = 0; i < kBufferCount; ++i) {
-      const BufferType type = (i % 3 == 0) ? BufferType::Vertex
-                             : (i % 3 == 1) ? BufferType::Index
-                                            : BufferType::Uniform;
-      m_stressBuffers.push_back(m_bufferManager->createBuffer(type, BufferUsageHint::Dynamic));
-    }
+	m_stressBuffers.reserve(kBufferCount);
+	for (size_t i = 0; i < kBufferCount; ++i) {
+	  const BufferType type = (i % 3 == 0) ? BufferType::Vertex
+							 : (i % 3 == 1) ? BufferType::Index
+											: BufferType::Uniform;
+	  m_stressBuffers.push_back(m_bufferManager->createBuffer(type, BufferUsageHint::Dynamic));
+	}
   }
 
   // Bounded churn: resize/update a subset each frame, periodically delete to exercise deferred releases.
   const size_t count = m_stressBuffers.size();
   const size_t maxUpdate = std::max(kMinUpdateSize + 1, m_stressScratch.size());
   for (size_t op = 0; op < kOpsPerFrame; ++op) {
-    const size_t idx = (static_cast<size_t>(m_frameCounter) * 131u + op * 17u) % count;
-    const size_t size = kMinUpdateSize +
-                        ((static_cast<size_t>(m_frameCounter) * 4099u + idx * 97u) % (maxUpdate - kMinUpdateSize));
-    m_bufferManager->updateBufferData(m_stressBuffers[idx], size, m_stressScratch.data());
+	const size_t idx = (static_cast<size_t>(m_frameCounter) * 131u + op * 17u) % count;
+	const size_t size = kMinUpdateSize +
+						((static_cast<size_t>(m_frameCounter) * 4099u + idx * 97u) % (maxUpdate - kMinUpdateSize));
+	m_bufferManager->updateBufferData(m_stressBuffers[idx], size, m_stressScratch.data());
   }
 
   if ((m_frameCounter % 4u) == 0u) {
-    const size_t idx = (static_cast<size_t>(m_frameCounter) / 4u) % count;
-    m_bufferManager->deleteBuffer(m_stressBuffers[idx]);
+	const size_t idx = (static_cast<size_t>(m_frameCounter) / 4u) % count;
+	m_bufferManager->deleteBuffer(m_stressBuffers[idx]);
   }
 }
 
@@ -217,24 +222,24 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
   auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
 
   if (result.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      // Swapchain recreation failed - cannot recover
-      return std::numeric_limits<uint32_t>::max();
-    }
-    // Recreate render targets that depend on swapchain size
-    m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+	const auto extent = m_vulkanDevice->swapchainExtent();
+	if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+	  // Swapchain recreation failed - cannot recover
+	  return std::numeric_limits<uint32_t>::max();
+	}
+	// Recreate render targets that depend on swapchain size
+	m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
 
-    // Retry acquire after successful recreation (fixes C5: crash on resize)
-    result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-    if (!result.success) {
-      return std::numeric_limits<uint32_t>::max();
-    }
-    return result.imageIndex;
+	// Retry acquire after successful recreation (fixes C5: crash on resize)
+	result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
+	if (!result.success) {
+	  return std::numeric_limits<uint32_t>::max();
+	}
+	return result.imageIndex;
   }
 
   if (!result.success) {
-    return std::numeric_limits<uint32_t>::max();
+	return std::numeric_limits<uint32_t>::max();
   }
 
   return result.imageIndex;
@@ -244,23 +249,23 @@ uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame& frame) {
   auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
 
   if (result.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      throw std::runtime_error("acquireImageOrThrow: swapchain recreation failed");
-    }
-    // Recreate render targets that depend on swapchain size
-    m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+	const auto extent = m_vulkanDevice->swapchainExtent();
+	if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+	  throw std::runtime_error("acquireImageOrThrow: swapchain recreation failed");
+	}
+	// Recreate render targets that depend on swapchain size
+	m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
 
-    // Retry acquire after successful recreation
-    result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-    if (!result.success) {
-      throw std::runtime_error("acquireImageOrThrow: acquire failed after swapchain recreation");
-    }
-    return result.imageIndex;
+	// Retry acquire after successful recreation
+	result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
+	if (!result.success) {
+	  throw std::runtime_error("acquireImageOrThrow: acquire failed after swapchain recreation");
+	}
+	return result.imageIndex;
   }
 
   if (!result.success) {
-    throw std::runtime_error("acquireImageOrThrow: acquire failed");
+	throw std::runtime_error("acquireImageOrThrow: acquire failed");
   }
 
   return result.imageIndex;
@@ -281,10 +286,13 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   // Collect serial-gated deferred releases opportunistically at a known safe point.
   m_completedSerial = std::max(m_completedSerial, queryCompletedSerial());
   if (m_bufferManager) {
-    m_bufferManager->collect(m_completedSerial);
+	m_bufferManager->collect(m_completedSerial);
   }
   if (m_textureManager) {
-    m_textureManager->collect(m_completedSerial);
+	m_textureManager->collect(m_completedSerial);
+  }
+  if (m_movieManager) {
+	m_movieManager->collect(m_completedSerial);
   }
 
   // Upload any pending textures before rendering begins (no render pass active yet).
@@ -294,6 +302,9 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
   // Resources retired during this frame's recording may still be referenced by the upcoming submission.
   m_textureManager->setSafeRetireSerial(m_submitSerial + 1);
   m_textureManager->setCurrentFrameIndex(m_frameCounter);
+  if (m_movieManager) {
+	m_movieManager->setSafeRetireSerial(m_submitSerial + 1);
+  }
 
   Assertion(m_bufferManager != nullptr, "m_bufferManager must be initialized before beginFrame");
   m_bufferManager->setSafeRetireSerial(m_submitSerial + 1);
@@ -332,7 +343,7 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   vk::Fence fence = frame.inflightFence();
   auto resetResult = m_vulkanDevice->device().resetFences(1, &fence);
   if (resetResult != vk::Result::eSuccess) {
-    throw std::runtime_error("Failed to reset fence for Vulkan frame submission");
+	throw std::runtime_error("Failed to reset fence for Vulkan frame submission");
   }
 
   vk::SemaphoreSubmitInfo waitSemaphore;
@@ -358,10 +369,10 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   const uint64_t submitSerial = ++m_submitSerial;
   signalSemaphores[1].value = submitSerial;
   if (m_textureManager) {
-    m_textureManager->setSafeRetireSerial(m_submitSerial);
+	m_textureManager->setSafeRetireSerial(m_submitSerial);
   }
   if (m_bufferManager) {
-    m_bufferManager->setSafeRetireSerial(m_submitSerial);
+	m_bufferManager->setSafeRetireSerial(m_submitSerial);
   }
   const uint64_t timelineValue = submitSerial;
 
@@ -375,10 +386,10 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   auto presentResult = m_vulkanDevice->present(frame.renderFinished(), imageIndex);
 
   if (presentResult.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
-    }
+	const auto extent = m_vulkanDevice->swapchainExtent();
+	if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
+	  m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
+	}
   }
 
   graphics::vulkan::SubmitInfo info{};
@@ -425,9 +436,9 @@ void VulkanRenderer::recycleOneInFlight()
   const uint64_t completed = queryCompletedSerial();
   m_completedSerial = std::max(m_completedSerial, completed);
   Assertion(m_completedSerial >= inflight.submit.serial,
-    "Completed serial (%llu) must be >= recycled submission serial (%llu)",
-    static_cast<unsigned long long>(m_completedSerial),
-    static_cast<unsigned long long>(inflight.submit.serial));
+	"Completed serial (%llu) must be >= recycled submission serial (%llu)",
+	static_cast<unsigned long long>(m_completedSerial),
+	static_cast<unsigned long long>(inflight.submit.serial));
   prepareFrameForReuse(f, m_completedSerial);
 
   m_availableFrames.push_back(AvailableFrame{ &f, m_completedSerial });
@@ -436,7 +447,7 @@ void VulkanRenderer::recycleOneInFlight()
 VulkanRenderer::AvailableFrame VulkanRenderer::acquireAvailableFrame()
 {
   while (m_availableFrames.empty()) {
-    recycleOneInFlight();
+	recycleOneInFlight();
   }
 
   AvailableFrame af = m_availableFrames.front();
@@ -471,7 +482,7 @@ graphics::vulkan::RecordingFrame VulkanRenderer::advanceFrame(graphics::vulkan::
 RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
 {
   Assertion(&ctx.renderer == this,
-    "ensureRenderingStarted called with FrameCtx from a different VulkanRenderer instance");
+	"ensureRenderingStarted called with FrameCtx from a different VulkanRenderer instance");
   return ensureRenderingStartedRecording(ctx.m_recording);
 }
 
@@ -481,7 +492,7 @@ void VulkanRenderer::applySetupFrameDynamicState(const FrameCtx& ctx,
   float lineWidth)
 {
   Assertion(&ctx.renderer == this,
-    "applySetupFrameDynamicState called with FrameCtx from a different VulkanRenderer instance");
+	"applySetupFrameDynamicState called with FrameCtx from a different VulkanRenderer instance");
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   Assertion(cmd, "applySetupFrameDynamicState called with null command buffer");
 
@@ -494,10 +505,10 @@ void VulkanRenderer::pushDebugGroup(const FrameCtx& ctx, const char* name)
 {
   Assertion(name != nullptr, "pushDebugGroup called with null name");
   Assertion(&ctx.renderer == this,
-    "pushDebugGroup called with FrameCtx from a different VulkanRenderer instance");
+	"pushDebugGroup called with FrameCtx from a different VulkanRenderer instance");
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   if (!cmd) {
-    return;
+	return;
   }
 
   vk::DebugUtilsLabelEXT label{};
@@ -514,10 +525,10 @@ void VulkanRenderer::pushDebugGroup(const FrameCtx& ctx, const char* name)
 void VulkanRenderer::popDebugGroup(const FrameCtx& ctx)
 {
   Assertion(&ctx.renderer == this,
-    "popDebugGroup called with FrameCtx from a different VulkanRenderer instance");
+	"popDebugGroup called with FrameCtx from a different VulkanRenderer instance");
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   if (!cmd) {
-    return;
+	return;
   }
   cmd.endDebugUtilsLabelEXT();
 }
@@ -542,21 +553,21 @@ void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame& rec
   restoreScissor.extent = vk::Extent2D{clip.width, clip.height};
 
   const bool canCaptureSwapchain =
-    (m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) != vk::ImageUsageFlags{};
+	(m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) != vk::ImageUsageFlags{};
 
   bool preserveEmissive = false;
   if (canCaptureSwapchain) {
-    // End any active swapchain rendering and snapshot the current swapchain image.
-    m_renderingSession->captureSwapchainColorToSceneCopy(cmd, rec.imageIndex);
+	// End any active swapchain rendering and snapshot the current swapchain image.
+	m_renderingSession->captureSwapchainColorToSceneCopy(cmd, rec.imageIndex);
 
-    // Copy the captured scene color into the emissive G-buffer attachment (OpenGL parity).
-    m_renderingSession->requestGBufferEmissiveTarget();
-    const auto emissiveRender = ensureRenderingStartedRecording(rec);
-    recordPreDeferredSceneColorCopy(emissiveRender, rec.imageIndex);
+	// Copy the captured scene color into the emissive G-buffer attachment (OpenGL parity).
+	m_renderingSession->requestGBufferEmissiveTarget();
+	const auto emissiveRender = ensureRenderingStartedRecording(rec);
+	recordPreDeferredSceneColorCopy(emissiveRender, rec.imageIndex);
 
-    // Restore scissor for subsequent geometry draws.
-    cmd.setScissor(0, 1, &restoreScissor);
-    preserveEmissive = true;
+	// Restore scissor for subsequent geometry draws.
+	cmd.setScissor(0, 1, &restoreScissor);
+	preserveEmissive = true;
   }
 
   m_renderingSession->beginDeferredPass(clearNonColorBufs, preserveEmissive);
@@ -583,9 +594,9 @@ DeferredGeometryCtx VulkanRenderer::deferredLightingBegin(graphics::vulkan::Reco
 DeferredLightingCtx VulkanRenderer::deferredLightingEnd(graphics::vulkan::RecordingFrame& rec, DeferredGeometryCtx&& geometry)
 {
   Assertion(geometry.frameIndex == m_frameCounter,
-    "deferredLightingEnd called with mismatched frameIndex (got %u, expected %u)",
-    geometry.frameIndex,
-    m_frameCounter);
+	"deferredLightingEnd called with mismatched frameIndex (got %u, expected %u)",
+	geometry.frameIndex,
+	m_frameCounter);
   vk::CommandBuffer cmd = rec.cmd();
   Assertion(cmd, "deferredLightingEnd called with null command buffer");
 
@@ -598,9 +609,9 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& re
   const vk::Rect2D& restoreScissor)
 {
   Assertion(lighting.frameIndex == m_frameCounter,
-    "deferredLightingFinish called with mismatched frameIndex (got %u, expected %u)",
-    lighting.frameIndex,
-    m_frameCounter);
+	"deferredLightingFinish called with mismatched frameIndex (got %u, expected %u)",
+	lighting.frameIndex,
+	m_frameCounter);
 
   bindDeferredGlobalDescriptors();
   VulkanFrame& frame = rec.ref();
@@ -608,16 +619,16 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame& re
 
   // Build lights from engine state (boundary: conditionals live here only).
   std::vector<DeferredLight> lights = buildDeferredLights(
-    frame,
-    uniformBuffer,
-    gr_view_matrix,
-    gr_projection_matrix,
-    getMinUniformBufferAlignment());
+	frame,
+	uniformBuffer,
+	gr_view_matrix,
+	gr_projection_matrix,
+	getMinUniformBufferAlignment());
 
   if (!lights.empty()) {
-    // Activate swapchain rendering without depth (target set by endDeferredGeometry).
-    auto render = ensureRenderingStartedRecording(rec);
-    recordDeferredLighting(render, uniformBuffer, lights);
+	// Activate swapchain rendering without depth (target set by endDeferredGeometry).
+	auto render = ensureRenderingStartedRecording(rec);
+	recordDeferredLighting(render, uniformBuffer, lights);
   }
 
   vk::CommandBuffer cmd = rec.cmd();
@@ -637,30 +648,30 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
 
   // G-buffer 0..2
   for (uint32_t i = 0; i < 3; ++i) {
-    vk::DescriptorImageInfo info{};
-    info.sampler = m_renderTargets->gbufferSampler();
-    info.imageView = m_renderTargets->gbufferView(i);
-    info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    
+	vk::DescriptorImageInfo info{};
+	info.sampler = m_renderTargets->gbufferSampler();
+	info.imageView = m_renderTargets->gbufferView(i);
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	
 
-    
-    infos.push_back(info);
+	
+	infos.push_back(info);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
-    write.dstBinding = i;
-    write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    write.descriptorCount = 1;
-    write.pImageInfo = &infos.back();
-    writes.push_back(write);
+	vk::WriteDescriptorSet write{};
+	write.dstSet = m_globalDescriptorSet;
+	write.dstBinding = i;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.descriptorCount = 1;
+	write.pImageInfo = &infos.back();
+	writes.push_back(write);
   }
 
   // Depth (binding 3) - uses nearest-filter sampler (linear often unsupported for depth)
-    vk::DescriptorImageInfo depthInfo{};
-    depthInfo.sampler = m_renderTargets->depthSampler();
-    depthInfo.imageView = m_renderTargets->depthSampledView();
-    depthInfo.imageLayout = m_renderTargets->depthReadLayout();
-    infos.push_back(depthInfo);
+	vk::DescriptorImageInfo depthInfo{};
+	depthInfo.sampler = m_renderTargets->depthSampler();
+	depthInfo.imageView = m_renderTargets->depthSampledView();
+	depthInfo.imageLayout = m_renderTargets->depthReadLayout();
+	infos.push_back(depthInfo);
 
   vk::WriteDescriptorSet depthWrite{};
   depthWrite.dstSet = m_globalDescriptorSet;
@@ -672,42 +683,42 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
 
   // Specular (binding 4): G-buffer attachment 3
   {
-    vk::DescriptorImageInfo info{};
-    info.sampler = m_renderTargets->gbufferSampler();
-    info.imageView = m_renderTargets->gbufferView(3);
-    info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    
+	vk::DescriptorImageInfo info{};
+	info.sampler = m_renderTargets->gbufferSampler();
+	info.imageView = m_renderTargets->gbufferView(3);
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	
 
-    
-    infos.push_back(info);
+	
+	infos.push_back(info);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
-    write.dstBinding = 4;
-    write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    write.descriptorCount = 1;
-    write.pImageInfo = &infos.back();
-    writes.push_back(write);
+	vk::WriteDescriptorSet write{};
+	write.dstSet = m_globalDescriptorSet;
+	write.dstBinding = 4;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.descriptorCount = 1;
+	write.pImageInfo = &infos.back();
+	writes.push_back(write);
   }
 
   // Emissive (binding 5): G-buffer attachment 4
   {
-    vk::DescriptorImageInfo info{};
-    info.sampler = m_renderTargets->gbufferSampler();
-    info.imageView = m_renderTargets->gbufferView(4);
-    info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    
+	vk::DescriptorImageInfo info{};
+	info.sampler = m_renderTargets->gbufferSampler();
+	info.imageView = m_renderTargets->gbufferView(4);
+	info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	
 
-    
-    infos.push_back(info);
+	
+	infos.push_back(info);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
-    write.dstBinding = 5;
-    write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    write.descriptorCount = 1;
-    write.pImageInfo = &infos.back();
-    writes.push_back(write);
+	vk::WriteDescriptorSet write{};
+	write.dstSet = m_globalDescriptorSet;
+	write.dstBinding = 5;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.descriptorCount = 1;
+	write.pImageInfo = &infos.back();
+	writes.push_back(write);
   }
 
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
@@ -750,9 +761,9 @@ void VulkanRenderer::recordPreDeferredSceneColorCopy(const RenderCtx& render, ui
   ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_COPY);
 
   static const vertex_layout copyLayout = []() {
-    vertex_layout layout{};
-    layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);
-    return layout;
+	vertex_layout layout{};
+	layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);
+	return layout;
   }();
 
   PipelineKey key{};
@@ -782,10 +793,10 @@ void VulkanRenderer::recordPreDeferredSceneColorCopy(const RenderCtx& render, ui
 
   std::array<vk::WriteDescriptorSet, 1> writes{write};
   cmd.pushDescriptorSetKHR(
-    vk::PipelineBindPoint::eGraphics,
-    m_descriptorLayouts->pipelineLayout(),
-    0,
-    writes);
+	vk::PipelineBindPoint::eGraphics,
+	m_descriptorLayouts->pipelineLayout(),
+	0,
+	writes);
 
   // Fullscreen triangle (same vertex buffer as deferred ambient).
   vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
@@ -803,7 +814,7 @@ vk::Buffer VulkanRenderer::getBuffer(gr_buffer_handle handle) const
 vk::Buffer VulkanRenderer::queryModelVertexHeapBuffer() const
 {
   Assertion(m_modelVertexHeapHandle.isValid(),
-    "queryModelVertexHeapBuffer called without a valid model vertex heap handle");
+	"queryModelVertexHeapBuffer called without a valid model vertex heap handle");
   return getBuffer(m_modelVertexHeapHandle);
 }
 
@@ -868,7 +879,7 @@ void VulkanRenderer::setViewport(const FrameCtx& ctx, const vk::Viewport& viewpo
   Assertion(&ctx.renderer == this, "setViewport called with FrameCtx from a different VulkanRenderer instance");
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   if (!cmd) {
-    return;
+	return;
   }
   cmd.setViewport(0, 1, &viewport);
 }
@@ -878,7 +889,7 @@ void VulkanRenderer::setScissor(const FrameCtx& ctx, const vk::Rect2D& scissor)
   Assertion(&ctx.renderer == this, "setScissor called with FrameCtx from a different VulkanRenderer instance");
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   if (!cmd) {
-    return;
+	return;
   }
   cmd.setScissor(0, 1, &scissor);
 }
@@ -887,10 +898,10 @@ bool VulkanRenderer::createBitmapRenderTarget(int handle, int* width, int* heigh
 {
   Assertion(m_textureManager != nullptr, "createBitmapRenderTarget called before texture manager initialization");
   if (!width || !height || !bpp || !mm_lvl) {
-    return false;
+	return false;
   }
   if (handle < 0) {
-    return false;
+	return false;
   }
 
   uint32_t w = static_cast<uint32_t>(*width);
@@ -898,24 +909,24 @@ bool VulkanRenderer::createBitmapRenderTarget(int handle, int* width, int* heigh
 
   // Cubemap faces must be square. Mirror OpenGL behavior: clamp to max dimension.
   if ((flags & BMP_FLAG_CUBEMAP) && (w != h)) {
-    const uint32_t mx = (w > h) ? w : h;
-    w = mx;
-    h = mx;
+	const uint32_t mx = (w > h) ? w : h;
+	w = mx;
+	h = mx;
   }
 
   // Hard clamp to device limits (fail-fast clamping, no silent overflow).
   const auto& limits = m_vulkanDevice->properties().limits;
   const uint32_t maxDim = (flags & BMP_FLAG_CUBEMAP) ? limits.maxImageDimensionCube : limits.maxImageDimension2D;
   if (w > maxDim) {
-    w = maxDim;
+	w = maxDim;
   }
   if (h > maxDim) {
-    h = maxDim;
+	h = maxDim;
   }
 
   uint32_t mipLevels = 1;
   if (!m_textureManager->createRenderTarget(handle, w, h, flags, &mipLevels)) {
-    return false;
+	return false;
   }
 
   *width = static_cast<int>(w);
@@ -934,7 +945,7 @@ bool VulkanRenderer::setBitmapRenderTarget(const FrameCtx& ctx, int handle, int 
 
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   if (!cmd) {
-    return false;
+	return false;
   }
 
   // bmpman updates gr_screen.rendering_to_texture *after* the graphics API callback returns, so this still reflects
@@ -943,22 +954,22 @@ bool VulkanRenderer::setBitmapRenderTarget(const FrameCtx& ctx, int handle, int 
 
   // Switching targets requires ending any active dynamic rendering scope.
   if (handle < 0) {
-    m_renderingSession->requestSwapchainTarget();
+	m_renderingSession->requestSwapchainTarget();
   } else {
-    if (!m_textureManager->hasRenderTarget(handle)) {
-      return false;
-    }
-    m_renderingSession->requestBitmapTarget(handle, face);
+	if (!m_textureManager->hasRenderTarget(handle)) {
+	  return false;
+	}
+	m_renderingSession->requestBitmapTarget(handle, face);
   }
 
   // Leaving a bitmap render target: transition to shader-read and generate mipmaps if requested.
   // (Skip when switching faces on the same cubemap.)
   if (prevTarget >= 0 && prevTarget != handle) {
-    if (m_textureManager->renderTargetMipLevels(prevTarget) > 1) {
-      m_textureManager->generateRenderTargetMipmaps(cmd, prevTarget);
-    } else {
-      m_textureManager->transitionRenderTargetToShaderRead(cmd, prevTarget);
-    }
+	if (m_textureManager->renderTargetMipLevels(prevTarget) > 1) {
+	  m_textureManager->generateRenderTargetMipmaps(cmd, prevTarget);
+	} else {
+	  m_textureManager->transitionRenderTargetToShaderRead(cmd, prevTarget);
+	}
   }
 
   return true;
@@ -979,19 +990,19 @@ vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const Vulkan
 uint32_t VulkanRenderer::getBindlessTextureIndex(int bitmapHandle)
 {
   if (bitmapHandle < 0) {
-    return kBindlessTextureSlotFallback;
+	return kBindlessTextureSlotFallback;
   }
 
   Assertion(m_textureBindings != nullptr, "getBindlessTextureIndex called before texture bindings initialization");
 
   const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);
   if (baseFrame < 0) {
-    return kBindlessTextureSlotFallback;
+	return kBindlessTextureSlotFallback;
   }
 
   const auto id = TextureId::tryFromBaseFrame(baseFrame);
   if (!id.has_value()) {
-    return kBindlessTextureSlotFallback;
+	return kBindlessTextureSlotFallback;
   }
 
   return m_textureBindings->bindlessIndex(*id);
@@ -1003,40 +1014,40 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
   size_t size) {
   const auto alignment = getMinUniformOffsetAlignment();
   Assertion(offset <= std::numeric_limits<uint32_t>::max(),
-    "Model uniform offset %zu exceeds uint32_t range", offset);
+	"Model uniform offset %zu exceeds uint32_t range", offset);
   const auto dynOffset = static_cast<uint32_t>(offset);
 
   Assertion(alignment > 0, "minUniformBufferOffsetAlignment must be non-zero");
   Assertion((dynOffset % alignment) == 0,
-    "Model uniform offset %u is not aligned to %zu", dynOffset, alignment);
+	"Model uniform offset %u is not aligned to %zu", dynOffset, alignment);
   Assertion(size >= sizeof(model_uniform_data),
-    "Model uniform size %zu is smaller than sizeof(model_uniform_data) %zu",
-    size, sizeof(model_uniform_data));
+	"Model uniform size %zu is smaller than sizeof(model_uniform_data) %zu",
+	size, sizeof(model_uniform_data));
 
   Assertion(frame.modelDescriptorSet(), "Model descriptor set must be allocated before binding uniform buffer");
   Assertion(handle.isValid(), "Invalid model uniform buffer handle");
   Assertion(m_bufferManager != nullptr, "setModelUniformBinding requires buffer manager");
 
   vk::Buffer vkBuffer = m_bufferManager->ensureBuffer(
-    handle, static_cast<vk::DeviceSize>(offset + sizeof(model_uniform_data)));
+	handle, static_cast<vk::DeviceSize>(offset + sizeof(model_uniform_data)));
   Assertion(vkBuffer, "Failed to resolve Vulkan buffer for handle %d", handle.value());
 
   // Check if buffer handle changed
   if (frame.modelUniformBinding.bufferHandle != handle) {
-    vk::DescriptorBufferInfo info{};
-    info.buffer = vkBuffer;
-    info.offset = 0;
-    info.range = sizeof(model_uniform_data);
+	vk::DescriptorBufferInfo info{};
+	info.buffer = vkBuffer;
+	info.offset = 0;
+	info.range = sizeof(model_uniform_data);
 
-    vk::WriteDescriptorSet write{};
-    write.dstSet = frame.modelDescriptorSet();
-    write.dstBinding = 2;
-    write.dstArrayElement = 0;
-    write.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &info;
+	vk::WriteDescriptorSet write{};
+	write.dstSet = frame.modelDescriptorSet();
+	write.dstBinding = 2;
+	write.dstArrayElement = 0;
+	write.descriptorType = vk::DescriptorType::eUniformBufferDynamic;
+	write.descriptorCount = 1;
+	write.pBufferInfo = &info;
 
-    m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
+	m_vulkanDevice->device().updateDescriptorSets(1, &write, 0, nullptr);
   }
 
   frame.modelUniformBinding = DynamicUniformBinding{ handle, dynOffset };
@@ -1053,12 +1064,12 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame& frame,
 
   const auto alignment = getMinUniformOffsetAlignment();
   Assertion(offset <= std::numeric_limits<uint32_t>::max(),
-    "Scene uniform offset %zu exceeds uint32_t range", offset);
+	"Scene uniform offset %zu exceeds uint32_t range", offset);
   const auto dynOffset = static_cast<uint32_t>(offset);
 
   Assertion(alignment > 0, "minUniformBufferOffsetAlignment must be non-zero");
   Assertion((dynOffset % alignment) == 0,
-    "Scene uniform offset %u is not aligned to %zu", dynOffset, alignment);
+	"Scene uniform offset %u is not aligned to %zu", dynOffset, alignment);
 
   frame.sceneUniformBinding = DynamicUniformBinding{ handle, dynOffset };
 }
@@ -1123,60 +1134,60 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex,
   desiredInfos.fill(fallbackInfo);
 
   for (const auto& [arrayIndex, handle] : textures) {
-    Assertion(arrayIndex < kMaxBindlessTextures,
-      "updateModelDescriptors: slot index %u out of range (max %u)", arrayIndex, kMaxBindlessTextures);
-    vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
-    Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
-    desiredInfos[arrayIndex] = info;
+	Assertion(arrayIndex < kMaxBindlessTextures,
+	  "updateModelDescriptors: slot index %u out of range (max %u)", arrayIndex, kMaxBindlessTextures);
+	vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
+	Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
+	desiredInfos[arrayIndex] = info;
   }
 
   auto sameInfo = [](const vk::DescriptorImageInfo& a, const vk::DescriptorImageInfo& b) {
-    return a.sampler == b.sampler && a.imageView == b.imageView && a.imageLayout == b.imageLayout;
+	return a.sampler == b.sampler && a.imageView == b.imageView && a.imageLayout == b.imageLayout;
   };
 
   Assertion(frameIndex < m_modelBindlessCache.size(),
-    "updateModelDescriptors called with invalid frameIndex %u (cache size %zu)",
-    frameIndex,
-    m_modelBindlessCache.size());
+	"updateModelDescriptors called with invalid frameIndex %u (cache size %zu)",
+	frameIndex,
+	m_modelBindlessCache.size());
   auto& cache = m_modelBindlessCache[frameIndex];
 
   if (!cache.initialized) {
-    vk::WriteDescriptorSet texturesWrite{};
-    texturesWrite.dstSet = set;
-    texturesWrite.dstBinding = 1;
-    texturesWrite.dstArrayElement = 0;
-    texturesWrite.descriptorCount = kMaxBindlessTextures;
-    texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    texturesWrite.pImageInfo = desiredInfos.data();
-    writes.push_back(texturesWrite);
+	vk::WriteDescriptorSet texturesWrite{};
+	texturesWrite.dstSet = set;
+	texturesWrite.dstBinding = 1;
+	texturesWrite.dstArrayElement = 0;
+	texturesWrite.descriptorCount = kMaxBindlessTextures;
+	texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	texturesWrite.pImageInfo = desiredInfos.data();
+	writes.push_back(texturesWrite);
 
-    cache.infos = desiredInfos;
-    cache.initialized = true;
+	cache.infos = desiredInfos;
+	cache.initialized = true;
   } else {
-    // Update only the slots that changed since last sync.
-    uint32_t i = 0;
-    while (i < kMaxBindlessTextures) {
-      if (sameInfo(cache.infos[i], desiredInfos[i])) {
-        ++i;
-        continue;
-      }
+	// Update only the slots that changed since last sync.
+	uint32_t i = 0;
+	while (i < kMaxBindlessTextures) {
+	  if (sameInfo(cache.infos[i], desiredInfos[i])) {
+		++i;
+		continue;
+	  }
 
-      const uint32_t start = i;
-      while (i < kMaxBindlessTextures && !sameInfo(cache.infos[i], desiredInfos[i])) {
-        cache.infos[i] = desiredInfos[i];
-        ++i;
-      }
-      const uint32_t count = i - start;
+	  const uint32_t start = i;
+	  while (i < kMaxBindlessTextures && !sameInfo(cache.infos[i], desiredInfos[i])) {
+		cache.infos[i] = desiredInfos[i];
+		++i;
+	  }
+	  const uint32_t count = i - start;
 
-      vk::WriteDescriptorSet texturesWrite{};
-      texturesWrite.dstSet = set;
-      texturesWrite.dstBinding = 1;
-      texturesWrite.dstArrayElement = start;
-      texturesWrite.descriptorCount = count;
-      texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-      texturesWrite.pImageInfo = desiredInfos.data() + start;
-      writes.push_back(texturesWrite);
-    }
+	  vk::WriteDescriptorSet texturesWrite{};
+	  texturesWrite.dstSet = set;
+	  texturesWrite.dstBinding = 1;
+	  texturesWrite.dstArrayElement = start;
+	  texturesWrite.descriptorCount = count;
+	  texturesWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	  texturesWrite.pImageInfo = desiredInfos.data() + start;
+	  writes.push_back(texturesWrite);
+	}
   }
 
   m_vulkanDevice->device().updateDescriptorSets(writes, {});
@@ -1185,12 +1196,12 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex,
 void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frameIndex, vk::Buffer vertexHeapBuffer) {
   // Precondition: vertexHeapBuffer is valid (caller checked)
   Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
-    "beginModelDescriptorSync called with null vertexHeapBuffer");
+	"beginModelDescriptorSync called with null vertexHeapBuffer");
   Assertion(m_bufferManager != nullptr, "beginModelDescriptorSync requires buffer manager");
 
   // frameIndex MUST be ring index [0, FramesInFlight)
   Assertion(frameIndex < kFramesInFlight,
-    "Invalid frame index %u (must be 0..%u)", frameIndex, kFramesInFlight - 1);
+	"Invalid frame index %u (must be 0..%u)", frameIndex, kFramesInFlight - 1);
 
   // Descriptor set must be allocated at frame construction (not lazily)
   Assertion(frame.modelDescriptorSet(), "Model descriptor set must be allocated at frame construction");
@@ -1204,15 +1215,15 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
   m_textureManager->appendResidentBindlessDescriptors(textures);
 
   updateModelDescriptors(frameIndex,
-    frame.modelDescriptorSet(),
-    vertexHeapBuffer,
-    frame.vertexBuffer().buffer(),
-    textures);
+	frame.modelDescriptorSet(),
+	vertexHeapBuffer,
+	frame.vertexBuffer().buffer(),
+	textures);
 }
 
 int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {
   if (m_textureManager && bitmapHandle >= 0) {
-    return m_textureManager->preloadTexture(bitmapHandle, isAABitmap) ? 1 : 0;
+	return m_textureManager->preloadTexture(bitmapHandle, isAABitmap) ? 1 : 0;
   }
   return 0;
 }
@@ -1220,20 +1231,20 @@ int VulkanRenderer::preloadTexture(int bitmapHandle, bool isAABitmap) {
 void VulkanRenderer::updateTexture(const FrameCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height)
 {
   if (!m_textureManager || !m_textureUploader) {
-    return;
+	return;
   }
   if (bitmapHandle < 0 || data == nullptr || width <= 0 || height <= 0) {
-    return;
+	return;
   }
 
   // Transfer operations are invalid inside dynamic rendering.
   if (m_renderingSession) {
-    m_renderingSession->suspendRendering();
+	m_renderingSession->suspendRendering();
   }
 
   vk::CommandBuffer cmd = ctx.m_recording.cmd();
   if (!cmd) {
-    return;
+	return;
   }
 
   UploadCtx uploadCtx{ ctx.m_recording.ref(), cmd, m_frameCounter };
@@ -1243,8 +1254,70 @@ void VulkanRenderer::updateTexture(const FrameCtx& ctx, int bitmapHandle, int bp
 void VulkanRenderer::releaseBitmap(int bitmapHandle)
 {
   if (m_textureManager && bitmapHandle >= 0) {
-    m_textureManager->releaseBitmap(bitmapHandle);
+	m_textureManager->releaseBitmap(bitmapHandle);
   }
+}
+
+MovieTextureHandle VulkanRenderer::createMovieTexture(uint32_t width,
+  uint32_t height,
+  MovieColorSpace colorspace,
+  MovieColorRange range)
+{
+  if (!m_movieManager || !m_movieManager->isAvailable()) {
+	return MovieTextureHandle::Invalid;
+  }
+  return m_movieManager->createMovieTexture(width, height, colorspace, range);
+}
+
+void VulkanRenderer::uploadMovieTexture(const FrameCtx& ctx,
+  MovieTextureHandle handle,
+  const ubyte* y,
+  int yStride,
+  const ubyte* u,
+  int uStride,
+  const ubyte* v,
+  int vStride)
+{
+  if (!m_movieManager || !m_movieManager->isAvailable() || !gr_is_valid(handle)) {
+	return;
+  }
+
+  if (m_renderingSession) {
+	m_renderingSession->suspendRendering();
+  }
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  if (!cmd) {
+	return;
+  }
+
+  UploadCtx uploadCtx{ ctx.m_recording.ref(), cmd, m_frameCounter };
+  m_movieManager->uploadMovieFrame(uploadCtx, handle, y, yStride, u, uStride, v, vStride);
+}
+
+void VulkanRenderer::drawMovieTexture(const FrameCtx& ctx,
+  MovieTextureHandle handle,
+  float x1,
+  float y1,
+  float x2,
+  float y2,
+  float alpha)
+{
+  if (!m_movieManager || !m_movieManager->isAvailable() || !gr_is_valid(handle)) {
+	return;
+  }
+
+  auto renderCtx = ensureRenderingStarted(ctx);
+  incrementPrimDraw();
+  m_movieManager->drawMovieTexture(renderCtx, handle, x1, y1, x2, y2, alpha);
+}
+
+void VulkanRenderer::releaseMovieTexture(MovieTextureHandle handle)
+{
+  if (!m_movieManager || !gr_is_valid(handle)) {
+	return;
+  }
+  m_movieManager->releaseMovieTexture(handle);
 }
 
 void VulkanRenderer::immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder) {
@@ -1275,7 +1348,7 @@ void VulkanRenderer::immediateSubmit(const std::function<void(vk::CommandBuffer)
 
 void VulkanRenderer::shutdown() {
   if (!m_vulkanDevice) {
-    return; // Already shut down or never initialized
+	return; // Already shut down or never initialized
   }
 
   m_vulkanDevice->device().waitIdle();
@@ -1293,16 +1366,16 @@ void VulkanRenderer::setClearColor(int r, int g, int b) {
 int VulkanRenderer::setCullMode(int cull) {
   switch (cull) {
   case 0:
-    m_renderingSession->setCullMode(vk::CullModeFlagBits::eNone);
-    break;
+	m_renderingSession->setCullMode(vk::CullModeFlagBits::eNone);
+	break;
   case 1:
-    m_renderingSession->setCullMode(vk::CullModeFlagBits::eBack);
-    break;
+	m_renderingSession->setCullMode(vk::CullModeFlagBits::eBack);
+	break;
   case 2:
-    m_renderingSession->setCullMode(vk::CullModeFlagBits::eFront);
-    break;
+	m_renderingSession->setCullMode(vk::CullModeFlagBits::eFront);
+	break;
   default:
-    return 0;
+	return 0;
   }
   return 1;
 }
@@ -1310,27 +1383,27 @@ int VulkanRenderer::setCullMode(int cull) {
 int VulkanRenderer::setZbufferMode(int mode) {
   switch (mode) {
   case 0: // ZBUFFER_TYPE_NONE
-    m_renderingSession->setDepthTest(false);
-    m_renderingSession->setDepthWrite(false);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_NONE;
-    break;
+	m_renderingSession->setDepthTest(false);
+	m_renderingSession->setDepthWrite(false);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_NONE;
+	break;
   case 1: // ZBUFFER_TYPE_READ
-    m_renderingSession->setDepthTest(true);
-    m_renderingSession->setDepthWrite(false);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_READ;
-    break;
+	m_renderingSession->setDepthTest(true);
+	m_renderingSession->setDepthWrite(false);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_READ;
+	break;
   case 2: // ZBUFFER_TYPE_WRITE
-    m_renderingSession->setDepthTest(false);
-    m_renderingSession->setDepthWrite(true);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_WRITE;
-    break;
+	m_renderingSession->setDepthTest(false);
+	m_renderingSession->setDepthWrite(true);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_WRITE;
+	break;
   case 3: // ZBUFFER_TYPE_FULL
-    m_renderingSession->setDepthTest(true);
-    m_renderingSession->setDepthWrite(true);
-    m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;
-    break;
+	m_renderingSession->setDepthTest(true);
+	m_renderingSession->setDepthWrite(true);
+	m_zbufferMode = gr_zbuffer_type::ZBUFFER_TYPE_FULL;
+	break;
   default:
-    return 0;
+	return 0;
   }
   return 1;
 }
@@ -1346,19 +1419,19 @@ void VulkanRenderer::requestClear() {
 
 void VulkanRenderer::zbufferClear(int mode) {
   if (mode) {
-    // Enable zbuffering + clear
-    gr_zbuffering = 1;
-    gr_zbuffering_mode = GR_ZBUFF_FULL;
-    gr_global_zbuffering = 1;
-    m_renderingSession->setDepthTest(true);
-    m_renderingSession->setDepthWrite(true);
-    m_renderingSession->requestDepthClear();
+	// Enable zbuffering + clear
+	gr_zbuffering = 1;
+	gr_zbuffering_mode = GR_ZBUFF_FULL;
+	gr_global_zbuffering = 1;
+	m_renderingSession->setDepthTest(true);
+	m_renderingSession->setDepthWrite(true);
+	m_renderingSession->requestDepthClear();
   } else {
-    // Disable zbuffering
-    gr_zbuffering = 0;
-    gr_zbuffering_mode = GR_ZBUFF_NONE;
-    gr_global_zbuffering = 0;
-    m_renderingSession->setDepthTest(false);
+	// Disable zbuffering
+	gr_zbuffering = 0;
+	gr_zbuffering_mode = GR_ZBUFF_NONE;
+	gr_global_zbuffering = 0;
+	m_renderingSession->setDepthTest(false);
   }
 }
 
@@ -1366,12 +1439,12 @@ void VulkanRenderer::createDeferredLightingResources() {
   // Fullscreen triangle (covers entire screen with 3 vertices, no clipping)
   // Positions are in clip space: vertex shader passes through directly
   struct FullscreenVertex {
-    float x, y, z;
+	float x, y, z;
   };
   static const FullscreenVertex fullscreenVerts[] = {
-    {-1.0f, -1.0f, 0.0f},
-    { 3.0f, -1.0f, 0.0f},
-    {-1.0f,  3.0f, 0.0f}
+	{-1.0f, -1.0f, 0.0f},
+	{ 3.0f, -1.0f, 0.0f},
+	{-1.0f,  3.0f, 0.0f}
   };
 
   m_fullscreenMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1385,25 +1458,25 @@ void VulkanRenderer::createDeferredLightingResources() {
 
   // Octahedron base vertices
   const float oct[] = {
-     0.0f,  1.0f,  0.0f,  // top
-     0.0f, -1.0f,  0.0f,  // bottom
-     1.0f,  0.0f,  0.0f,  // +X
-    -1.0f,  0.0f,  0.0f,  // -X
-     0.0f,  0.0f,  1.0f,  // +Z
-     0.0f,  0.0f, -1.0f   // -Z
+	 0.0f,  1.0f,  0.0f,  // top
+	 0.0f, -1.0f,  0.0f,  // bottom
+	 1.0f,  0.0f,  0.0f,  // +X
+	-1.0f,  0.0f,  0.0f,  // -X
+	 0.0f,  0.0f,  1.0f,  // +Z
+	 0.0f,  0.0f, -1.0f   // -Z
   };
 
   // Octahedron faces (8 triangles)
   const uint32_t octFaces[] = {
-    0, 4, 2,  0, 2, 5,  0, 5, 3,  0, 3, 4,  // top half
-    1, 2, 4,  1, 5, 2,  1, 3, 5,  1, 4, 3   // bottom half
+	0, 4, 2,  0, 2, 5,  0, 5, 3,  0, 3, 4,  // top half
+	1, 2, 4,  1, 5, 2,  1, 3, 5,  1, 4, 3   // bottom half
   };
 
   for (int i = 0; i < 18; i++) {
-    sphereVerts.push_back(oct[i]);
+	sphereVerts.push_back(oct[i]);
   }
   for (int i = 0; i < 24; i++) {
-    sphereIndices.push_back(octFaces[i]);
+	sphereIndices.push_back(octFaces[i]);
   }
 
   m_sphereMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1422,13 +1495,13 @@ void VulkanRenderer::createDeferredLightingResources() {
 
   // Generate ring vertices at z=0 and z=-1
   for (int ring = 0; ring < 2; ++ring) {
-    float z = (ring == 0) ? 0.0f : -1.0f;
-    for (int i = 0; i < segments; ++i) {
-      float angle = twoPi * i / segments;
-      cylVerts.push_back(cosf(angle));  // x
-      cylVerts.push_back(sinf(angle));  // y
-      cylVerts.push_back(z);            // z
-    }
+	float z = (ring == 0) ? 0.0f : -1.0f;
+	for (int i = 0; i < segments; ++i) {
+	  float angle = twoPi * i / segments;
+	  cylVerts.push_back(cosf(angle));  // x
+	  cylVerts.push_back(sinf(angle));  // y
+	  cylVerts.push_back(z);            // z
+	}
   }
 
   // Center vertices for caps
@@ -1444,33 +1517,33 @@ void VulkanRenderer::createDeferredLightingResources() {
 
   // Side faces (quads as two triangles)
   for (int i = 0; i < segments; ++i) {
-    uint32_t i0 = i;
-    uint32_t i1 = (i + 1) % segments;
-    uint32_t i2 = i + segments;
-    uint32_t i3 = ((i + 1) % segments) + segments;
+	uint32_t i0 = i;
+	uint32_t i1 = (i + 1) % segments;
+	uint32_t i2 = i + segments;
+	uint32_t i3 = ((i + 1) % segments) + segments;
 
-    // Two triangles per quad
-    cylIndices.push_back(i0);
-    cylIndices.push_back(i2);
-    cylIndices.push_back(i1);
+	// Two triangles per quad
+	cylIndices.push_back(i0);
+	cylIndices.push_back(i2);
+	cylIndices.push_back(i1);
 
-    cylIndices.push_back(i1);
-    cylIndices.push_back(i2);
-    cylIndices.push_back(i3);
+	cylIndices.push_back(i1);
+	cylIndices.push_back(i2);
+	cylIndices.push_back(i3);
   }
 
   // Top cap (z=0)
   for (int i = 0; i < segments; ++i) {
-    cylIndices.push_back(capTop);
-    cylIndices.push_back((i + 1) % segments);
-    cylIndices.push_back(i);
+	cylIndices.push_back(capTop);
+	cylIndices.push_back((i + 1) % segments);
+	cylIndices.push_back(i);
   }
 
   // Bottom cap (z=-1)
   for (int i = 0; i < segments; ++i) {
-    cylIndices.push_back(capBot);
-    cylIndices.push_back(i + segments);
-    cylIndices.push_back(((i + 1) % segments) + segments);
+	cylIndices.push_back(capBot);
+	cylIndices.push_back(i + segments);
+	cylIndices.push_back(((i + 1) % segments) + segments);
   }
 
   m_cylinderMesh.vbo = m_bufferManager->createBuffer(BufferType::Vertex, BufferUsageHint::Static);
@@ -1489,29 +1562,29 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {
-    const auto extent = m_vulkanDevice->swapchainExtent();
+	const auto extent = m_vulkanDevice->swapchainExtent();
 
-    vk::Viewport viewport{};
-    viewport.x = 0.f;
-    viewport.y = static_cast<float>(extent.height);
-    viewport.width = static_cast<float>(extent.width);
-    viewport.height = -static_cast<float>(extent.height);
-    viewport.minDepth = 0.f;
-    viewport.maxDepth = 1.f;
-    cmd.setViewport(0, 1, &viewport);
+	vk::Viewport viewport{};
+	viewport.x = 0.f;
+	viewport.y = static_cast<float>(extent.height);
+	viewport.width = static_cast<float>(extent.width);
+	viewport.height = -static_cast<float>(extent.height);
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+	cmd.setViewport(0, 1, &viewport);
 
-    vk::Rect2D scissor{{0, 0}, extent};
-    cmd.setScissor(0, 1, &scissor);
-    
+	vk::Rect2D scissor{{0, 0}, extent};
+	cmd.setScissor(0, 1, &scissor);
+	
 
 
-    cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
-    cmd.setCullMode(vk::CullModeFlagBits::eNone);
-    cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
-    cmd.setDepthTestEnable(VK_FALSE);
-    cmd.setDepthWriteEnable(VK_FALSE);
-    cmd.setDepthCompareOp(vk::CompareOp::eAlways);
-    cmd.setStencilTestEnable(VK_FALSE);
+	cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+	cmd.setCullMode(vk::CullModeFlagBits::eNone);
+	cmd.setFrontFace(vk::FrontFace::eClockwise); // Matches Y-flipped viewport convention
+	cmd.setDepthTestEnable(VK_FALSE);
+	cmd.setDepthWriteEnable(VK_FALSE);
+	cmd.setDepthCompareOp(vk::CompareOp::eAlways);
+	cmd.setStencilTestEnable(VK_FALSE);
   }
 
   // Get pipeline and layout for deferred shader
@@ -1519,9 +1592,9 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
   ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_DEFERRED_LIGHTING);
 
   static const vertex_layout deferredLayout = []() {
-    vertex_layout layout{};
-    layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0); // Position only for volume meshes
-    return layout;
+	vertex_layout layout{};
+	layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0); // Position only for volume meshes
+	return layout;
   }();
 
   // Create pipeline key for deferred lighting
@@ -1555,10 +1628,10 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
   // Bind global (set=1) deferred descriptor set using the *deferred* pipeline layout.
   // Binding via the standard pipeline layout is not descriptor-set compatible because set 0 differs.
   cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                         ctx.layout,
-                         1, 1,
-                         &m_globalDescriptorSet,
-                         0, nullptr);
+						 ctx.layout,
+						 1, 1,
+						 &m_globalDescriptorSet,
+						 0, nullptr);
   
 
 
@@ -1571,16 +1644,16 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx& render,
 
   // Record each light
   for (const auto& light : lights) {
-    std::visit([&](const auto& l) {
-      using T = std::decay_t<decltype(l)>;
-      if constexpr (std::is_same_v<T, FullscreenLight>) {
-        l.record(ctx, fullscreenVB);
-      } else if constexpr (std::is_same_v<T, SphereLight>) {
-        l.record(ctx, sphereVB, sphereIB, m_sphereMesh.indexCount);
-      } else if constexpr (std::is_same_v<T, CylinderLight>) {
-        l.record(ctx, cylinderVB, cylinderIB, m_cylinderMesh.indexCount);
-      }
-    }, light);
+	std::visit([&](const auto& l) {
+	  using T = std::decay_t<decltype(l)>;
+	  if constexpr (std::is_same_v<T, FullscreenLight>) {
+		l.record(ctx, fullscreenVB);
+	  } else if constexpr (std::is_same_v<T, SphereLight>) {
+		l.record(ctx, sphereVB, sphereIB, m_sphereMesh.indexCount);
+	  } else if constexpr (std::is_same_v<T, CylinderLight>) {
+		l.record(ctx, cylinderVB, cylinderIB, m_cylinderMesh.indexCount);
+	  }
+	}, light);
   }
   // Note: render pass ends at explicit session boundaries (target changes/frame end).
 }

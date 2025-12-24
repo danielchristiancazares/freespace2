@@ -621,21 +621,23 @@ bool VulkanDevice::pickPhysicalDevice(PhysicalDeviceValues& deviceValues) {
 		dev.getProperties2(&props);
 		vals.properties = props.properties;
 
-		vk::PhysicalDeviceFeatures2 feats;
-		vals.features12 = vk::PhysicalDeviceVulkan12Features{};
-		vals.features13 = vk::PhysicalDeviceVulkan13Features{};
-		vals.features14 = vk::PhysicalDeviceVulkan14Features{};
-		vals.extDynamicState = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{};
-		vals.extDynamicState2 = vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT{};
-		vals.extDynamicState3 = vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{};
-		vals.pushDescriptorProps = vk::PhysicalDevicePushDescriptorPropertiesKHR{};
-		feats.pNext = &vals.features12;
-		vals.features12.pNext = &vals.features13;
-		vals.features13.pNext = &vals.features14;
-		vals.features14.pNext = &vals.extDynamicState;
-		vals.extDynamicState.pNext = &vals.extDynamicState2;
-		vals.extDynamicState2.pNext = &vals.extDynamicState3;
-		vals.extDynamicState3.pNext = &vals.pushDescriptorProps;
+			vk::PhysicalDeviceFeatures2 feats;
+			vals.features11 = vk::PhysicalDeviceVulkan11Features{};
+			vals.features12 = vk::PhysicalDeviceVulkan12Features{};
+			vals.features13 = vk::PhysicalDeviceVulkan13Features{};
+			vals.features14 = vk::PhysicalDeviceVulkan14Features{};
+			vals.extDynamicState = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{};
+			vals.extDynamicState2 = vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT{};
+			vals.extDynamicState3 = vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{};
+			vals.pushDescriptorProps = vk::PhysicalDevicePushDescriptorPropertiesKHR{};
+			feats.pNext = &vals.features11;
+			vals.features11.pNext = &vals.features12;
+			vals.features12.pNext = &vals.features13;
+			vals.features13.pNext = &vals.features14;
+			vals.features14.pNext = &vals.extDynamicState;
+			vals.extDynamicState.pNext = &vals.extDynamicState2;
+			vals.extDynamicState2.pNext = &vals.extDynamicState3;
+			vals.extDynamicState3.pNext = &vals.pushDescriptorProps;
 		dev.getFeatures2(&feats);
 		vals.features = feats.features;
 
@@ -685,27 +687,30 @@ bool VulkanDevice::createLogicalDevice(const PhysicalDeviceValues& deviceValues)
 		}
 	}
 
-	// Chain features for 1.2/1.3/1.4 and extension features
-	// Create fresh structures to avoid copying stale pNext pointers from the query phase
-	vk::PhysicalDeviceFeatures2 enabledFeatures;
-	enabledFeatures.features = deviceValues.features;
-	vk::PhysicalDeviceVulkan12Features enabled12 = deviceValues.features12;
-	vk::PhysicalDeviceVulkan13Features enabled13 = deviceValues.features13;
-	vk::PhysicalDeviceVulkan14Features enabled14 = deviceValues.features14;
-	// Explicitly enable the features we depend on (after capability checks).
-	enabled13.dynamicRendering = deviceValues.features13.dynamicRendering ? VK_TRUE : VK_FALSE;
-	enabled14.vertexAttributeInstanceRateDivisor = deviceValues.features14.vertexAttributeInstanceRateDivisor;
-	vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT enabledExtDyn = deviceValues.extDynamicState;
-	vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT enabledExtDyn2 = deviceValues.extDynamicState2;
-	vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT enabledExtDyn3 = deviceValues.extDynamicState3;
-	// Explicitly reset pNext to ensure clean chain (copied structures may have stale pointers)
-	enabled12.pNext = &enabled13;
-	enabled13.pNext = &enabled14;
-	enabled14.pNext = &enabledExtDyn;
-	enabledExtDyn.pNext = &enabledExtDyn2;
-	enabledExtDyn2.pNext = &enabledExtDyn3;
-	enabledExtDyn3.pNext = nullptr;
-	enabledFeatures.pNext = &enabled12;
+		// Chain features for 1.2/1.3/1.4 and extension features
+		// Create fresh structures to avoid copying stale pNext pointers from the query phase
+		vk::PhysicalDeviceFeatures2 enabledFeatures;
+		enabledFeatures.features = deviceValues.features;
+		vk::PhysicalDeviceVulkan11Features enabled11 = deviceValues.features11;
+		vk::PhysicalDeviceVulkan12Features enabled12 = deviceValues.features12;
+		vk::PhysicalDeviceVulkan13Features enabled13 = deviceValues.features13;
+		vk::PhysicalDeviceVulkan14Features enabled14 = deviceValues.features14;
+		enabled11.samplerYcbcrConversion = deviceValues.features11.samplerYcbcrConversion ? VK_TRUE : VK_FALSE;
+		// Explicitly enable the features we depend on (after capability checks).
+		enabled13.dynamicRendering = deviceValues.features13.dynamicRendering ? VK_TRUE : VK_FALSE;
+		enabled14.vertexAttributeInstanceRateDivisor = deviceValues.features14.vertexAttributeInstanceRateDivisor;
+		vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT enabledExtDyn = deviceValues.extDynamicState;
+		vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT enabledExtDyn2 = deviceValues.extDynamicState2;
+		vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT enabledExtDyn3 = deviceValues.extDynamicState3;
+		// Explicitly reset pNext to ensure clean chain (copied structures may have stale pointers)
+		enabled11.pNext = &enabled12;
+		enabled12.pNext = &enabled13;
+		enabled13.pNext = &enabled14;
+		enabled14.pNext = &enabledExtDyn;
+		enabledExtDyn.pNext = &enabledExtDyn2;
+		enabledExtDyn2.pNext = &enabledExtDyn3;
+		enabledExtDyn3.pNext = nullptr;
+		enabledFeatures.pNext = &enabled11;
 
 	vk::DeviceCreateInfo deviceCreate;
 	deviceCreate.pQueueCreateInfos = queueInfos.data();
@@ -729,12 +734,15 @@ bool VulkanDevice::createLogicalDevice(const PhysicalDeviceValues& deviceValues)
 	m_properties = deviceValues.properties;
 	m_memoryProperties = m_physicalDevice.getMemoryProperties();
 
-	// Keep sanitized copies of enabled Vulkan features for downstream validation.
-	m_features13 = enabled13;
-	m_features13.pNext = nullptr;
+		// Keep sanitized copies of enabled Vulkan features for downstream validation.
+		m_features11 = enabled11;
+		m_features11.pNext = nullptr;
 
-	m_features14 = enabled14;
-	m_features14.pNext = nullptr;
+		m_features13 = enabled13;
+		m_features13.pNext = nullptr;
+
+		m_features14 = enabled14;
+		m_features14.pNext = nullptr;
 
 	return true;
 }
@@ -763,11 +771,11 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues& deviceValues) {
 		const auto requested = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
 		createInfo.imageUsage = requested & supported;
 		Assertion((createInfo.imageUsage & vk::ImageUsageFlagBits::eColorAttachment) != vk::ImageUsageFlags{},
-		          "Surface does not support swapchain images as color attachments (supportedUsageFlags=0x%x)",
-		          static_cast<uint32_t>(supported));
+				  "Surface does not support swapchain images as color attachments (supportedUsageFlags=0x%x)",
+				  static_cast<uint32_t>(supported));
 		if ((createInfo.imageUsage & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
 			vkprintf("VulkanDevice: swapchain does not support TRANSFER_SRC usage; "
-			         "pre-deferred scene capture will be disabled.\n");
+					 "pre-deferred scene capture will be disabled.\n");
 		}
 	}
 
@@ -986,15 +994,20 @@ vk::Extent2D VulkanDevice::chooseSwapExtent(const PhysicalDeviceValues& values, 
 }
 
 VulkanDevice::AcquireResult VulkanDevice::acquireNextImage(vk::Semaphore imageAvailable) {
-	AcquireResult result;
-	uint32_t imageIndex = std::numeric_limits<uint32_t>::max();
+		AcquireResult result;
+		uint32_t imageIndex = std::numeric_limits<uint32_t>::max();
 
-	auto res = m_device->acquireNextImageKHR(
-		m_swapchain.get(), std::numeric_limits<uint64_t>::max(), imageAvailable, nullptr, &imageIndex);
+		vk::Result res = vk::Result::eSuccess;
+		try {
+			res = m_device->acquireNextImageKHR(
+				m_swapchain.get(), std::numeric_limits<uint64_t>::max(), imageAvailable, nullptr, &imageIndex);
+		} catch (const vk::SystemError& err) {
+			res = static_cast<vk::Result>(err.code().value());
+		}
 
-	if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR) {
-		result.needsRecreate = true;
-		result.success = (res == vk::Result::eSuboptimalKHR);
+		if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR) {
+			result.needsRecreate = true;
+			result.success = (res == vk::Result::eSuboptimalKHR);
 		result.imageIndex = imageIndex;
 		return result;
 	}
@@ -1010,7 +1023,7 @@ VulkanDevice::AcquireResult VulkanDevice::acquireNextImage(vk::Semaphore imageAv
 }
 
 VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, uint32_t imageIndex) {
-	PresentResult result;
+		PresentResult result;
 
 	vk::PresentInfoKHR presentInfo;
 	presentInfo.waitSemaphoreCount = 1;
@@ -1020,13 +1033,18 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 	presentInfo.pSwapchains = &swapchain;
 	presentInfo.pImageIndices = &imageIndex;
 
-	auto presentResult = m_presentQueue.presentKHR(presentInfo);
+		vk::Result presentResult = vk::Result::eSuccess;
+		try {
+			presentResult = m_presentQueue.presentKHR(presentInfo);
+		} catch (const vk::SystemError& err) {
+			presentResult = static_cast<vk::Result>(err.code().value());
+		}
 
-	if (presentResult == vk::Result::eErrorOutOfDateKHR || presentResult == vk::Result::eSuboptimalKHR) {
-		result.needsRecreate = true;
-		result.success = (presentResult == vk::Result::eSuboptimalKHR);
-		return result;
-	}
+		if (presentResult == vk::Result::eErrorOutOfDateKHR || presentResult == vk::Result::eSuboptimalKHR) {
+			result.needsRecreate = true;
+			result.success = (presentResult == vk::Result::eSuboptimalKHR);
+			return result;
+		}
 
 	if (presentResult != vk::Result::eSuccess) {
 		result.success = false;
@@ -1085,11 +1103,11 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
 		const auto requested = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
 		createInfo.imageUsage = requested & supported;
 		Assertion((createInfo.imageUsage & vk::ImageUsageFlagBits::eColorAttachment) != vk::ImageUsageFlags{},
-		          "Surface does not support swapchain images as color attachments (supportedUsageFlags=0x%x)",
-		          static_cast<uint32_t>(supported));
+				  "Surface does not support swapchain images as color attachments (supportedUsageFlags=0x%x)",
+				  static_cast<uint32_t>(supported));
 		if ((createInfo.imageUsage & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
 			vkprintf("VulkanDevice: swapchain does not support TRANSFER_SRC usage; "
-			         "pre-deferred scene capture will be disabled.\n");
+					 "pre-deferred scene capture will be disabled.\n");
 		}
 	}
 

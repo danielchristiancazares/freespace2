@@ -16,6 +16,7 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanGraphics.*` | Engine glue: `gr_vulkan_*` functions, `g_currentFrame` injection |
 | `VulkanBufferManager.*` | Buffer creation, updates, deferred deletion |
 | `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache, bitmap render targets |
+| `VulkanMovieManager.*` | YCbCr movie textures: feature checks, pipeline setup, upload/draw, deferred release |
 | `VulkanTextureBindings.h` | Draw-path texture API (safe binding lookup, no GPU recording) |
 | `VulkanShaderManager.*` | Shader module loading/caching by type + variant |
 | `VulkanShaderReflection.*` | SPIR-V reflection helpers for pipeline layout/validation |
@@ -135,6 +136,17 @@ Split responsibilities:
 - **Bindings:** `getBindlessSlotIndex` returns a valid slot (fallback if non-resident).
 - **Render Targets:** `createRenderTarget` / `transitionRenderTargetToAttachment` manage GPU-backed bitmaps.
 
+### `VulkanMovieManager` (YCbCr Movie Path)
+
+Owns the Vulkan-native movie path based on `VkSamplerYcbcrConversion`:
+- **Feature/format checks:** gated on `samplerYcbcrConversion` and multi-planar format support, including
+  `combinedImageSamplerDescriptorCount` for pool sizing.
+- **Pipelines per config:** immutable sampler + descriptor set layout/pipeline per colorspace/range combination.
+- **Upload:** uses the per-frame staging ring and records `vkCmdCopyBufferToImage` on the active command buffer.
+  This upload can occur **mid-frame** (after `beginFrame()`), so `VulkanRenderer::uploadMovieTexture()` suspends
+  dynamic rendering before issuing transfer commands.
+- **Lifetime:** serial-gated deferred release, matching other Vulkan managers.
+
 ### `VulkanFrame` (Per-Frame Resources)
 
 Packages everything for one frame in the ring:
@@ -191,6 +203,7 @@ gr_vulkan_setup_frame()
 - **Descriptor writes happen at frame start.** Writing descriptors mid-recording fights the design.
 - **Render pass is lazy and session-owned.** `setup_frame()` doesn't begin rendering; first draw/clear does. The render pass remains active until a frame/target boundary ends it.
 - **Target switches end the active pass automatically.** Call session boundary methods like `requestSwapchainTarget()` directly; they will end any active pass first.
+- **Movie uploads can be mid-recording.** The movie path records transfer commands after `beginFrame()`, so always suspend dynamic rendering before uploading.
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
 - **Pipeline layout compatibility matters.** “Deferred” pipelines use a different set-0 layout than “Standard”; bind the global set using the matching pipeline layout when mixing pipeline families.

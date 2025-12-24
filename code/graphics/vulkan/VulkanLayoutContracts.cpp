@@ -58,6 +58,7 @@ constexpr std::array<ShaderLayoutSpec, NUM_SHADER_TYPES> buildSpecs()
 		makeSpec(SDR_TYPE_POST_PROCESS_SMAA_NEIGHBORHOOD_BLENDING, "SDR_TYPE_POST_PROCESS_SMAA_NEIGHBORHOOD_BLENDING", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_ENVMAP_SPHERE_WARP, "SDR_TYPE_ENVMAP_SPHERE_WARP", PL::Standard, VI::VertexAttributes),
 		makeSpec(SDR_TYPE_IRRADIANCE_MAP_GEN, "SDR_TYPE_IRRADIANCE_MAP_GEN", PL::Standard, VI::VertexAttributes),
+		makeSpec(SDR_TYPE_FLAT_COLOR, "SDR_TYPE_FLAT_COLOR", PL::Standard, VI::VertexAttributes),
 	};
 }
 
@@ -89,6 +90,7 @@ PipelineLayoutKind pipelineLayoutForShader(shader_type type)
 
 } // namespace vulkan
 } // namespace graphics
+
 
 
 
