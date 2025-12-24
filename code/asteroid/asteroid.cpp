@@ -400,12 +400,12 @@ object *asteroid_create(asteroid_field *asfieldp, int asteroid_type, int asteroi
 	}
 
 	vm_angles_2_matrix(&orient, &angs);
-    flagset<Object::Object_Flags> asteroid_default_flagset;
-    asteroid_default_flagset += Object::Object_Flags::Renders;
-    asteroid_default_flagset += Object::Object_Flags::Physics;
-    asteroid_default_flagset += Object::Object_Flags::Collides;
-    
-    objnum = obj_create(OBJ_ASTEROID, -1, n, &orient, &pos, radius, asteroid_default_flagset, false);
+	flagset<Object::Object_Flags> asteroid_default_flagset;
+	asteroid_default_flagset += Object::Object_Flags::Renders;
+	asteroid_default_flagset += Object::Object_Flags::Physics;
+	asteroid_default_flagset += Object::Object_Flags::Collides;
+	
+	objnum = obj_create(OBJ_ASTEROID, -1, n, &orient, &pos, radius, asteroid_default_flagset, false);
 	
 	if ( (objnum == -1) || (objnum >= MAX_OBJECTS) ) {
 		mprintf(("Couldn't create asteroid -- out of object slots\n"));
@@ -569,21 +569,15 @@ void asteroid_load(int asteroid_info_index, int asteroid_subtype)
 	{
 		polymodel *pm = model_get(asip->subtypes[asteroid_subtype].model_number);
 		
-		if ( asip->num_detail_levels != pm->n_detail_levels )
-		{
-			if ( !Is_standalone )
-			{
-				// just log to file for standalone servers
-				Warning(LOCATION, "For asteroid '%s', detail level mismatch (POF has %d, table has %d)", asip->name, pm->n_detail_levels, asip->num_detail_levels );
+		// Stuff detail level distances. POF's LOD count is authoritative.
+		// Use table distances when available, otherwise compute from model radius.
+		for ( i=0; i<pm->n_detail_levels; i++ ) {
+			if (i < asip->num_detail_levels) {
+				pm->detail_depth[i] = i2fl(asip->detail_distance[i]);
+			} else {
+				pm->detail_depth[i] = (pm->rad * 20.0f + 20.0f) * i;
 			}
-			else
-			{
-				nprintf(("Warning",  "For asteroid '%s', detail level mismatch (POF has %d, table has %d)\n", asip->name, pm->n_detail_levels, asip->num_detail_levels ));
-			}
-		}	
-		// Stuff detail level distances.
-		for ( i=0; i<pm->n_detail_levels; i++ )
-			pm->detail_depth[i] = (i < asip->num_detail_levels) ? i2fl(asip->detail_distance[i]) : 0.0f;
+		}
 	}
 }
 

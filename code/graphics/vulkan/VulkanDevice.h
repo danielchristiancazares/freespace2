@@ -20,15 +20,16 @@ struct QueueIndex {
 	uint32_t index = 0;
 };
 
-struct PhysicalDeviceValues {
-	vk::PhysicalDevice device;
-	vk::PhysicalDeviceProperties properties;
-	vk::PhysicalDeviceFeatures features;
-	vk::PhysicalDeviceVulkan12Features features12;
-	vk::PhysicalDeviceVulkan13Features features13;
-	vk::PhysicalDeviceVulkan14Features features14;
-	vk::PhysicalDevicePushDescriptorPropertiesKHR pushDescriptorProps{};
-	vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT extDynamicState{};
+	struct PhysicalDeviceValues {
+		vk::PhysicalDevice device;
+		vk::PhysicalDeviceProperties properties;
+		vk::PhysicalDeviceFeatures features;
+		vk::PhysicalDeviceVulkan11Features features11;
+		vk::PhysicalDeviceVulkan12Features features12;
+		vk::PhysicalDeviceVulkan13Features features13;
+		vk::PhysicalDeviceVulkan14Features features14;
+		vk::PhysicalDevicePushDescriptorPropertiesKHR pushDescriptorProps{};
+		vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT extDynamicState{};
 	vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT extDynamicState2{};
 	vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT extDynamicState3{};
 
@@ -100,16 +101,17 @@ class VulkanDevice {
 	uint32_t swapchainImageCount() const;
 	vk::ImageUsageFlags swapchainUsage() const { return m_swapchainUsage; }
 
-	//--------------------------------------------------------------------------
-	// Device properties and capabilities
-	//--------------------------------------------------------------------------
-	const vk::PhysicalDeviceProperties& properties() const { return m_properties; }
-	const vk::PhysicalDeviceMemoryProperties& memoryProperties() const { return m_memoryProperties; }
-	const vk::PhysicalDeviceVulkan13Features& features13() const { return m_features13; }
-	const vk::PhysicalDeviceVulkan14Features& features14() const { return m_features14; }
-	const ExtendedDynamicState3Caps& extDyn3Caps() const { return m_extDyn3Caps; }
-	bool supportsExtendedDynamicState() const { return m_supportsExtDyn; }
-	bool supportsExtendedDynamicState2() const { return m_supportsExtDyn2; }
+		//--------------------------------------------------------------------------
+		// Device properties and capabilities
+		//--------------------------------------------------------------------------
+		const vk::PhysicalDeviceProperties& properties() const { return m_properties; }
+		const vk::PhysicalDeviceMemoryProperties& memoryProperties() const { return m_memoryProperties; }
+		const vk::PhysicalDeviceVulkan11Features& features11() const { return m_features11; }
+		const vk::PhysicalDeviceVulkan13Features& features13() const { return m_features13; }
+		const vk::PhysicalDeviceVulkan14Features& features14() const { return m_features14; }
+		const ExtendedDynamicState3Caps& extDyn3Caps() const { return m_extDyn3Caps; }
+		bool supportsExtendedDynamicState() const { return m_supportsExtDyn; }
+		bool supportsExtendedDynamicState2() const { return m_supportsExtDyn2; }
 	bool supportsExtendedDynamicState3() const { return m_supportsExtDyn3; }
 	bool supportsVertexAttributeDivisor() const { return m_supportsVertexAttributeDivisor; }
 
@@ -155,13 +157,14 @@ class VulkanDevice {
 	uint32_t m_graphicsQueueIndex = 0;
 	uint32_t m_presentQueueIndex = 0;
 
-	// Device properties
-	vk::PhysicalDeviceProperties m_properties;
-	vk::PhysicalDeviceMemoryProperties m_memoryProperties;
-	vk::PhysicalDeviceVulkan13Features m_features13;
-	vk::PhysicalDeviceVulkan14Features m_features14;
-	ExtendedDynamicState3Caps m_extDyn3Caps;
-	bool m_supportsExtDyn = true;
+		// Device properties
+		vk::PhysicalDeviceProperties m_properties;
+		vk::PhysicalDeviceMemoryProperties m_memoryProperties;
+		vk::PhysicalDeviceVulkan11Features m_features11;
+		vk::PhysicalDeviceVulkan13Features m_features13;
+		vk::PhysicalDeviceVulkan14Features m_features14;
+		ExtendedDynamicState3Caps m_extDyn3Caps;
+		bool m_supportsExtDyn = true;
 	bool m_supportsExtDyn2 = false;
 	bool m_supportsExtDyn3 = false;
 	bool m_supportsVertexAttributeDivisor = false;

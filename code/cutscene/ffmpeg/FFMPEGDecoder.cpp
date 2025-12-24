@@ -37,12 +37,12 @@ class AVPacketScope
 };
 
 const char* CHECKED_EXTENSIONS[] = {"webm", "mp4", "ogg",
-                                    "png", // This is designed to be used with APNG animations
-                                    "mve"};
+								    "png", // This is designed to be used with APNG animations
+								    "mve"};
 
 const char* CHECKED_SUBT_EXTENSIONS[] = {"srt"};
 
-double getFrameRate(AVStream* stream, AVCodecContext* codecCtx) {
+	double getFrameRate(AVStream* stream, AVCodecContext* codecCtx) {
 #if LIBAVCODEC_VERSION_INT > AV_VERSION_INT(58, 3, 102)
 	auto fps = av_q2d(stream->r_frame_rate);
 #else
@@ -59,33 +59,53 @@ double getFrameRate(AVStream* stream, AVCodecContext* codecCtx) {
 		fps = 1.0 / av_q2d(codecCtx->time_base);
 	}
 
-	return fps;
-}
+		return fps;
+	}
 
-CodecContextParameters getCodecParameters(AVStream* stream) {
-	CodecContextParameters paras;
+	MovieColorSpace mapMovieColorSpace(const CodecContextParameters& p)
+	{
+		switch (p.color_space) {
+		case AVCOL_SPC_BT709:
+			return MovieColorSpace::BT709;
+		default:
+			// Best-effort heuristic: HD content is typically BT.709.
+			return (p.height >= 720) ? MovieColorSpace::BT709 : MovieColorSpace::BT601;
+		}
+	}
+
+	MovieColorRange mapMovieColorRange(const CodecContextParameters& p)
+	{
+		return (p.color_range == AVCOL_RANGE_JPEG) ? MovieColorRange::Full : MovieColorRange::Narrow;
+	}
+
+	CodecContextParameters getCodecParameters(AVStream* stream) {
+		CodecContextParameters paras;
 #if LIBAVCODEC_VERSION_INT > AV_VERSION_INT(57, 24, 255)
-	paras.width        = stream->codecpar->width;
-	paras.height       = stream->codecpar->height;
-	paras.pixel_format = (AVPixelFormat)stream->codecpar->format;
+		paras.width        = stream->codecpar->width;
+		paras.height       = stream->codecpar->height;
+		paras.pixel_format = (AVPixelFormat)stream->codecpar->format;
+		paras.color_space  = stream->codecpar->color_space;
+		paras.color_range  = stream->codecpar->color_range;
 
-	#if LIBAVCODEC_VERSION_INT > AV_VERSION_INT(59, 36, 255)
-		paras.channel_layout = stream->codecpar->ch_layout.u.mask;
-	#else
-		paras.channel_layout = stream->codecpar->channel_layout;
+		#if LIBAVCODEC_VERSION_INT > AV_VERSION_INT(59, 36, 255)
+			paras.channel_layout = stream->codecpar->ch_layout.u.mask;
+		#else
+			paras.channel_layout = stream->codecpar->channel_layout;
 	#endif
 	paras.sample_rate    = stream->codecpar->sample_rate;
 	paras.audio_format   = (AVSampleFormat)stream->codecpar->format;
 
 	paras.codec_id = stream->codecpar->codec_id;
 #else
-	paras.width        = stream->codec->width;
-	paras.height       = stream->codec->height;
-	paras.pixel_format = stream->codec->pix_fmt;
+		paras.width        = stream->codec->width;
+		paras.height       = stream->codec->height;
+		paras.pixel_format = stream->codec->pix_fmt;
+		paras.color_space  = stream->codec->colorspace;
+		paras.color_range  = stream->codec->color_range;
 
-	paras.channel_layout = stream->codec->channel_layout;
-	paras.sample_rate    = stream->codec->sample_rate;
-	paras.audio_format   = stream->codec->sample_fmt;
+		paras.channel_layout = stream->codec->channel_layout;
+		paras.sample_rate    = stream->codec->sample_rate;
+		paras.audio_format   = stream->codec->sample_fmt;
 
 	paras.codec_id = stream->codec->codec_id;
 #endif
@@ -221,8 +241,8 @@ std::unique_ptr<InputStream> openStream(const SCP_string& name) {
 }
 
 std::unique_ptr<DecoderStatus> initializeStatus(std::unique_ptr<InputStream>& stream,
-                                                std::unique_ptr<InputStream>& subt,
-                                                const PlaybackProperties& properties)
+								                std::unique_ptr<InputStream>& subt,
+								                const PlaybackProperties& properties)
 {
 	if (subt && properties.looping) {
 		mprintf(("FFmpeg: External subtitles and looping movies are not supported!\n"));
@@ -417,8 +437,8 @@ std::unique_ptr<DecoderStatus> initializeStatus(std::unique_ptr<InputStream>& st
 		}
 
 		mprintf(("FFmpeg: Using subtitle codec %s (%s).\n",
-		         status->subtitleCodec->long_name ? status->subtitleCodec->long_name : "<Unknown>",
-		         status->subtitleCodec->name ? status->subtitleCodec->name : "<Unknown>"));
+				 status->subtitleCodec->long_name ? status->subtitleCodec->long_name : "<Unknown>",
+				 status->subtitleCodec->name ? status->subtitleCodec->name : "<Unknown>"));
 	}
 
 	return status;
@@ -510,6 +530,8 @@ MovieProperties FFMPEGDecoder::getProperties() const
 	props.duration = static_cast<float>(m_status->videoStream->duration * av_q2d(m_status->videoStream->time_base));
 
 	props.pixelFormat = getPixelFormat(getConversionFormat(m_status->videoCodecPars.pixel_format));
+	props.colorSpace = mapMovieColorSpace(m_status->videoCodecPars);
+	props.colorRange = mapMovieColorRange(m_status->videoCodecPars);
 
 	return props;
 }
@@ -532,7 +554,7 @@ void FFMPEGDecoder::startDecoding() {
 		// Start a new thread for the subtitles since otherwise we would need to make sure that neither of the input
 		// streames starves while the other waits for more space in the queues
 		subtitle_thread.reset(
-		    new std::thread([this, &subtitleDecoder]() { runSubtitleDecoder(subtitleDecoder.get()); }));
+			new std::thread([this, &subtitleDecoder]() { runSubtitleDecoder(subtitleDecoder.get()); }));
 	}
 
 	auto ctx = m_input->m_ctx->ctx();

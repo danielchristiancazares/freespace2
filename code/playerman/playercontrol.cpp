@@ -108,7 +108,7 @@ static SCP_string degrees_display(float val)
 {
 	auto degrees = fl_degrees(val);
 	SCP_string out;
-	sprintf(out, u8"%.1f\u00B0", degrees);
+	sprintf(out, "%.1f\u00B0", degrees);
 	return out;
 }
 
@@ -1711,7 +1711,7 @@ bool player_inspect_cargo(float frametime, char *outstr)
 				? XSTR("Nothing", 1674)
 				: Cargo_names[cargo_sp->cargo1 & CARGO_INDEX_MASK];
 			//Why was this assert here? I'm not sure it makes much sense because any ship can be scanned and have cargo revealed...
-            //Assert(cargo_sip->flags[Ship::Info_Flags::Cargo] || cargo_sip->flags[Ship::Info_Flags::Transport]);
+			//Assert(cargo_sip->flags[Ship::Info_Flags::Cargo] || cargo_sip->flags[Ship::Info_Flags::Transport]);
 
 			if (cargo_sp->cargo_title[0] != '\0') {
 				if (cargo_sp->cargo_title[0] == '#') {
@@ -1896,7 +1896,7 @@ bool player_inspect_cap_subsys_cargo(float frametime, char *outstr)
 
 	// Goober5000
 	ship_info* player_sip = &Ship_info[Player_ship->ship_info_index];
-    if (cargo_sip->is_huge_ship()) {
+	if (cargo_sip->is_huge_ship()) {
 		scan_dist = MAX(player_sip->scan_range_capital, (subsys_rad + player_sip->scan_range_capital - CARGO_RADIUS_REAL_DELTA));
 	} else {
 		scan_dist = MAX(player_sip->scan_range_normal, (subsys_rad + player_sip->scan_range_normal - CARGO_RADIUS_REAL_DELTA));
