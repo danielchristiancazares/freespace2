@@ -59,14 +59,6 @@ uint32_t bytesPerPixel(const bitmap& bmp)
   }
 }
 
-inline bool isBuiltinTextureHandle(int handle)
-{
-  return handle == VulkanTextureManager::kFallbackTextureHandle ||
-	handle == VulkanTextureManager::kDefaultTextureHandle ||
-	handle == VulkanTextureManager::kDefaultNormalTextureHandle ||
-	handle == VulkanTextureManager::kDefaultSpecTextureHandle;
-}
-
 inline bool isDynamicBindlessSlot(uint32_t slot)
 {
   return slot >= kBindlessFirstDynamicTextureSlot && slot < kMaxBindlessTextures;
@@ -138,12 +130,6 @@ VulkanTextureManager::VulkanTextureManager(vk::Device device,
   createDefaultNormalTexture();
   createDefaultSpecTexture();
 
-  // Fixed bindless slots for built-in textures.
-  m_bindlessSlots.insert_or_assign(kFallbackTextureHandle, kBindlessTextureSlotFallback);
-  m_bindlessSlots.insert_or_assign(kDefaultTextureHandle, kBindlessTextureSlotDefaultBase);
-  m_bindlessSlots.insert_or_assign(kDefaultNormalTextureHandle, kBindlessTextureSlotDefaultNormal);
-  m_bindlessSlots.insert_or_assign(kDefaultSpecTextureHandle, kBindlessTextureSlotDefaultSpec);
-
   m_freeBindlessSlots.reserve(kMaxBindlessTextures - kBindlessFirstDynamicTextureSlot);
   for (uint32_t slot = kMaxBindlessTextures; slot-- > kBindlessFirstDynamicTextureSlot;) {
 	m_freeBindlessSlots.push_back(slot);
@@ -185,7 +171,7 @@ void VulkanTextureManager::createDefaultSampler()
   m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
 }
 
-void VulkanTextureManager::createSolidTexture(int textureHandle, const uint8_t rgba[4])
+VulkanTexture VulkanTextureManager::createSolidTexture(const uint8_t rgba[4])
 {
   // Create a 1x1 RGBA texture for use as a stable descriptor target.
   constexpr uint32_t width = 1;
@@ -312,23 +298,21 @@ void VulkanTextureManager::createSolidTexture(int textureHandle, const uint8_t r
   viewInfo.subresourceRange.layerCount = 1;
   auto view = m_device.createImageViewUnique(viewInfo);
 
-  // Store as resident texture
-  ResidentTexture record{};
-  record.gpu.image = std::move(image);
-  record.gpu.memory = std::move(imageMem);
-  record.gpu.imageView = std::move(view);
-  record.gpu.sampler = m_defaultSampler.get();
-  record.gpu.width = width;
-  record.gpu.height = height;
-  record.gpu.layers = 1;
-  record.gpu.mipLevels = 1;
-  record.gpu.format = format;
-  record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  m_residentTextures[textureHandle] = std::move(record);
-  onTextureResident(textureHandle);
+  VulkanTexture tex{};
+  tex.image = std::move(image);
+  tex.memory = std::move(imageMem);
+  tex.imageView = std::move(view);
+  tex.sampler = m_defaultSampler.get();
+  tex.width = width;
+  tex.height = height;
+  tex.layers = 1;
+  tex.mipLevels = 1;
+  tex.format = format;
+  tex.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  return tex;
 }
 
-vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key)
+vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key) const
 {
   const size_t hash = (static_cast<size_t>(key.filter) << 4) ^ static_cast<size_t>(key.address);
   auto it = m_samplerCache.find(hash);
@@ -598,35 +582,68 @@ void VulkanTextureManager::createFallbackTexture()
   // Create a 1x1 black texture for use when retired textures are sampled.
   // This prevents accessing destroyed VkImage/VkImageView resources.
   const uint8_t black[4] = {0, 0, 0, 255}; // RGBA black
-  createSolidTexture(kFallbackTextureHandle, black);
-
-  // Set the handle so getFallbackTextureHandle() returns valid value
-  m_fallbackTextureHandle = kFallbackTextureHandle;
+  m_builtins.fallback = createSolidTexture(black);
 }
 
 void VulkanTextureManager::createDefaultTexture()
 {
   // Create a 1x1 white texture for untextured draws that still require a sampler binding.
   const uint8_t white[4] = {255, 255, 255, 255}; // RGBA white
-  createSolidTexture(kDefaultTextureHandle, white);
-
-  m_defaultTextureHandle = kDefaultTextureHandle;
+  m_builtins.defaultBase = createSolidTexture(white);
 }
 
 void VulkanTextureManager::createDefaultNormalTexture()
 {
   // Flat tangent-space normal: (0.5, 0.5, 1.0) in [0,1] -> (0,0,1) after remap.
   const uint8_t flatNormal[4] = {128, 128, 255, 255};
-  createSolidTexture(kDefaultNormalTextureHandle, flatNormal);
-  m_defaultNormalTextureHandle = kDefaultNormalTextureHandle;
+  m_builtins.defaultNormal = createSolidTexture(flatNormal);
 }
 
 void VulkanTextureManager::createDefaultSpecTexture()
 {
   // Default dielectric F0 (~0.04). Alpha is currently unused by the deferred lighting stage.
   const uint8_t dielectricF0[4] = {10, 10, 10, 0};
-  createSolidTexture(kDefaultSpecTextureHandle, dielectricF0);
-  m_defaultSpecTextureHandle = kDefaultSpecTextureHandle;
+  m_builtins.defaultSpec = createSolidTexture(dielectricF0);
+}
+
+vk::DescriptorImageInfo VulkanTextureManager::fallbackDescriptor(const SamplerKey& samplerKey) const
+{
+  vk::DescriptorImageInfo info{};
+  info.imageView = m_builtins.fallback.imageView.get();
+  Assertion(info.imageView, "Fallback texture must be initialized");
+  info.sampler = getOrCreateSampler(samplerKey);
+  info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  return info;
+}
+
+vk::DescriptorImageInfo VulkanTextureManager::defaultBaseDescriptor(const SamplerKey& samplerKey) const
+{
+  vk::DescriptorImageInfo info{};
+  info.imageView = m_builtins.defaultBase.imageView.get();
+  Assertion(info.imageView, "Default base texture must be initialized");
+  info.sampler = getOrCreateSampler(samplerKey);
+  info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  return info;
+}
+
+vk::DescriptorImageInfo VulkanTextureManager::defaultNormalDescriptor(const SamplerKey& samplerKey) const
+{
+  vk::DescriptorImageInfo info{};
+  info.imageView = m_builtins.defaultNormal.imageView.get();
+  Assertion(info.imageView, "Default normal texture must be initialized");
+  info.sampler = getOrCreateSampler(samplerKey);
+  info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  return info;
+}
+
+vk::DescriptorImageInfo VulkanTextureManager::defaultSpecDescriptor(const SamplerKey& samplerKey) const
+{
+  vk::DescriptorImageInfo info{};
+  info.imageView = m_builtins.defaultSpec.imageView.get();
+  Assertion(info.imageView, "Default spec texture must be initialized");
+  info.sampler = getOrCreateSampler(samplerKey);
+  info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  return info;
 }
 
 void VulkanTextureManager::flushPendingUploads(const UploadCtx& ctx)
@@ -915,10 +932,6 @@ bool VulkanTextureManager::updateTexture(const UploadCtx& ctx, int bitmapHandle,
   int numFrames = 1;
   const int baseFrame = bm_get_base_frame(bitmapHandle, &numFrames);
   if (baseFrame < 0) {
-	return false;
-  }
-  // Never update the synthetic default/fallback textures.
-  if (isBuiltinTextureHandle(baseFrame)) {
 	return false;
   }
 
@@ -1217,10 +1230,6 @@ void VulkanTextureManager::processPendingRetirements()
   }
 
   for (const int handle : m_pendingRetirements) {
-	if (isBuiltinTextureHandle(handle)) {
-	  continue;
-	}
-
 	// Any pending "slot request" becomes irrelevant once we're deleting the texture.
 	m_pendingBindlessSlots.erase(handle);
 
@@ -1264,10 +1273,6 @@ void VulkanTextureManager::retryPendingBindlessSlots()
 
 bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowResidentEvict)
 {
-  if (textureHandle == kFallbackTextureHandle) {
-	return true;
-  }
-
   if (m_bindlessSlots.find(textureHandle) != m_bindlessSlots.end()) {
 	return true;
   }
@@ -1275,9 +1280,6 @@ bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowRe
   auto reclaimNonResidentSlot = [&]() -> bool {
 	for (auto it = m_bindlessSlots.begin(); it != m_bindlessSlots.end(); ++it) {
 	  const int handle = it->first;
-	  if (isBuiltinTextureHandle(handle)) {
-		continue;
-	  }
 	  if (m_residentTextures.find(handle) != m_residentTextures.end()) {
 		continue;
 	  }
@@ -1309,9 +1311,6 @@ bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowRe
 
 	for (const auto& [handle, slot] : m_bindlessSlots) {
 	  (void)slot;
-	  if (isBuiltinTextureHandle(handle)) {
-		continue;
-	  }
 	  // Render targets are long-lived GPU resources (cockpit displays, monitors, envmaps).
 	  // Treat their bindless slot mapping as pinned: evicting them causes visible flicker.
 	  if (m_renderTargets.find(handle) != m_renderTargets.end()) {
@@ -1401,10 +1400,6 @@ void VulkanTextureManager::deleteTexture(int bitmapHandle)
   if (base < 0) {
 	return;
   }
-  // Never delete the synthetic default/fallback textures.
-  if (isBuiltinTextureHandle(base)) {
-	return;
-  }
 
   // Remove from any queued/unavailable state immediately.
   m_unavailableTextures.erase(base);
@@ -1420,9 +1415,6 @@ void VulkanTextureManager::releaseBitmap(int bitmapHandle)
 {
   int base = bm_get_base_frame(bitmapHandle, nullptr);
   if (base < 0) {
-	return;
-  }
-  if (isBuiltinTextureHandle(base)) {
 	return;
   }
 
@@ -1462,6 +1454,7 @@ void VulkanTextureManager::releaseBitmap(int bitmapHandle)
 void VulkanTextureManager::cleanup()
 {
   m_deferredReleases.clear();
+  m_builtins.reset();
   m_residentTextures.clear();
   m_unavailableTextures.clear();
   m_renderTargets.clear();
@@ -1530,11 +1523,6 @@ void VulkanTextureManager::markTextureUsedBaseFrame(int baseFrame, uint32_t curr
 
 void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial)
 {
-  // Never retire the synthetic default/fallback textures.
-  if (isBuiltinTextureHandle(textureHandle)) {
-	return;
-  }
-
   m_pendingBindlessSlots.erase(textureHandle);
 
   auto slotIt = m_bindlessSlots.find(textureHandle);

@@ -6,34 +6,44 @@
 
 using graphics::vulkan::VulkanTextureManager;
 
-// Contract tests: verify that the Vulkan backend provides stable synthetic handles for builtin textures.
-// These tests are compile-time only and do not require Vulkan runtime objects.
+// Contract tests: verify the Vulkan backend provides stable bindless reserved slots and
+// a builtin-descriptor API (no sentinel "fake handles" for defaults).
 
-TEST(VulkanFallbackTextureContract, BuiltinHandlesAreNegativeAndDistinct)
+TEST(VulkanFallbackTextureContract, BindlessReservedSlotsAreDistinctAndPinned)
 {
-	constexpr int fallback = VulkanTextureManager::kFallbackTextureHandle;
-	constexpr int white = VulkanTextureManager::kDefaultTextureHandle;
-	constexpr int normal = VulkanTextureManager::kDefaultNormalTextureHandle;
-	constexpr int spec = VulkanTextureManager::kDefaultSpecTextureHandle;
+	using namespace graphics::vulkan;
 
-	EXPECT_LT(fallback, 0);
-	EXPECT_LT(white, 0);
-	EXPECT_LT(normal, 0);
-	EXPECT_LT(spec, 0);
+	constexpr uint32_t fallback = kBindlessTextureSlotFallback;
+	constexpr uint32_t base = kBindlessTextureSlotDefaultBase;
+	constexpr uint32_t normal = kBindlessTextureSlotDefaultNormal;
+	constexpr uint32_t spec = kBindlessTextureSlotDefaultSpec;
 
-	EXPECT_NE(fallback, white);
+	EXPECT_LT(fallback, kBindlessFirstDynamicTextureSlot);
+	EXPECT_LT(base, kBindlessFirstDynamicTextureSlot);
+	EXPECT_LT(normal, kBindlessFirstDynamicTextureSlot);
+	EXPECT_LT(spec, kBindlessFirstDynamicTextureSlot);
+
+	EXPECT_NE(fallback, base);
 	EXPECT_NE(fallback, normal);
 	EXPECT_NE(fallback, spec);
-	EXPECT_NE(white, normal);
-	EXPECT_NE(white, spec);
+	EXPECT_NE(base, normal);
+	EXPECT_NE(base, spec);
 	EXPECT_NE(normal, spec);
 }
 
-TEST(VulkanFallbackTextureContract, GetFallbackTextureHandleSignature)
+TEST(VulkanFallbackTextureContract, BuiltinDescriptorApiSignatures)
 {
-	using ReturnType = decltype(std::declval<VulkanTextureManager>().getFallbackTextureHandle());
-	constexpr bool correct_return = std::is_same_v<ReturnType, int>;
-	EXPECT_TRUE(correct_return) << "getFallbackTextureHandle() must return int";
+	using SamplerKey = VulkanTextureManager::SamplerKey;
+
+	using FallbackReturn = decltype(std::declval<VulkanTextureManager>().fallbackDescriptor(std::declval<SamplerKey>()));
+	using DefaultBaseReturn = decltype(std::declval<VulkanTextureManager>().defaultBaseDescriptor(std::declval<SamplerKey>()));
+	using DefaultNormalReturn = decltype(std::declval<VulkanTextureManager>().defaultNormalDescriptor(std::declval<SamplerKey>()));
+	using DefaultSpecReturn = decltype(std::declval<VulkanTextureManager>().defaultSpecDescriptor(std::declval<SamplerKey>()));
+
+	EXPECT_TRUE((std::is_same_v<FallbackReturn, vk::DescriptorImageInfo>));
+	EXPECT_TRUE((std::is_same_v<DefaultBaseReturn, vk::DescriptorImageInfo>));
+	EXPECT_TRUE((std::is_same_v<DefaultNormalReturn, vk::DescriptorImageInfo>));
+	EXPECT_TRUE((std::is_same_v<DefaultSpecReturn, vk::DescriptorImageInfo>));
 }
 
 TEST(VulkanTextureHelpers, CalculateCompressedSizeBC1)
