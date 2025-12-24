@@ -978,13 +978,7 @@ bool VulkanRenderer::setBitmapRenderTarget(const FrameCtx& ctx, int handle, int 
 vk::DescriptorImageInfo VulkanRenderer::getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey)
 {
   Assertion(m_textureManager != nullptr, "getDefaultTextureDescriptor called before texture manager initialization");
-
-  const int handle = m_textureManager->getDefaultTextureHandle();
-  Assertion(handle != -1, "Default texture handle must be initialized");
-
-  auto info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
-  Assertion(info.imageView, "Default texture must have a valid imageView");
-  return info;
+  return m_textureManager->defaultBaseDescriptor(samplerKey);
 }
 
 uint32_t VulkanRenderer::getBindlessTextureIndex(int bitmapHandle)
@@ -1125,13 +1119,16 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex,
   samplerKey.filter = vk::Filter::eLinear;
 
   Assertion(m_textureManager != nullptr, "updateModelDescriptors called before texture manager initialization");
-  const int fallbackHandle = m_textureManager->getFallbackTextureHandle();
-  Assertion(fallbackHandle != -1, "Fallback texture handle must be initialized");
-  const vk::DescriptorImageInfo fallbackInfo = m_textureManager->getTextureDescriptorInfo(fallbackHandle, samplerKey);
-  Assertion(fallbackInfo.imageView, "Fallback texture must have a valid imageView");
+  const vk::DescriptorImageInfo fallbackInfo = m_textureManager->fallbackDescriptor(samplerKey);
+  const vk::DescriptorImageInfo defaultBaseInfo = m_textureManager->defaultBaseDescriptor(samplerKey);
+  const vk::DescriptorImageInfo defaultNormalInfo = m_textureManager->defaultNormalDescriptor(samplerKey);
+  const vk::DescriptorImageInfo defaultSpecInfo = m_textureManager->defaultSpecDescriptor(samplerKey);
 
   std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> desiredInfos{};
   desiredInfos.fill(fallbackInfo);
+  desiredInfos[kBindlessTextureSlotDefaultBase] = defaultBaseInfo;
+  desiredInfos[kBindlessTextureSlotDefaultNormal] = defaultNormalInfo;
+  desiredInfos[kBindlessTextureSlotDefaultSpec] = defaultSpecInfo;
 
   for (const auto& [arrayIndex, handle] : textures) {
 	Assertion(arrayIndex < kMaxBindlessTextures,
