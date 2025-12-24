@@ -34,6 +34,7 @@ add_file_folder("Graphics"
 	   graphics/test_vulkan_dynstate.cpp
 	   graphics/test_vulkan_pipeline_manager.cpp
 	   graphics/test_vulkan_frame_lifecycle.cpp
+	   graphics/test_vulkan_recordingframe_sealed.cpp
 	   graphics/test_vulkan_shader_manager_model.cpp
 	   graphics/test_vulkan_shader_alignment.cpp
 	   graphics/test_vulkan_texture_contract.cpp
