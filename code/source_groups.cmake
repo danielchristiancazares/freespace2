@@ -439,12 +439,13 @@ add_file_folder("GlobalIncs\\\\Toolchain"
 
 # Graphics files
 add_file_folder("Graphics"
-	graphics/2d.cpp
-	graphics/2d.h
-	graphics/decal_draw_list.cpp
-	graphics/decal_draw_list.h
-	graphics/debug_sphere.cpp
-	graphics/debug_sphere.h
+		graphics/2d.cpp
+		graphics/2d.h
+		graphics/MovieTypes.h
+		graphics/decal_draw_list.cpp
+		graphics/decal_draw_list.h
+		graphics/debug_sphere.cpp
+		graphics/debug_sphere.h
 	graphics/color.cpp
 	graphics/color.h
 	graphics/grbatch.cpp
@@ -593,6 +594,8 @@ if (FSO_BUILD_WITH_VULKAN)
 			graphics/vulkan/VulkanPipelineManager.h
 		graphics/vulkan/VulkanShaderManager.cpp
 		graphics/vulkan/VulkanShaderManager.h
+		graphics/vulkan/VulkanMovieManager.cpp
+		graphics/vulkan/VulkanMovieManager.h
 		graphics/vulkan/VulkanBufferManager.cpp
 		graphics/vulkan/VulkanBufferManager.h
 		graphics/vulkan/VulkanModelValidation.cpp

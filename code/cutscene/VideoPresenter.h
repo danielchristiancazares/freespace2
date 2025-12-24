@@ -16,6 +16,9 @@ class VideoPresenter {
 
 	std::array<int, 3> _planeTextureHandles;
 	std::array<std::unique_ptr<uint8_t[]>, 3> _planeTextureBuffers;
+	MovieTextureHandle _movieTextureHandle = MovieTextureHandle::Invalid;
+	bool _useNativeYCbCr = false;
+	bool _useLegacyTextures = false;
 
 	movie_material _movie_material;
 	material _rgb_material; // Material used when a RGB/RGBA movie is played
