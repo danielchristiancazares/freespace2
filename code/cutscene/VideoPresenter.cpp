@@ -23,8 +23,19 @@ VideoPresenter::VideoPresenter(const MovieProperties& props) : _properties(props
 	auto w = static_cast<int>(props.size.width);
 	auto h = static_cast<int>(props.size.height);
 
-	switch (props.pixelFormat) {
-	case FramePixelFormat::YUV420:
+	if (props.pixelFormat == FramePixelFormat::YUV420) {
+		_movieTextureHandle = gr_movie_texture_create(static_cast<uint32_t>(w),
+			static_cast<uint32_t>(h),
+			props.colorSpace,
+			props.colorRange);
+		if (gr_is_valid(_movieTextureHandle)) {
+			_useNativeYCbCr = true;
+			return;
+		}
+		if (gr_screen.mode == GR_VULKAN) {
+			return;
+		}
+		_useLegacyTextures = true;
 		_planeTextureBuffers[0].reset(new uint8_t[w * h]);
 		_planeTextureHandles[0] = bm_create(8, w, h, _planeTextureBuffers[0].get(), BMP_AABITMAP);
 
@@ -35,7 +46,11 @@ VideoPresenter::VideoPresenter(const MovieProperties& props) : _properties(props
 		_planeTextureHandles[2] = bm_create(8, w / 2, h / 2, _planeTextureBuffers[2].get(), BMP_AABITMAP);
 
 		material_set_movie(&_movie_material, _planeTextureHandles[0], _planeTextureHandles[1], _planeTextureHandles[2]);
-		break;
+		return;
+	}
+
+	_useLegacyTextures = true;
+	switch (props.pixelFormat) {
 	case FramePixelFormat::BGR:
 		_planeTextureBuffers[0].reset(new uint8_t[w * h * 3]);
 		_planeTextureHandles[0] = bm_create(24, w, h, _planeTextureBuffers[0].get(), 0);
@@ -57,6 +72,11 @@ VideoPresenter::VideoPresenter(const MovieProperties& props) : _properties(props
 VideoPresenter::~VideoPresenter() {
 	GR_DEBUG_SCOPE("Deinit video");
 
+	if (_useNativeYCbCr && gr_is_valid(_movieTextureHandle)) {
+		gr_movie_texture_release(_movieTextureHandle);
+		_movieTextureHandle = MovieTextureHandle::Invalid;
+	}
+
 	for (auto& handle : _planeTextureHandles) {
 		if (handle > 0) {
 			bm_release(handle);
@@ -67,6 +87,37 @@ VideoPresenter::~VideoPresenter() {
 
 void VideoPresenter::uploadVideoFrame(const VideoFramePtr& frame) {
 	GR_DEBUG_SCOPE("Update video frame");
+
+	if (_useNativeYCbCr) {
+		if (!gr_is_valid(_movieTextureHandle) || !frame) {
+			return;
+		}
+
+		if (frame->getPlaneNumber() < 3) {
+			return;
+		}
+
+		const auto ySize = frame->getPlaneSize(0);
+		const auto uSize = frame->getPlaneSize(1);
+		const auto vSize = frame->getPlaneSize(2);
+
+		const auto* yData = static_cast<const ubyte*>(frame->getPlaneData(0));
+		const auto* uData = static_cast<const ubyte*>(frame->getPlaneData(1));
+		const auto* vData = static_cast<const ubyte*>(frame->getPlaneData(2));
+		if (!yData || !uData || !vData) {
+			return;
+		}
+
+		gr_movie_texture_upload(_movieTextureHandle,
+			yData, static_cast<int>(ySize.stride),
+			uData, static_cast<int>(uSize.stride),
+			vData, static_cast<int>(vSize.stride));
+		return;
+	}
+
+	if (!_useLegacyTextures) {
+		return;
+	}
 
 	for (size_t i = 0; i < frame->getPlaneNumber(); ++i) {
 		auto size = frame->getPlaneSize(i);
@@ -91,12 +142,24 @@ void VideoPresenter::uploadVideoFrame(const VideoFramePtr& frame) {
 		}
 
 		gr_update_texture(_planeTextureHandles[i], bpp, _planeTextureBuffers[i].get(), static_cast<int>(size.width),
-		                  static_cast<int>(size.height));
+						  static_cast<int>(size.height));
 	}
 }
 
 void VideoPresenter::displayFrame(float x1, float y1, float x2, float y2, float alpha) {
 	GR_DEBUG_SCOPE("Draw video frame");
+
+	if (_useNativeYCbCr) {
+		if (!gr_is_valid(_movieTextureHandle)) {
+			return;
+		}
+		gr_movie_texture_draw(_movieTextureHandle, x1, y1, x2, y2, alpha);
+		return;
+	}
+
+	if (!_useLegacyTextures) {
+		return;
+	}
 
 	movie_vertex vertex_data[4];
 

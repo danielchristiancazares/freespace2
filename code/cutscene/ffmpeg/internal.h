@@ -8,14 +8,16 @@
 
 namespace cutscene {
 namespace ffmpeg {
-struct CodecContextParameters {
-	int width = -1;
-	int height = -1;
-	AVPixelFormat pixel_format = AV_PIX_FMT_NONE;
+	struct CodecContextParameters {
+		int width = -1;
+		int height = -1;
+		AVPixelFormat pixel_format = AV_PIX_FMT_NONE;
+		AVColorSpace color_space = AVCOL_SPC_UNSPECIFIED;
+		AVColorRange color_range = AVCOL_RANGE_UNSPECIFIED;
 
-	uint64_t channel_layout = 0;
-	int sample_rate = -1;
-	AVSampleFormat audio_format = AV_SAMPLE_FMT_NONE;
+		uint64_t channel_layout = 0;
+		int sample_rate = -1;
+		AVSampleFormat audio_format = AV_SAMPLE_FMT_NONE;
 
 	AVCodecID codec_id = AV_CODEC_ID_NONE;
 };
