@@ -527,7 +527,7 @@ void model_draw_list::render_buffer(const queued_buffer_draw &render_elements)
 	TRACE_SCOPE(tracing::RenderBuffer);
 
 	gr_bind_uniform_buffer(uniform_block_type::ModelData, render_elements.uniform_buffer_offset,
-	                       sizeof(graphics::model_uniform_data), _dataBuffer.bufferHandle());
+						   sizeof(graphics::model_uniform_data), _dataBuffer.bufferHandle());
 
 	gr_render_model(const_cast<model_material*>(&render_elements.render_material), const_cast<indexed_vertex_source*>(render_elements.vert_src), const_cast<vertex_buffer*>(render_elements.buffer), render_elements.texi);
 }
@@ -714,6 +714,7 @@ void model_draw_list::render_outline(const outline_draw &outline_info)
 
 	material material_instance;
 
+	material_instance.set_shader_type(SDR_TYPE_FLAT_COLOR);
 	material_instance.set_depth_mode(ZBUFFER_TYPE_READ);
 	material_instance.set_blend_mode(ALPHA_BLEND_ALPHA_BLEND_ALPHA);
 	material_instance.set_color(outline_info.clr);
@@ -871,7 +872,7 @@ void model_render_add_lightning(model_draw_list *scene, const model_render_param
 			}
 
 			secondary = Arc_color_emp_s1;
-      
+	  
 			// try and scale the size a bit so that it looks equally well on smaller vessels
 			width = Arc_width_default_emp;
 			if (pm->rad < Arc_width_no_multiply_over_radius_emp) {
@@ -881,7 +882,7 @@ void model_render_add_lightning(model_draw_list *scene, const model_render_param
 					width = Arc_width_minimum_emp;
 				}
 			}      
-      
+	  
 			break;
 
 		default:
@@ -2373,7 +2374,7 @@ void model_queue_render_thrusters(const model_render_params *interp, const polym
 					batching_add_beam(thruster_info.secondary_glow_bitmap, &pnt, &norm2, wVal*thruster_info.secondary_glow_rad_factor*0.5f, d);
 
 					if (Scene_framebuffer_in_frame && thruster_info.draw_distortion &&
-					    Gr_framebuffer_effects[FramebufferEffects::Thrusters]) {
+						Gr_framebuffer_effects[FramebufferEffects::Thrusters]) {
 						vm_vec_scale_add(&norm2, &pnt, &fvec, wVal * 2 * thruster_info.distortion_length_factor);
 						int dist_bitmap;
 						if (thruster_info.distortion_bitmap > 0) {

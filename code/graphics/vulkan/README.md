@@ -7,7 +7,7 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | File | Purpose |
 |------|---------|
 | `VulkanDevice.*` | Instance, surface, physical/logical device, swapchain, pipeline cache |
-| `VulkanRenderer.*` | Frame orchestration, submission, per-frame sync |
+| `VulkanRenderer.*` | Frame orchestration, submission, per-frame sync, global resource creation |
 | `VulkanRenderingSession.*` | Render pass state machine, layout transitions, dynamic state |
 | `VulkanFrame.*` | Per-frame resources: command buffer, fences, semaphores, ring buffers |
 | `VulkanFrameCaps.h` | Capability tokens (`FrameCtx`, `RenderCtx`) |
@@ -15,20 +15,23 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `FrameLifecycleTracker.h` | Debug validation for recording state |
 | `VulkanGraphics.*` | Engine glue: `gr_vulkan_*` functions, `g_currentFrame` injection |
 | `VulkanBufferManager.*` | Buffer creation, updates, deferred deletion |
-| `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache |
+| `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache, bitmap render targets |
+| `VulkanMovieManager.*` | YCbCr movie textures: feature checks, pipeline setup, upload/draw, deferred release |
+| `VulkanTextureBindings.h` | Draw-path texture API (safe binding lookup, no GPU recording) |
 | `VulkanShaderManager.*` | Shader module loading/caching by type + variant |
 | `VulkanShaderReflection.*` | SPIR-V reflection helpers for pipeline layout/validation |
 | `VulkanPipelineManager.*` | Pipeline creation/caching by `PipelineKey` |
 | `VulkanDescriptorLayouts.*` | Set layouts, pipeline layouts, descriptor pool allocation |
 | `VulkanDeferredLights.*` | Deferred lighting pass orchestration and light volume meshes |
 | `VulkanRenderTargets.*` | Depth buffer, G-buffer, resize handling |
+| `VulkanRenderTargetInfo.h` | Render target contract definition (formats, counts) |
 | `VulkanRingBuffer.*` | Per-frame transient allocations (uniform, vertex, staging) |
 | `VulkanLayoutContracts.*` | Shader ↔ pipeline layout binding contracts |
 | `VulkanModelValidation.*` | Model draw validation and safety checks |
 | `VulkanModelTypes.h` | Shared model/mesh-related types |
 | `VulkanVertexTypes.h` | Vertex layout/type definitions |
 | `VulkanClip.h` | Clipping and scissor helpers |
-| `VulkanDebug.*` | Vulkan debug helpers and instrumentation |
+| `VulkanDebug.*` | Vulkan debug helpers and instrumentation (lightweight logging) |
 | `VulkanConstants.h` | Shared constants (frames-in-flight, bindless limits) |
 
 ## Constants
@@ -47,11 +50,12 @@ This backend adheres to the [Type-Driven Design Philosophy](../../../docs/DESIGN
 
 ### State as Location
 - **Frames**: Managed by moving between `m_availableFrames` and `m_inFlightFrames` containers.
-- **Render Targets**: Represented by the active `RenderTargetState` subclass instance.
+- **Render Targets**: Represented by the active `RenderTargetState` subclass instance in `VulkanRenderingSession`.
+- **Texture Residency**: Textures move between `m_residentTextures`, `m_pendingUploads`, and `m_unavailableTextures`.
 
 ### Boundary / Adapter
 `VulkanGraphics.cpp` bridges the legacy engine's implicit global state to the backend's explicit token requirements.
-*Caution:* This is not a place for "inhabitant branching" (e.g., `if (exists)` logic). While it currently validates state to produce tokens, the architectural goal is to push these ownership requirements upstream into the engine. If `VulkanGraphics.cpp` requires complex conditionals to handle engine state, the engine's ownership model is likely what needs fixing.
+*Caution:* This is not a place for "inhabitant branching" (e.g., `if (exists)` logic). While it currently validates state to produce tokens, the architectural goal is to push these ownership requirements upstream into the engine.
 
 ## Entry Points
 
@@ -72,7 +76,7 @@ Owns and manages:
 - Vulkan instance + debug messenger
 - SDL surface
 - Physical device selection + feature probing
-- Logical device + queues (graphics/present)
+- Logical device + queues (graphics/transfer/present)
 - Swapchain + image views
 - Pipeline cache (device lifetime)
 
@@ -99,29 +103,49 @@ Key methods:
 
 **Token-based API:** Rendering methods require proof of state via capability tokens (e.g., `ensureRenderingStarted(FrameCtx)`).
 
-Model descriptor sync happens in `beginFrame()` via `beginModelDescriptorSync()` before recording starts.
-
 ### `VulkanRenderingSession` (Render Pass State Machine)
 
 Responsible for:
 - Dynamic-rendering state machine (single “current target” truth)
 - Image layout transitions (swapchain, depth, G-buffer) via `pipelineBarrier2`
-- Target switching:
+- Target switching (automatically ends previous pass):
   - `requestSwapchainTarget()` — swapchain + depth
   - `requestBitmapTarget(bitmapHandle, face)` — bitmap render targets (bmpman RTT; cubemap faces supported)
   - `requestGBufferEmissiveTarget()` — G-buffer emissive-only (pre-deferred scene copy)
-  - `beginDeferredPass(clearNonColorBufs, preserveEmissive)` — select G-buffer target + clear policy (emissive may be preserved)
+  - `beginDeferredPass(clearNonColorBufs, preserveEmissive)` — select G-buffer target + clear policy
   - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
 - Lazy render pass begin via `ensureRendering(cmd, imageIndex)`. The session owns the active pass and ends it automatically at frame/target boundaries.
-- Dynamic state application (`applyDynamicState()`) is performed when a pass begins after selecting the target (but does not override viewport/scissor; those are driven by engine calls).
+- Dynamic state application (`applyDynamicState()`) is performed when a pass begins.
 
 **Polymorphic State:** The active render target is represented by a `std::unique_ptr<RenderTargetState>` (State as Location). There is no "target mode" enum; the object *is* the state.
 
 **RAII Guard:** `ActivePass` manages `vkCmdBeginRendering`/`vkCmdEndRendering`.
 
-The render target’s “contract” (attachment formats + count) is exposed as `RenderTargetInfo` and is used to key pipelines.
+### `VulkanBufferManager` (Buffers)
 
-**Y-flip:** Viewport has negative height; front-face is set to clockwise to preserve winding.
+Handles buffer creation and updates.
+- **Lazy Existence:** `createBuffer` returns a handle but does *not* create a `VkBuffer` immediately.
+- **ensureBuffer(handle, size):** Called by `updateBufferData` or `setModelUniformBinding`. Creates the `VkBuffer` if it doesn't exist or resizes it if too small. This ensures buffers always exist when descriptors reference them.
+- **Deferred Deletion:** `deleteBuffer` queues the buffer for destruction only after the current frame's completion serial is passed.
+
+### `VulkanTextureManager` (Textures)
+
+Split responsibilities:
+- **Residency:** Tracks which textures are GPU-resident, queued for upload, or unavailable.
+- **Uploads:** `queueTextureUpload` stages data. `flushPendingUploads` (called at `beginFrame`) executes copies.
+- **Bindings:** `getBindlessSlotIndex` returns a valid slot (fallback if non-resident).
+- **Render Targets:** `createRenderTarget` / `transitionRenderTargetToAttachment` manage GPU-backed bitmaps.
+
+### `VulkanMovieManager` (YCbCr Movie Path)
+
+Owns the Vulkan-native movie path based on `VkSamplerYcbcrConversion`:
+- **Feature/format checks:** gated on `samplerYcbcrConversion` and multi-planar format support, including
+  `combinedImageSamplerDescriptorCount` for pool sizing.
+- **Pipelines per config:** immutable sampler + descriptor set layout/pipeline per colorspace/range combination.
+- **Upload:** uses the per-frame staging ring and records `vkCmdCopyBufferToImage` on the active command buffer.
+  This upload can occur **mid-frame** (after `beginFrame()`), so `VulkanRenderer::uploadMovieTexture()` suspends
+  dynamic rendering before issuing transfer commands.
+- **Lifetime:** serial-gated deferred release, matching other Vulkan managers.
 
 ### `VulkanFrame` (Per-Frame Resources)
 
@@ -129,25 +153,7 @@ Packages everything for one frame in the ring:
 - Command pool + command buffer
 - Fence (CPU wait) + semaphores (image-available, render-finished, timeline)
 - Ring buffers: uniform, vertex, staging
-- Per-frame descriptor set + dynamic offset tracking
-
-### `VulkanRenderTargets`
-
-Owns:
-- Depth image, depth attachment view, depth sample view (for shader reads)
-- G-buffer images (`kGBufferCount = 5`)
-- Scene color snapshot images (one per swapchain image) for OpenGL-parity deferred begin
-- Resize logic tied to swapchain recreation
-
-### Resource Managers
-
-| Manager | Responsibility |
-|---------|----------------|
-| `VulkanDescriptorLayouts` | Set layouts, pipeline layouts, pool allocation |
-| `VulkanShaderManager` | Shader module cache (type + variant) |
-| `VulkanPipelineManager` | Pipeline cache (`PipelineKey` → pipeline) |
-| `VulkanBufferManager` | Buffer CRUD, serial-gated deferred deletion (retireSerial → destroy when completedSerial >= retireSerial) |
-| `VulkanTextureManager` | Upload scheduling, residency state machine, sampler cache |
+- Per-frame descriptor set + descriptor sync logic
 
 ### Pipelines (`VulkanPipelineManager` + `VulkanLayoutContracts`)
 
@@ -156,16 +162,6 @@ Pipelines are “contract-driven” and cached by `PipelineKey`:
 - Shader layout contracts (`VulkanLayoutContracts`) define, per `shader_type`:
   - which pipeline layout to use (`Standard`, `Model`, `Deferred`)
   - which vertex input mode to use (`VertexAttributes` vs. `VertexPulling`)
-
-Pipeline layout families (descriptor model):
-- **Standard:** set 0 = per-draw push descriptors, set 1 = global set.
-- **Model:** set 0 = bindless model set + dynamic UBO, push constants (vertex pulling; no vertex attributes).
-- **Deferred:** set 0 = deferred push descriptors, set 1 = global G-buffer set.
-
-Caching layers:
-- `VulkanShaderManager` caches shader modules by (type, flags).
-- `VulkanPipelineManager` caches vertex input state by `vertex_layout::hash()` and pipelines by `PipelineKey`.
-- `VulkanDevice` owns a `VkPipelineCache` persisted as `vulkan_pipeline.cache` and passed into pipeline creation.
 
 ## Synchronization Primitives
 
@@ -182,7 +178,7 @@ flip()
 ├── if recording: endFrame() + submitFrame()
 ├── advance frame index
 ├── VulkanFrame::wait_for_gpu()           # fence wait
-├── managers: collect(completedSerial)
+├── managers: collect(completedSerial)    # recycle buffers/textures
 ├── acquireNextImage()                    # recreate swapchain if needed
 		└── beginFrame()
 		    ├── reset command pool
@@ -192,7 +188,7 @@ flip()
 	    └── VulkanRenderingSession::beginFrame()
 
 gr_vulkan_setup_frame()
-└── set viewport/scissor
+└── set viewport/scissor (stored for next pass)
 
 [first draw/clear]
 └── ensureRenderingStarted()
@@ -207,8 +203,7 @@ gr_vulkan_setup_frame()
 - **Descriptor writes happen at frame start.** Writing descriptors mid-recording fights the design.
 - **Render pass is lazy and session-owned.** `setup_frame()` doesn't begin rendering; first draw/clear does. The render pass remains active until a frame/target boundary ends it.
 - **Target switches end the active pass automatically.** Call session boundary methods like `requestSwapchainTarget()` directly; they will end any active pass first.
+- **Movie uploads can be mid-recording.** The movie path records transfer commands after `beginFrame()`, so always suspend dynamic rendering before uploading.
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
-- **Swapchain resize cascades.** Anything tied to swapchain extent must handle `recreateSwapchain()`.
-- **`PipelineKey.layout_hash` is caller-owned for vertex-attribute shaders.** If a shader uses `VertexAttributes`, ensure `PipelineKey.layout_hash = layout.hash()` (vertex-pulling shaders intentionally ignore the layout hash).
 - **Pipeline layout compatibility matters.** “Deferred” pipelines use a different set-0 layout than “Standard”; bind the global set using the matching pipeline layout when mixing pipeline families.

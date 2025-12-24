@@ -409,6 +409,15 @@ struct irrmap_data {
 	int face;
 };
 
+struct flat_color_data {
+	vec4 color;
+
+	int srgb;
+	float intensity;
+
+	float pad[2];
+};
+
 } // namespace generic_data
 
 } // namespace graphics
