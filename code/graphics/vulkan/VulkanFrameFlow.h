@@ -16,8 +16,6 @@ struct SubmitInfo {
 };
 
 struct RecordingFrame {
-  RecordingFrame(VulkanFrame& f, uint32_t img) : frame(f), imageIndex(img) {}
-
   RecordingFrame(const RecordingFrame&) = delete;
   RecordingFrame& operator=(const RecordingFrame&) = delete;
   RecordingFrame(RecordingFrame&&) = default;
@@ -26,6 +24,10 @@ struct RecordingFrame {
   VulkanFrame& ref() const { return frame.get(); }
 
   private:
+  // Only VulkanRenderer may mint the recording token. This makes "recording is active"
+  // unforgeable by construction (DESIGN_PHILOSOPHY: capability tokens).
+  RecordingFrame(VulkanFrame& f, uint32_t img) : frame(f), imageIndex(img) {}
+
   std::reference_wrapper<VulkanFrame> frame;
   uint32_t imageIndex;
 
@@ -50,6 +52,7 @@ struct InFlightFrame {
 
 } // namespace vulkan
 } // namespace graphics
+
 
 
 
