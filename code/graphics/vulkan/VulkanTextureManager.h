@@ -135,8 +135,10 @@ class VulkanTextureManager {
 		// Variant for callers that already have a base-frame handle.
 		void queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
 
-	// Preload uploads immediately; returns true on success.
-	bool preloadTexture(int bitmapHandle, bool isAABitmap);
+		// Preload uploads immediately. Return value follows bmpman gf_preload semantics:
+		// - false: abort further preloading (out of memory)
+		// - true: continue preloading (success or recoverable/unavailable texture)
+		bool preloadTexture(int bitmapHandle, bool isAABitmap);
 
 	// Delete texture for a bitmap handle (base frame)
 	void deleteTexture(int bitmapHandle);

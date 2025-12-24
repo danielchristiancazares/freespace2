@@ -382,6 +382,29 @@ void gr_stub_render_movie(movie_material* /*material_info*/,
 {
 }
 
+MovieTextureHandle gr_stub_movie_texture_create(uint32_t /*width*/, uint32_t /*height*/,
+	MovieColorSpace /*colorspace*/, MovieColorRange /*range*/)
+{
+	return MovieTextureHandle::Invalid;
+}
+
+void gr_stub_movie_texture_upload(MovieTextureHandle /*handle*/,
+	const ubyte* /*y*/, int /*y_stride*/,
+	const ubyte* /*u*/, int /*u_stride*/,
+	const ubyte* /*v*/, int /*v_stride*/)
+{
+}
+
+void gr_stub_movie_texture_draw(MovieTextureHandle /*handle*/,
+	float /*x1*/, float /*y1*/, float /*x2*/, float /*y2*/,
+	float /*alpha*/)
+{
+}
+
+void gr_stub_movie_texture_release(MovieTextureHandle /*handle*/)
+{
+}
+
 void gr_stub_render_nanovg(nanovg_material* /*material_info*/,
 	primitive_type /*prim_type*/,
 	vertex_layout* /*layout*/,
@@ -612,13 +635,17 @@ void gr_stub_init_function_pointers() {
 	gr_screen.gf_get_bitmap_from_texture = gr_stub_get_bitmap_from_texture;
 
 	gr_screen.gf_render_model = gr_stub_render_model;
-	gr_screen.gf_render_primitives	= gr_stub_render_primitives;
-	gr_screen.gf_render_primitives_particle	= gr_stub_render_primitives_particle;
+	gr_screen.gf_render_primitives = gr_stub_render_primitives;
+	gr_screen.gf_render_primitives_particle = gr_stub_render_primitives_particle;
 	gr_screen.gf_render_primitives_distortion = gr_stub_render_primitives_distortion;
 	gr_screen.gf_render_movie = gr_stub_render_movie;
+	gr_screen.gf_movie_texture_create = gr_stub_movie_texture_create;
+	gr_screen.gf_movie_texture_upload = gr_stub_movie_texture_upload;
+	gr_screen.gf_movie_texture_draw = gr_stub_movie_texture_draw;
+	gr_screen.gf_movie_texture_release = gr_stub_movie_texture_release;
 	gr_screen.gf_render_nanovg = gr_stub_render_nanovg;
 	gr_screen.gf_render_primitives_batched = gr_stub_render_primitives_batched;
-	gr_screen.gf_render_rocket_primitives     = gr_stub_render_rocket_primitives;
+	gr_screen.gf_render_rocket_primitives = gr_stub_render_rocket_primitives;
 
 	gr_screen.gf_is_capable = gr_stub_is_capable;
 	gr_screen.gf_get_property = gr_stub_get_property;

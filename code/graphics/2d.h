@@ -16,6 +16,7 @@
 #include "bmpman/bmpman.h"
 #include "cfile/cfile.h"
 #include "graphics/grinternal.h"
+#include "graphics/MovieTypes.h"
 #include "graphics/tmapper.h"
 #include "io/cursor.h"
 #include "math/vecmat.h"
@@ -193,7 +194,7 @@ enum shader_type {
 	SDR_TYPE_DEFERRED_CLEAR,
 	SDR_TYPE_VIDEO_PROCESS,
 	SDR_TYPE_PASSTHROUGH_RENDER, //!< Shader for doing the old style fixed-function rendering. Only used internally, use
-	                             //!< SDR_TYPE_DEFAULT_MATERIAL.
+								 //!< SDR_TYPE_DEFAULT_MATERIAL.
 	SDR_TYPE_SHIELD_DECAL,
 	SDR_TYPE_BATCHED_BITMAP,
 	SDR_TYPE_DEFAULT_MATERIAL,
@@ -214,6 +215,8 @@ enum shader_type {
 	SDR_TYPE_ENVMAP_SPHERE_WARP,
 
 	SDR_TYPE_IRRADIANCE_MAP_GEN,
+
+	SDR_TYPE_FLAT_COLOR,  // Position-only shader with uniform color output
 
 	NUM_SHADER_TYPES
 };
@@ -469,7 +472,7 @@ public:
 		return index;
 	}
 
-        uint i_first, i_last;
+		uint i_first, i_last;
 
 	void release()
 	{
@@ -874,17 +877,30 @@ typedef struct screen {
 		int n_verts,
 		gr_buffer_handle buffer_handle)>
 		gf_render_primitives_distortion;
-	std::function<void(movie_material* material_info,
-		primitive_type prim_type,
-		vertex_layout* layout,
-		int n_verts,
-		gr_buffer_handle buffer,
-		size_t buffer_offset)>
-		gf_render_movie;
-	std::function<void(batched_bitmap_material* material_info,
-		primitive_type prim_type,
-		vertex_layout* layout,
-		int offset,
+		std::function<void(movie_material* material_info,
+			primitive_type prim_type,
+			vertex_layout* layout,
+			int n_verts,
+			gr_buffer_handle buffer,
+			size_t buffer_offset)>
+			gf_render_movie;
+
+		// Vulkan-native movie path (YUV420 via VkSamplerYcbcrConversion).
+		std::function<MovieTextureHandle(uint32_t width, uint32_t height, MovieColorSpace colorspace, MovieColorRange range)>
+			gf_movie_texture_create;
+		std::function<void(MovieTextureHandle handle,
+			const ubyte* y, int y_stride,
+			const ubyte* u, int u_stride,
+			const ubyte* v, int v_stride)>
+			gf_movie_texture_upload;
+		std::function<void(MovieTextureHandle handle, float x1, float y1, float x2, float y2, float alpha)>
+			gf_movie_texture_draw;
+		std::function<void(MovieTextureHandle handle)> gf_movie_texture_release;
+
+		std::function<void(batched_bitmap_material* material_info,
+			primitive_type prim_type,
+			vertex_layout* layout,
+			int offset,
 		int n_verts,
 		gr_buffer_handle buffer_handle)>
 		gf_render_primitives_batched;
@@ -1301,27 +1317,67 @@ inline void gr_render_primitives_distortion(distortion_material* material_info,
 }
 
 inline void gr_render_movie(movie_material* material_info,
-	primitive_type prim_type,
-	vertex_layout* layout,
-	int n_verts,
-	gr_buffer_handle buffer,
-	size_t buffer_offset = 0)
+		primitive_type prim_type,
+		vertex_layout* layout,
+		int n_verts,
+		gr_buffer_handle buffer,
+		size_t buffer_offset = 0)
 {
-	gr_screen.gf_render_movie(material_info, prim_type, layout, n_verts, buffer, buffer_offset);
+		gr_screen.gf_render_movie(material_info, prim_type, layout, n_verts, buffer, buffer_offset);
+}
+
+inline MovieTextureHandle gr_movie_texture_create(uint32_t width,
+	uint32_t height,
+	MovieColorSpace colorspace,
+	MovieColorRange range)
+{
+	if (!gr_screen.gf_movie_texture_create) {
+		return MovieTextureHandle::Invalid;
+	}
+	return gr_screen.gf_movie_texture_create(width, height, colorspace, range);
+}
+
+inline void gr_movie_texture_upload(MovieTextureHandle handle,
+	const ubyte* y, int y_stride,
+	const ubyte* u, int u_stride,
+	const ubyte* v, int v_stride)
+{
+	if (!gr_screen.gf_movie_texture_upload || !gr_is_valid(handle)) {
+		return;
+	}
+	gr_screen.gf_movie_texture_upload(handle, y, y_stride, u, u_stride, v, v_stride);
+}
+
+inline void gr_movie_texture_draw(MovieTextureHandle handle,
+	float x1, float y1, float x2, float y2,
+	float alpha)
+{
+	if (!gr_screen.gf_movie_texture_draw || !gr_is_valid(handle)) {
+		return;
+	}
+	gr_screen.gf_movie_texture_draw(handle, x1, y1, x2, y2, alpha);
+}
+
+inline void gr_movie_texture_release(MovieTextureHandle handle)
+{
+	if (!gr_screen.gf_movie_texture_release || !gr_is_valid(handle)) {
+		return;
+	}
+	gr_screen.gf_movie_texture_release(handle);
 }
 
 inline void gr_render_model(model_material* material_info, indexed_vertex_source *vert_source, vertex_buffer* bufferp, size_t texi)
 {
-	static uint64_t gr_render_model_calls = 0;
-	gr_render_model_calls++;
+		static uint64_t gr_render_model_calls = 0;
+		gr_render_model_calls++;
 		if (gr_render_model_calls <= 5 || (gr_render_model_calls & 0xFF) == 0) {
 			if (FSO_DEBUG || Cmdline_graphics_debug_output) {
 				mprintf(("gr_render_model() entry #%llu material=%p vert_source=%p buffer=%p texi=%zu\n",
-				         static_cast<unsigned long long>(gr_render_model_calls),
-				         static_cast<void*>(material_info),
-				         static_cast<void*>(vert_source),
-				         static_cast<void*>(bufferp),
-				         texi));
+						 static_cast<unsigned long long>(gr_render_model_calls),
+						 static_cast<void*>(material_info),
+						 static_cast<void*>(vert_source),
+						 static_cast<void*>(bufferp),
+						 texi));
 			}
 		}
 	gr_screen.gf_render_model(material_info, vert_source, bufferp, texi);
@@ -1500,7 +1556,7 @@ enum AnimatedShader {
  * @return A structure which gives access to a memory buffer where the uniform data can be stored
  */
 graphics::util::UniformBuffer gr_get_uniform_buffer(uniform_block_type type, size_t num_elements,
-                                                    size_t element_size_override = 0);
+								                    size_t element_size_override = 0);
 
 struct VideoModeData {
 	uint32_t width = 0;
