@@ -155,6 +155,16 @@ vk::Rect2D createClipScissor()
   return scissor;
 }
 
+vk::Rect2D createFullScreenScissor()
+{
+  const int w = std::max(0, gr_screen.max_w);
+  const int h = std::max(0, gr_screen.max_h);
+  vk::Rect2D scissor{};
+  scissor.offset = vk::Offset2D{0, 0};
+  scissor.extent = vk::Extent2D{static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+  return scissor;
+}
+
 vk::PrimitiveTopology convertPrimitiveType(primitive_type prim_type)
 {
   switch (prim_type) {
@@ -270,8 +280,12 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
   // Viewport: full-screen with Vulkan Y-flip (y = height, height = -height)
 	vk::Viewport viewport = createFullScreenViewport();
 
-  // Scissor: current clip region
-	vk::Rect2D scissor = createClipScissor();
+  // Scissor: force full-screen at frame start.
+  // Vulkan scissor is always active (unlike OpenGL's scissor test enable/disable), so if UI code
+  // leaves the clip rectangle set at end-of-frame, using the clip here will cause the *next frame's*
+  // first draws (often the 3D scene) to be clipped to that stale rect, producing "black coverage holes".
+  // Clipped UI draws still call gr_set_clip/gr_reset_clip and update scissor explicitly.
+	vk::Rect2D scissor = createFullScreenScissor();
 
   // Line width: apply requested width, clamped to device limits
   const auto& limits = renderer.vulkanDevice()->properties().limits;
@@ -1143,16 +1157,14 @@ void gr_vulkan_render_primitives(material* material_info,
 
   vk::DescriptorImageInfo baseMapInfo{};
   const bool isTextured = textureHandle >= 0;
-  if (isTextured) {
-	auto samplerKey = VulkanTextureManager::SamplerKey{};
-	samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
-
-	baseMapInfo = ctxBase.renderer.getTextureDescriptor(
-	  textureHandle, samplerKey);
-  }
+  auto samplerKey = VulkanTextureManager::SamplerKey{};
+  samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
+  baseMapInfo = isTextured
+	? ctxBase.renderer.getTextureDescriptor(textureHandle, samplerKey)
+	: ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
 
   std::array<vk::WriteDescriptorSet, 3> writes{};
-  uint32_t writeCount = 2; // Always have matrix and generic uniform buffers
+  uint32_t writeCount = 3; // Always bind all push descriptor bindings to avoid state leakage
 
   writes[0].dstBinding = 0;
   writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
@@ -1164,13 +1176,10 @@ void gr_vulkan_render_primitives(material* material_info,
   writes[1].descriptorCount = 1;
   writes[1].pBufferInfo = &genericInfo;
 
-  if (isTextured) {
-	writes[2].dstBinding = 2;
-	writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-	writes[2].descriptorCount = 1;
-	writes[2].pImageInfo = &baseMapInfo;
-	writeCount = 3;
-  }
+  writes[2].dstBinding = 2;
+  writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[2].descriptorCount = 1;
+  writes[2].pImageInfo = &baseMapInfo;
 
   // Bind pipeline
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
