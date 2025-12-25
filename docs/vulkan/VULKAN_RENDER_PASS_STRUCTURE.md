@@ -9,7 +9,7 @@ This document provides comprehensive documentation of the Vulkan dynamic renderi
 1. [Architecture Overview](#architecture-overview)
 2. [Render Target Types](#render-target-types)
 3. [G-Buffer Content Specification](#g-buffer-content-specification)
-4. [Active Pass Guard (RAII)](#active-pass-guard-raii)
+4. [Active Pass (RAII)](#active-pass-raii)
 5. [Layout Transition System](#layout-transition-system)
 6. [Dynamic State Management](#dynamic-state-management)
 7. [Scene Color Copy Pipeline](#scene-color-copy-pipeline)
@@ -27,7 +27,7 @@ The renderer uses **Vulkan dynamic rendering** (`vkCmdBeginRendering`/`vkCmdEndR
 - Avoids `VkSubpass` complexity and implicit subpass dependencies
 - Uses explicit layout transitions via `pipelineBarrier2()` with `VkImageMemoryBarrier2`
 - Leverages the **synchronization2** extension for fine-grained memory barriers
-- Employs RAII pattern (`ActivePassGuard`) for automatic pass lifecycle management
+- Employs RAII pattern (`ActivePass`) for automatic pass lifecycle management
 
 **Key Source Files:**
 
@@ -43,11 +43,9 @@ The renderer uses **Vulkan dynamic rendering** (`vkCmdBeginRendering`/`vkCmdEndR
 
 ## Render Target Types
 
-Five mutually exclusive target types drive the state machine (`VulkanRenderingSession.h:97-139`):
+The render target state machine uses polymorphic `RenderTargetState` classes (`VulkanRenderingSession.h`):
 
 ### 1. SwapchainWithDepthTarget
-
-**Lines:** 105-109
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
@@ -56,24 +54,71 @@ Five mutually exclusive target types drive the state machine (`VulkanRenderingSe
 
 **Usage:** Main 3D scene rendering, post-deferred composition with depth.
 
-### 2. DeferredGBufferTarget
+### 2. SceneHdrWithDepthTarget
 
-**Lines:** 111-115
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | HDR scene color buffer |
+| Depth | `D32Sfloat` (shared) | 3D scene depth testing |
+
+**Usage:** Main scene rendering when HDR post-processing is enabled.
+
+### 3. SceneHdrNoDepthTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | HDR scene color buffer |
+
+**Usage:** HDR compositing passes that do not require depth testing.
+
+### 4. PostLdrTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R8G8B8A8Unorm` | LDR post-processing target |
+
+**Usage:** Post-tonemapping effects (film grain, color grading).
+
+### 5. PostLuminanceTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R8G8B8A8Unorm` | Luminance for FXAA |
+
+**Usage:** FXAA prepass luminance calculation.
+
+### 6. SmaaEdgesTarget / SmaaBlendTarget / SmaaOutputTarget
+
+| Target | Attachment | Format | Purpose |
+|--------|------------|--------|---------|
+| Edges | Color 0 | `R8G8B8A8Unorm` | Edge detection output |
+| Blend | Color 0 | `R8G8B8A8Unorm` | Blending weight calculation |
+| Output | Color 0 | Swapchain/LDR format | Final SMAA output |
+
+**Usage:** SMAA anti-aliasing pipeline stages.
+
+### 7. BloomMipTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | Bloom ping-pong mip level |
+
+**Usage:** Bloom downsample/upsample passes with configurable mip level and ping-pong index.
+
+### 8. DeferredGBufferTarget
 
 | Attachment | Index | Format |
 |------------|-------|--------|
 | Albedo | 0 | `R16G16B16A16Sfloat` |
 | Normal | 1 | `R16G16B16A16Sfloat` |
-| Position | 2 | `R32G32B32A32Sfloat` |
-| Specular | 3 | `R8G8B8A8Unorm` |
+| Position | 2 | `R16G16B16A16Sfloat` |
+| Specular | 3 | `R16G16B16A16Sfloat` |
 | Emissive | 4 | `R16G16B16A16Sfloat` |
 | Depth | - | `D32Sfloat` (shared) |
 
 **Usage:** Deferred geometry pass - renders material properties to G-buffer.
 
-### 3. SwapchainNoDepthTarget
-
-**Lines:** 117-121
+### 9. SwapchainNoDepthTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
@@ -83,9 +128,7 @@ Five mutually exclusive target types drive the state machine (`VulkanRenderingSe
 
 **Usage:** Deferred lighting composition, HUD/UI overlay, NanoVG rendering.
 
-### 4. GBufferEmissiveTarget
-
-**Lines:** 123-127
+### 10. GBufferEmissiveTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
@@ -93,9 +136,7 @@ Five mutually exclusive target types drive the state machine (`VulkanRenderingSe
 
 **Usage:** Pre-deferred scene color snapshot capture.
 
-### 5. BitmapTarget
-
-**Lines:** 129-139
+### 11. BitmapTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
@@ -126,14 +167,14 @@ Complete channel definitions for all G-buffer attachments:
 .a   = Metalness factor (0.0 = dielectric/non-metal, 1.0 = pure metal)
 ```
 
-### Index 2: Position (`R32G32B32A32Sfloat`)
+### Index 2: Position (`R16G16B16A16Sfloat`)
 
 ```
 .rgb = World-space fragment position (absolute world coordinates)
 .a   = Linear depth (eye-space Z distance from camera)
 ```
 
-### Index 3: Specular (`R8G8B8A8Unorm`)
+### Index 3: Specular (`R16G16B16A16Sfloat`)
 
 ```
 .rgb = Specular reflectance color (F0 for dielectrics, albedo-tinted for metals)
@@ -167,35 +208,33 @@ class VulkanRenderTargets {
 
 ---
 
-## Active Pass Guard (RAII)
+## Active Pass (RAII)
 
-**File:** `VulkanRenderingSession.h:68-95`
+**File:** `VulkanRenderingSession.h:102-129`
 
-The `ActivePassGuard` class implements RAII-based render pass lifecycle management:
+The `ActivePass` struct implements RAII-based render pass lifecycle management:
 
 ```cpp
-class ActivePassGuard {
-public:
-    // Constructor: stores reference to session and command buffer
-    ActivePassGuard(VulkanRenderingSession& session, vk::CommandBuffer cmd);
+struct ActivePass {
+    vk::CommandBuffer cmd{};
 
-    // Destructor: automatically calls vkCmdEndRendering() if pass is active
-    ~ActivePassGuard();
+    // Constructor: stores command buffer for endRendering()
+    explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
+
+    // Destructor: automatically calls cmd.endRendering() if cmd is valid
+    ~ActivePass() {
+        if (cmd) {
+            cmd.endRendering();
+        }
+    }
 
     // Move-only semantics (no copy)
-    ActivePassGuard(ActivePassGuard&& other) noexcept;
-    ActivePassGuard& operator=(ActivePassGuard&& other) noexcept;
-
-    // Explicit end (optional, destructor handles automatically)
-    void end();
-
-    // Query active state
-    bool isActive() const;
-
-private:
-    VulkanRenderingSession* m_session;
-    vk::CommandBuffer m_cmd;
-    bool m_active;
+    ActivePass(const ActivePass&) = delete;
+    ActivePass& operator=(const ActivePass&) = delete;
+    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd) {
+        other.cmd = vk::CommandBuffer{};
+    }
+    ActivePass& operator=(ActivePass&& other) noexcept;
 };
 ```
 
@@ -518,8 +557,8 @@ flip()
 | Component | File | Lines | Notes |
 |-----------|------|-------|-------|
 | Render pass state machine | `VulkanRenderingSession.h` | 18-202 | Target types, state tracking |
-| Target type enum | `VulkanRenderingSession.h` | 97-139 | 5 target definitions |
-| Active Pass Guard | `VulkanRenderingSession.h` | 68-95 | RAII pass management |
+| Target type enum | `VulkanRenderingSession.h` | - | 11 target definitions |
+| Active Pass | `VulkanRenderingSession.h` | 102-129 | RAII pass management |
 | Clear operations | `VulkanRenderingSession.h` | 141-160 | Load/store config |
 | Dynamic rendering begin | `VulkanRenderingSession.cpp` | 332-518 | Per-target begin logic |
 | Layout transitions | `VulkanRenderingSession.cpp` | 520-702 | Barrier functions |
@@ -537,7 +576,7 @@ flip()
 
 2. **Explicit Synchronization:** All layout transitions use explicit barriers rather than implicit subpass dependencies.
 
-3. **RAII Lifecycle:** `ActivePassGuard` ensures proper pass termination even during exceptions.
+3. **RAII Lifecycle:** `ActivePass` ensures proper pass termination even during exceptions.
 
 4. **Lazy Initialization:** Passes begin on first draw/clear, not on target request.
 

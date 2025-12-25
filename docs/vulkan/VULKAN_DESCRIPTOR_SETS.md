@@ -161,7 +161,10 @@ Used for 2D rendering, UI, particles, post-processing, and most non-model shader
 |---------|------|-------|---------|
 | 0 | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` | Vertex + Fragment | Matrix UBO |
 | 1 | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` | Vertex + Fragment | Generic data UBO |
-| 2 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Per-draw texture |
+| 2 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Texture sampler 0 (primary) |
+| 3 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Texture sampler 1 (secondary) |
+| 4 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Texture sampler 2 (post-processing) |
+| 5 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Texture sampler 3 (post-processing) |
 
 ### 4.3 Model Pipeline Layout
 
