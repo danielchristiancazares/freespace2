@@ -1330,6 +1330,192 @@ void gr_vulkan_render_model(model_material* material_info,
   issueModelDraw(renderCtx, ctx);
 }
 
+void gr_vulkan_render_shield_impact(shield_material* material_info,
+  primitive_type prim_type,
+  vertex_layout* layout,
+  gr_buffer_handle buffer_handle,
+  int n_verts)
+{
+  // Preconditions - frame injected by setup_frame, parameters must be valid
+  Assertion(g_backend->renderer != nullptr, "render_shield_impact called without renderer");
+  Assertion(material_info != nullptr, "render_shield_impact called with null material_info");
+  Assertion(layout != nullptr, "render_shield_impact called with null vertex layout");
+  Assertion(n_verts > 0, "render_shield_impact called with zero vertices");
+  Assertion(buffer_handle.isValid(), "render_shield_impact called with invalid buffer handle");
+
+  auto ctxBase = currentFrameCtx();
+  auto& frame = ctxBase.frame();
+  ctxBase.renderer.incrementPrimDraw();
+
+  // Start rendering FIRST and get the actual target contract
+  auto renderCtx = ctxBase.renderer.ensureRenderingStarted(ctxBase);
+  vk::CommandBuffer cmd = renderCtx.cmd;
+  const auto& rt = renderCtx.targetInfo;
+
+  // Shield impacts render into a single color attachment target (scene HDR or swapchain).
+  Assertion(rt.colorAttachmentCount == 1, "Shield impact rendering requires a single color attachment target");
+
+  ShaderModules shaderModules = ctxBase.renderer.getShaderModules(SDR_TYPE_SHIELD_DECAL);
+  Assertion(shaderModules.vert != nullptr, "Shield impact vertex shader not loaded");
+  Assertion(shaderModules.frag != nullptr, "Shield impact fragment shader not loaded");
+
+  PipelineKey pipelineKey{};
+  pipelineKey.type = SDR_TYPE_SHIELD_DECAL;
+  pipelineKey.variant_flags = material_info->get_shader_flags();
+  pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
+  pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);
+  pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
+  pipelineKey.color_attachment_count = rt.colorAttachmentCount;
+  pipelineKey.blend_mode = material_info->get_blend_mode();
+  pipelineKey.layout_hash = layout->hash();
+
+  vk::Pipeline pipeline = ctxBase.renderer.getPipeline(pipelineKey, shaderModules, *layout);
+  Assertion(pipeline, "Pipeline creation failed for shield impact shader");
+
+  vk::Buffer vertexBuffer = ctxBase.renderer.getBuffer(buffer_handle);
+  Assertion(vertexBuffer, "Failed to resolve Vulkan vertex buffer for shield impact handle %d", buffer_handle.value());
+
+  // Mirror OpenGL math + payload
+  matrix4 impact_transform;
+  matrix4 impact_projection;
+  vec3d min;
+  vec3d max;
+
+  const float radius = material_info->get_impact_radius();
+  min.xyz.x = min.xyz.y = min.xyz.z = -radius;
+  max.xyz.x = max.xyz.y = max.xyz.z = radius;
+  vm_matrix4_set_orthographic(&impact_projection, &max, &min);
+
+  // vm_matrix4_set_inverse_transform takes non-const pointers; mirror the OpenGL path by copying.
+  matrix impact_orient = material_info->get_impact_orient();
+  vec3d impact_pos = material_info->get_impact_pos();
+  vm_matrix4_set_inverse_transform(&impact_transform, &impact_orient, &impact_pos);
+
+  // Matrix UBO (binding 0) - match the standard matrixData layout.
+  matrixData_default_material_vert matrices{};
+  matrices.modelViewMatrix = gr_model_view_matrix;
+  matrices.projMatrix = gr_projection_matrix;
+
+  // Generic UBO (binding 1)
+  graphics::generic_data::shield_impact_data impactData{};
+  impactData.hitNormal = impact_orient.vec.fvec;
+  impactData.shieldProjMatrix = impact_projection;
+  impactData.shieldModelViewMatrix = impact_transform;
+  impactData.srgb = High_dynamic_range ? 1 : 0;
+  impactData.color = material_info->get_color();
+
+  const int textureHandle = material_info->get_texture_map(TM_BASE_TYPE);
+  impactData.shieldMapIndex = (textureHandle >= 0) ? bm_get_array_index(textureHandle) : 0;
+
+  // Allocate from uniform ring buffer (align both bindings to device requirement)
+  const size_t uboAlignmentRaw = ctxBase.renderer.getMinUniformOffsetAlignment();
+  const size_t uboAlignment = uboAlignmentRaw == 0 ? 1 : uboAlignmentRaw;
+  const size_t matrixSize = sizeof(matrices);
+  const size_t genericSize = sizeof(impactData);
+  const size_t genericOffset = ((matrixSize + uboAlignment - 1) / uboAlignment) * uboAlignment;
+  const size_t totalUniformSize = genericOffset + genericSize;
+
+  auto uniformAlloc = frame.uniformBuffer().allocate(totalUniformSize, uboAlignment);
+  auto* uniformBase = static_cast<char*>(uniformAlloc.mapped);
+  std::memcpy(uniformBase, &matrices, matrixSize);
+  std::memcpy(uniformBase + genericOffset, &impactData, genericSize);
+
+  vk::DescriptorBufferInfo matrixInfo{};
+  matrixInfo.buffer = frame.uniformBuffer().buffer();
+  matrixInfo.offset = uniformAlloc.offset;
+  matrixInfo.range = matrixSize;
+
+  vk::DescriptorBufferInfo genericInfo{};
+  genericInfo.buffer = frame.uniformBuffer().buffer();
+  genericInfo.offset = uniformAlloc.offset + genericOffset;
+  genericInfo.range = genericSize;
+
+  auto samplerKey = VulkanTextureManager::SamplerKey{};
+  samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
+
+  vk::DescriptorImageInfo shieldMapInfo = (textureHandle >= 0)
+	? ctxBase.renderer.getTextureDescriptor(ctxBase, textureHandle, samplerKey)
+	: ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
+
+  // Push descriptors: bind all declared bindings to avoid state leakage across draw calls
+  std::array<vk::WriteDescriptorSet, 6> writes{};
+  writes[0].dstBinding = 0;
+  writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+  writes[0].descriptorCount = 1;
+  writes[0].pBufferInfo = &matrixInfo;
+
+  writes[1].dstBinding = 1;
+  writes[1].descriptorType = vk::DescriptorType::eUniformBuffer;
+  writes[1].descriptorCount = 1;
+  writes[1].pBufferInfo = &genericInfo;
+
+  writes[2].dstBinding = 2;
+  writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[2].descriptorCount = 1;
+  writes[2].pImageInfo = &shieldMapInfo;
+
+  // Unused extra samplers: bind safe defaults
+  vk::DescriptorImageInfo defaultInfo = ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
+  for (uint32_t i = 3; i <= 5; ++i) {
+	writes[i].dstBinding = i;
+	writes[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	writes[i].descriptorCount = 1;
+	writes[i].pImageInfo = &defaultInfo;
+  }
+
+  cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, ctxBase.renderer.getPipelineLayout(), 0,
+	static_cast<uint32_t>(writes.size()), writes.data());
+
+  // Bind vertex buffer (shield mesh is a plain vertex stream)
+  vk::DeviceSize vbOffset = 0;
+  cmd.bindVertexBuffers(0, 1, &vertexBuffer, &vbOffset);
+
+  // Dynamic state
+  cmd.setPrimitiveTopology(convertPrimitiveType(prim_type));
+  cmd.setCullMode(material_info->get_cull_mode() ? vk::CullModeFlagBits::eBack : vk::CullModeFlagBits::eNone);
+  cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW compensates for negative viewport height Y-flip
+
+  gr_zbuffer_type zbufferMode = material_info->get_depth_mode();
+  bool depthTest = (zbufferMode == ZBUFFER_TYPE_READ || zbufferMode == ZBUFFER_TYPE_FULL);
+  bool depthWrite = (zbufferMode == ZBUFFER_TYPE_WRITE || zbufferMode == ZBUFFER_TYPE_FULL);
+  const bool hasDepthAttachment = (rt.depthFormat != vk::Format::eUndefined);
+  if (!hasDepthAttachment) {
+	depthTest = false;
+	depthWrite = false;
+  }
+  cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
+  cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
+  cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
+  cmd.setStencilTestEnable(VK_FALSE);
+
+  if (ctxBase.renderer.supportsExtendedDynamicState3()) {
+	const auto& caps = ctxBase.renderer.getExtendedDynamicState3Caps();
+	if (caps.colorBlendEnable) {
+	  vk::Bool32 blendEnable = (material_info->get_blend_mode() != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
+	  cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+	}
+	if (caps.colorWriteMask) {
+	  vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+		vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+	  cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+	}
+	if (caps.polygonMode) {
+	  cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
+	}
+	if (caps.rasterizationSamples) {
+	  cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+	}
+  }
+
+  vk::Viewport viewport = createFullScreenViewport();
+  cmd.setViewport(0, 1, &viewport);
+  vk::Rect2D scissor = createClipScissor();
+  cmd.setScissor(0, 1, &scissor);
+
+  cmd.draw(static_cast<uint32_t>(n_verts), 1, 0, 0);
+}
+
 void gr_vulkan_render_primitives(material* material_info,
   primitive_type prim_type,
   vertex_layout* layout,
@@ -2294,6 +2480,7 @@ void init_function_pointers()
 
   // Rendering
   gr_screen.gf_render_model = gr_vulkan_render_model;
+  gr_screen.gf_render_shield_impact = gr_vulkan_render_shield_impact;
   gr_screen.gf_render_primitives = gr_vulkan_render_primitives;
   gr_screen.gf_render_primitives_batched = gr_vulkan_render_primitives_batched;
   gr_screen.gf_render_nanovg = gr_vulkan_render_nanovg;
