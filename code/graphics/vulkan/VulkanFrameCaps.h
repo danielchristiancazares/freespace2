@@ -61,5 +61,23 @@ inline NanoVGBoundFrame requireNanoVGBound(FrameCtx ctx)
   return NanoVGBoundFrame{ ctx, ctx.frame().nanovgData };
 }
 
+struct DecalBoundFrame {
+  FrameCtx ctx;
+  BoundUniformBuffer globalsUbo;
+  BoundUniformBuffer infoUbo;
+};
+
+inline DecalBoundFrame requireDecalBound(FrameCtx ctx)
+{
+  Assertion(ctx.frame().decalGlobalsData.handle.isValid(),
+    "DecalGlobals UBO binding not set; call gr_bind_uniform_buffer(DecalGlobals) before rendering decals");
+  Assertion(ctx.frame().decalGlobalsData.size > 0, "DecalGlobals UBO binding must have non-zero size");
+  Assertion(ctx.frame().decalInfoData.handle.isValid(),
+    "DecalInfo UBO binding not set; call gr_bind_uniform_buffer(DecalInfo) before rendering decals");
+  Assertion(ctx.frame().decalInfoData.size > 0, "DecalInfo UBO binding must have non-zero size");
+
+  return DecalBoundFrame{ ctx, ctx.frame().decalGlobalsData, ctx.frame().decalInfoData };
+}
+
 } // namespace vulkan
 } // namespace graphics

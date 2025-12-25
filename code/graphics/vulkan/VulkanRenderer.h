@@ -74,6 +74,8 @@ class VulkanRenderer {
 			int bitmapHandle,
 			const VulkanTextureManager::SamplerKey& samplerKey);
 		vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
+		// Prepare for decal rendering: decals sample the main depth buffer, so it must be shader-readable.
+		void beginDecalPass(const FrameCtx& ctx);
 		// Returns a valid bindless slot index. Invalid handles return slot 0 (fallback).
 		uint32_t getBindlessTextureIndex(const FrameCtx& ctx, int bitmapHandle);
 		// Recording-only: update dynamic viewport/scissor state without requiring an active rendering pass.
@@ -144,7 +146,14 @@ class VulkanRenderer {
 		uint32_t getMinUniformBufferAlignment() const { return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment()); }
 		uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
 		ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
+		ShaderModules getShaderModulesByFilenames(const SCP_string& vertFilename, const SCP_string& fragFilename) const
+		{
+			return m_shaderManager->getModulesByFilenames(vertFilename, fragFilename);
+		}
 	vk::Pipeline getPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout) const { return m_pipelineManager->getPipeline(key, modules, layout); }
+		vk::DescriptorSet globalDescriptorSet() const { return m_globalDescriptorSet; }
+		// Updates the global (set=1) descriptor set to point at current G-buffer/depth views.
+		void refreshGlobalDescriptorSet() { bindDeferredGlobalDescriptors(); }
 	vk::Buffer getBuffer(gr_buffer_handle handle) const;
 	const ExtendedDynamicState3Caps& getExtendedDynamicState3Caps() const { return m_vulkanDevice->extDyn3Caps(); }
 	bool supportsExtendedDynamicState3() const { return m_vulkanDevice->supportsExtendedDynamicState3(); }
@@ -197,6 +206,19 @@ class VulkanRenderer {
 		static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;
 		static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;
 		static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
+
+		// Initialization-phase capability token: proves we are in initialize() and not mid-frame.
+		// This prevents "immediate submit" style helpers from being callable from draw/recording paths.
+		struct InitCtx {
+			InitCtx(const InitCtx&) = delete;
+			InitCtx& operator=(const InitCtx&) = delete;
+			InitCtx(InitCtx&&) = default;
+			InitCtx& operator=(InitCtx&&) = default;
+
+		private:
+			InitCtx() = default;
+			friend bool VulkanRenderer::initialize();
+		};
 
 		RenderCtx ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec); // Recording-only (internal)
 		// Recording-only: flushes any queued bitmap uploads into the current command buffer.
@@ -256,7 +278,7 @@ class VulkanRenderer {
 		void createRenderTargets();
 		void createRenderingSession();
 	void createDeferredLightingResources();
-	void createSmaaLookupTextures();
+	void createSmaaLookupTextures(const InitCtx& init);
 
 	uint32_t acquireImage(VulkanFrame& frame);
 	uint32_t acquireImageOrThrow(VulkanFrame& frame); // Throws on failure, no sentinels
@@ -273,7 +295,9 @@ class VulkanRenderer {
 		void recycleOneInFlight(); // Consumes one in-flight frame, adds to available
 		graphics::vulkan::SubmitInfo submitRecordedFrame(graphics::vulkan::RecordingFrame& rec); // Recording-only
 
-		void immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder);
+		// Init-only: records a one-time command buffer, submits it, and blocks until it has completed.
+		// Uses the renderer's global timeline semaphore to integrate with serial-gated deferred releases.
+		void submitInitCommandsAndWait(const InitCtx& init, const std::function<void(vk::CommandBuffer)>& recorder);
 
 		uint64_t queryCompletedSerial() const;
 		void maybeRunVulkanStress();

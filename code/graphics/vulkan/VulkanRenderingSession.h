@@ -46,8 +46,11 @@ public:
   void requestSmaaOutputTarget();                 // SMAA output (no depth)
   void requestBloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel); // bloom ping-pong mip (no depth)
   void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
+  // Select the deferred G-buffer target without modifying clear/load ops (used by decal pass restore).
+  void requestDeferredGBufferTarget();
   void endDeferredGeometry(vk::CommandBuffer cmd);// transitions gbuffer -> shader read, selects swapchain-no-depth
   void requestGBufferEmissiveTarget();            // gbuffer emissive-only (for pre-deferred scene copy)
+  void requestGBufferAttachmentTarget(uint32_t gbufferIndex); // single gbuffer attachment (no depth)
   void requestBitmapTarget(int bitmapHandle, int face); // bitmap render target (RTT)
 
   // Depth attachment selection (OpenGL post-processing parity):
@@ -199,6 +202,16 @@ private:
   public:
     RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
     void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class GBufferAttachmentTarget final : public RenderTargetState {
+  public:
+    explicit GBufferAttachmentTarget(uint32_t gbufferIndex);
+    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+
+  private:
+    uint32_t m_index = 0;
   };
 
   class SwapchainNoDepthTarget final : public RenderTargetState {

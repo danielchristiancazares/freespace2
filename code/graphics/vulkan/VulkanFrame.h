@@ -61,6 +61,8 @@ class VulkanFrame {
   uint32_t modelTransformDynamicOffset = 0;
   size_t modelTransformSize = 0;
   BoundUniformBuffer nanovgData;
+  BoundUniformBuffer decalGlobalsData;
+  BoundUniformBuffer decalInfoData;
 
   void resetPerFrameBindings()
   {
@@ -69,6 +71,8 @@ class VulkanFrame {
     modelTransformDynamicOffset = 0;
     modelTransformSize = 0;
     nanovgData = {};
+    decalGlobalsData = {};
+    decalInfoData = {};
   }
 
   private:
