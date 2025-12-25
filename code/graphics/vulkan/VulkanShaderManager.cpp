@@ -87,6 +87,80 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
 	const auto fragPath = fs::path(m_shaderRoot) / "copy.frag.spv";
 	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
   }
+  case shader_type::SDR_TYPE_POST_PROCESS_BRIGHTPASS: {
+	// Bloom bright-pass: downsample + high-pass into half-res RGBA16F.
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "brightpass.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_BLUR: {
+	// Bloom blur: horizontal/vertical variants selected by SDR_FLAG_BLUR_*.
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath =
+	  (variantFlags & SDR_FLAG_BLUR_HORIZONTAL)
+		? (fs::path(m_shaderRoot) / "blur_h.frag.spv")
+		: (fs::path(m_shaderRoot) / "blur_v.frag.spv");
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_BLOOM_COMP: {
+	// Bloom composite: sample blurred mip chain and add into HDR scene color.
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "bloom_comp.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_SMAA_EDGE: {
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "smaa_edge.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "smaa_edge.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_SMAA_BLENDING_WEIGHT: {
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "smaa_blend.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "smaa_blend.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_SMAA_NEIGHBORHOOD_BLENDING: {
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "smaa_neighborhood.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "smaa_neighborhood.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_FXAA_PREPASS: {
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "fxaa_prepass.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_FXAA: {
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "fxaa.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_LIGHTSHAFTS: {
+	// Lightshafts: additive fullscreen pass into LDR.
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "lightshafts.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_MAIN: {
+	// Main post-processing shader (color grading / film grain etc) applied on the LDR image.
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "post_uv.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "post_effects.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
+  case shader_type::SDR_TYPE_POST_PROCESS_TONEMAPPING: {
+	// Vulkan tonemapping pass: always outputs linear (swapchain is sRGB).
+	key.flags = 0;
+	const auto vertPath = fs::path(m_shaderRoot) / "tonemapping.vert.spv";
+	const auto fragPath = fs::path(m_shaderRoot) / "tonemapping.frag.spv";
+	return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+  }
   case shader_type::SDR_TYPE_DEFERRED_LIGHTING: {
 	const auto vertPath = fs::path(m_shaderRoot) / "deferred.vert.spv";
 	const auto fragPath = fs::path(m_shaderRoot) / "deferred.frag.spv";

@@ -170,6 +170,8 @@ class VulkanTextureManager {
 
 		// Populate (slot, baseFrameHandle) pairs for bindless descriptor updates.
 		void appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, int>>& out) const;
+		// Query slot assignment state (state-as-location: presence in m_bindlessSlots).
+		bool hasBindlessSlot(int baseFrameHandle) const;
 
 		// Serial at/after which it is safe to destroy newly-retired resources.
 		// During frame recording this should be the serial of the upcoming submit; after submit it should match the last submitted serial.
@@ -255,12 +257,12 @@ class VulkanTextureManager {
 	// - presence in m_bindlessSlots    => has a bindless slot assigned
 	std::unordered_map<int, ResidentTexture> m_residentTextures; // keyed by bmpman base frame handle
 	std::unordered_map<int, UnavailableTexture> m_unavailableTextures; // keyed by base frame
-	std::unordered_map<int, RenderTargetRecord> m_renderTargets; // keyed by base frame (bmpman render targets)
-	std::unordered_map<int, uint32_t> m_bindlessSlots; // keyed by base frame
-	std::unordered_set<int> m_pendingBindlessSlots; // textures waiting for a bindless slot assignment (retry each frame start)
-	std::unordered_set<int> m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)
-	mutable std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
-	std::vector<int> m_pendingUploads; // base frame handles queued for upload
+		std::unordered_map<int, RenderTargetRecord> m_renderTargets; // keyed by base frame (bmpman render targets)
+		std::unordered_map<int, uint32_t> m_bindlessSlots; // keyed by base frame
+		std::unordered_set<int> m_pendingBindlessSlots; // textures waiting for a bindless slot assignment (retry each frame start)
+		std::unordered_set<int> m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)
+		mutable std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
+		std::vector<int> m_pendingUploads; // base frame handles queued for upload
 
 	uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
 	void createDefaultSampler();

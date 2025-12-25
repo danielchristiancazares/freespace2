@@ -26,9 +26,15 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vulkan/vulkan.hpp>
 
 namespace graphics {
+namespace generic_data {
+struct lightshaft_data;
+struct post_data;
+} // namespace generic_data
+
 namespace vulkan {
 
 class VulkanTextureBindings;
@@ -64,17 +70,23 @@ class VulkanRenderer {
 
 
 		// Helper methods for rendering
-		vk::DescriptorImageInfo getTextureDescriptor(int bitmapHandle,
+		vk::DescriptorImageInfo getTextureDescriptor(const FrameCtx& ctx,
+			int bitmapHandle,
 			const VulkanTextureManager::SamplerKey& samplerKey);
 		vk::DescriptorImageInfo getDefaultTextureDescriptor(const VulkanTextureManager::SamplerKey& samplerKey);
 		// Returns a valid bindless slot index. Invalid handles return slot 0 (fallback).
-		uint32_t getBindlessTextureIndex(int bitmapHandle);
+		uint32_t getBindlessTextureIndex(const FrameCtx& ctx, int bitmapHandle);
 		// Recording-only: update dynamic viewport/scissor state without requiring an active rendering pass.
 		void setViewport(const FrameCtx& ctx, const vk::Viewport& viewport);
 		void setScissor(const FrameCtx& ctx, const vk::Rect2D& scissor);
 		// Bitmap render targets (bmpman RTT API)
 		bool createBitmapRenderTarget(int handle, int* width, int* height, int* bpp, int* mm_lvl, int flags);
 		bool setBitmapRenderTarget(const FrameCtx& ctx, int handle, int face);
+
+	// Scene texture (OpenGL parity): render the 3D scene into an offscreen HDR target, then post-process to swapchain.
+	void beginSceneTexture(const FrameCtx& ctx, bool enableHdrPipeline);
+	void copySceneEffectTexture(const FrameCtx& ctx);
+	void endSceneTexture(const FrameCtx& ctx, bool enablePostProcessing);
 		void setModelUniformBinding(VulkanFrame& frame,
 			gr_buffer_handle handle,
 			size_t offset,
@@ -187,15 +199,47 @@ class VulkanRenderer {
 		static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB for on-demand uploads
 
 		RenderCtx ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame& rec); // Recording-only (internal)
+		// Recording-only: flushes any queued bitmap uploads into the current command buffer.
+		// If rendering was active, this will suspend and then resume dynamic rendering to make transfer ops legal.
+		void flushQueuedTextureUploads(const FrameCtx& ctx, bool syncModelDescriptors);
 
 		// Deferred implementation details (called by typestate wrapper API)
 		void beginDeferredLighting(graphics::vulkan::RecordingFrame& rec, bool clearNonColorBufs); // Recording-only
 		void endDeferredGeometry(vk::CommandBuffer cmd);
 		void bindDeferredGlobalDescriptors();
 		void recordPreDeferredSceneColorCopy(const RenderCtx& render, uint32_t imageIndex);
+		void recordPreDeferredSceneHdrCopy(const RenderCtx& render);
 		void recordDeferredLighting(const RenderCtx& render,
 			vk::Buffer uniformBuffer,
 			const std::vector<DeferredLight>& lights);
+		void recordTonemappingToSwapchain(const RenderCtx& render, VulkanFrame& frame, bool hdrEnabled);
+		void recordBloomBrightPass(const RenderCtx& render, VulkanFrame& frame);
+		void recordBloomBlurPass(const RenderCtx& render,
+			VulkanFrame& frame,
+			uint32_t srcPingPongIndex,
+			uint32_t variantFlags,
+			int mipLevel,
+			uint32_t bloomWidth,
+			uint32_t bloomHeight);
+		void recordBloomCompositePass(const RenderCtx& render, VulkanFrame& frame, int mipLevels);
+		void generateBloomMipmaps(vk::CommandBuffer cmd, uint32_t pingPongIndex, vk::Extent2D baseExtent);
+		void recordSmaaEdgePass(const RenderCtx& render, VulkanFrame& frame, const vk::DescriptorImageInfo& colorInput);
+		void recordSmaaBlendWeightsPass(const RenderCtx& render,
+			VulkanFrame& frame,
+			const vk::DescriptorImageInfo& edgesInput,
+			const vk::DescriptorImageInfo& areaTex,
+			const vk::DescriptorImageInfo& searchTex);
+		void recordSmaaNeighborhoodPass(const RenderCtx& render,
+			VulkanFrame& frame,
+			const vk::DescriptorImageInfo& colorInput,
+			const vk::DescriptorImageInfo& blendTex);
+		void recordFxaaPrepass(const RenderCtx& render, VulkanFrame& frame, const vk::DescriptorImageInfo& ldrInput);
+		void recordFxaaPass(const RenderCtx& render, VulkanFrame& frame, const vk::DescriptorImageInfo& luminanceInput);
+		void recordLightshaftsPass(const RenderCtx& render, VulkanFrame& frame, const graphics::generic_data::lightshaft_data& params);
+		void recordPostEffectsPass(const RenderCtx& render, VulkanFrame& frame, const graphics::generic_data::post_data& params, const vk::DescriptorImageInfo& ldrInput, const vk::DescriptorImageInfo& depthInput);
+		void recordCopyToSwapchain(const RenderCtx& render, vk::DescriptorImageInfo src);
+
+		void requestMainTargetWithDepth();
 
 		// Descriptor sync helpers (called from beginFrame).
 		void updateModelDescriptors(uint32_t frameIndex,
@@ -212,6 +256,7 @@ class VulkanRenderer {
 		void createRenderTargets();
 		void createRenderingSession();
 	void createDeferredLightingResources();
+	void createSmaaLookupTextures();
 
 	uint32_t acquireImage(VulkanFrame& frame);
 	uint32_t acquireImageOrThrow(VulkanFrame& frame); // Throws on failure, no sentinels
@@ -300,6 +345,21 @@ class VulkanRenderer {
 	VolumeMesh m_fullscreenMesh;
 	VolumeMesh m_sphereMesh;
 	VolumeMesh m_cylinderMesh;
+
+	// SMAA lookup textures (area/search) - immutable, sampled-only resources.
+	struct SmaaLookupTexture {
+		vk::UniqueImage image;
+		vk::UniqueDeviceMemory memory;
+		vk::UniqueImageView view;
+	};
+	SmaaLookupTexture m_smaaAreaTex;
+	SmaaLookupTexture m_smaaSearchTex;
+
+	// Scene texture typestate: presence == active (state as location).
+	struct SceneTextureState {
+		bool hdrEnabled = false;
+	};
+	std::optional<SceneTextureState> m_sceneTexture;
 };
 
 } // namespace vulkan

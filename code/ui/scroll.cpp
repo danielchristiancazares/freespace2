@@ -115,6 +115,8 @@ void UI_SCROLLBAR::create(UI_WINDOW *wnd, int _x, int _y, int _h, int _start, in
 
 void UI_SCROLLBAR::draw()
 {
+	auto clip_restore = graphics::save_clip();
+
 	UI_GADGET::draw();
 
 	if (uses_bmaps) {

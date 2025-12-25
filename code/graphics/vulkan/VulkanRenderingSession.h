@@ -36,14 +36,48 @@ public:
 
   // Boundary-facing state transitions (no "pending", no dual state)
   void requestSwapchainTarget();                  // swapchain + depth
+  void requestSwapchainNoDepthTarget();           // swapchain (no depth)
+  void requestSceneHdrTarget();                   // scene HDR + depth
+  void requestSceneHdrNoDepthTarget();            // scene HDR (no depth)
+  void requestPostLdrTarget();                    // post LDR (no depth)
+  void requestPostLuminanceTarget();              // post luminance (no depth)
+  void requestSmaaEdgesTarget();                  // SMAA edges (no depth)
+  void requestSmaaBlendTarget();                  // SMAA blend weights (no depth)
+  void requestSmaaOutputTarget();                 // SMAA output (no depth)
+  void requestBloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel); // bloom ping-pong mip (no depth)
   void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
   void endDeferredGeometry(vk::CommandBuffer cmd);// transitions gbuffer -> shader read, selects swapchain-no-depth
   void requestGBufferEmissiveTarget();            // gbuffer emissive-only (for pre-deferred scene copy)
   void requestBitmapTarget(int bitmapHandle, int face); // bitmap render target (RTT)
 
+  // Depth attachment selection (OpenGL post-processing parity):
+  // - Main depth holds the scene depth
+  // - Cockpit depth holds cockpit-only depth (populated between save/restore zbuffer calls)
+  void useMainDepthAttachment();
+  void useCockpitDepthAttachment();
+
   // Capture the current swapchain image into the scene-color snapshot for this swapchain image index.
   // No-op if the swapchain was not created with TRANSFER_SRC usage.
   void captureSwapchainColorToSceneCopy(vk::CommandBuffer cmd, uint32_t imageIndex);
+
+  // Transition scene HDR color to shader-read for post-processing.
+  void transitionSceneHdrToShaderRead(vk::CommandBuffer cmd);
+
+  // Transition depth attachments to shader-read for post-processing (lightshafts, etc.).
+  void transitionMainDepthToShaderRead(vk::CommandBuffer cmd);
+  void transitionCockpitDepthToShaderRead(vk::CommandBuffer cmd);
+
+  // Transition offscreen post-processing images to shader-read for sampling in subsequent passes.
+  void transitionPostLdrToShaderRead(vk::CommandBuffer cmd);
+  void transitionPostLuminanceToShaderRead(vk::CommandBuffer cmd);
+  void transitionSmaaEdgesToShaderRead(vk::CommandBuffer cmd);
+  void transitionSmaaBlendToShaderRead(vk::CommandBuffer cmd);
+  void transitionSmaaOutputToShaderRead(vk::CommandBuffer cmd);
+  void transitionBloomToShaderRead(vk::CommandBuffer cmd, uint32_t pingPongIndex);
+
+  // Copy the current scene HDR color into the effect snapshot (used by distortion/effects).
+  // Ends any active dynamic rendering scope since transfers are invalid inside rendering.
+  void copySceneHdrToEffect(vk::CommandBuffer cmd);
 
   // Clear control
   void requestClear();
@@ -108,6 +142,59 @@ private:
     void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
+  class SceneHdrWithDepthTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class SceneHdrNoDepthTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class PostLdrTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class PostLuminanceTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class SmaaEdgesTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class SmaaBlendTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class SmaaOutputTarget final : public RenderTargetState {
+  public:
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+  };
+
+  class BloomMipTarget final : public RenderTargetState {
+  public:
+	BloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel);
+	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
+	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+
+  private:
+	uint32_t m_index = 0;
+	uint32_t m_mip = 0;
+  };
+
   class DeferredGBufferTarget final : public RenderTargetState {
   public:
     RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
@@ -163,6 +250,9 @@ private:
 
   // Render pass variants - called by target state classes
   void beginSwapchainRenderingInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
+  void beginSceneHdrRenderingInternal(vk::CommandBuffer cmd);
+  void beginSceneHdrRenderingNoDepthInternal(vk::CommandBuffer cmd);
+  void beginOffscreenColorRenderingInternal(vk::CommandBuffer cmd, vk::Extent2D extent, vk::ImageView colorView);
   void beginGBufferRenderingInternal(vk::CommandBuffer cmd);
   void beginGBufferEmissiveRenderingInternal(vk::CommandBuffer cmd);
   void beginSwapchainRenderingNoDepthInternal(vk::CommandBuffer cmd, uint32_t imageIndex);
@@ -171,10 +261,23 @@ private:
   // Layout transitions (barriers encapsulated here)
   void transitionSwapchainToAttachment(vk::CommandBuffer cmd, uint32_t imageIndex);
   void transitionDepthToAttachment(vk::CommandBuffer cmd);
+  void transitionCockpitDepthToAttachment(vk::CommandBuffer cmd);
   void transitionSwapchainToPresent(vk::CommandBuffer cmd, uint32_t imageIndex);
   void transitionGBufferToAttachment(vk::CommandBuffer cmd);
   void transitionGBufferToShaderRead(vk::CommandBuffer cmd);
   void transitionSceneCopyToLayout(vk::CommandBuffer cmd, uint32_t imageIndex, vk::ImageLayout newLayout);
+  void transitionSceneHdrToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionSceneEffectToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionCockpitDepthToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionPostLdrToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionPostLuminanceToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionSmaaEdgesToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionSmaaBlendToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionSmaaOutputToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout);
+  void transitionBloomToLayout(vk::CommandBuffer cmd, uint32_t pingPongIndex, vk::ImageLayout newLayout);
+
+  enum class DepthAttachmentKind { Main, Cockpit };
+  DepthAttachmentKind m_depthAttachment = DepthAttachmentKind::Main;
 
   VulkanDevice& m_device;
   VulkanRenderTargets& m_targets;

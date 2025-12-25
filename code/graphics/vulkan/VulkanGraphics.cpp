@@ -17,6 +17,7 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_vulkan.h"
 #include "graphics/2d.h"
+#include "graphics/grinternal.h"
 #include "graphics/grstub.h"
 #include "graphics/material.h"
 #include "graphics/matrix.h"
@@ -25,6 +26,7 @@
 #include "mod_table/mod_table.h"
 #include "cmdline/cmdline.h"
 #include "globalincs/version.h"
+#include "globalincs/systemvars.h"
 #include "lighting/lighting.h"
 
 #define MODEL_SDR_FLAG_MODE_CPP
@@ -498,11 +500,133 @@ void stub_post_process_begin() {}
 
 void stub_post_process_end() {}
 
+void gr_vulkan_post_process_set_effect(const char* name, int value, const vec3d* rgb)
+{
+  if (name == nullptr) {
+	return;
+  }
+
+  // Boundary: ensure the post-processing manager exists so scripted effects have a place to land.
+  if (graphics::Post_processing_manager == nullptr) {
+	graphics::Post_processing_manager.reset(new graphics::PostProcessingManager());
+	// Table parse failure is non-fatal for Vulkan; post-processing shaders may be partially implemented.
+	(void)graphics::Post_processing_manager->parse_table();
+  }
+
+  // Lightshafts are special-cased (OpenGL parity)
+  if (!stricmp("lightshafts", name)) {
+	auto& ls_params = graphics::Post_processing_manager->getLightshaftParams();
+	ls_params.intensity = value / 100.0f;
+	ls_params.on = !!value;
+	return;
+  }
+
+  auto& postEffects = graphics::Post_processing_manager->getPostEffects();
+  for (auto& eff : postEffects) {
+	if (!stricmp(eff.name.c_str(), name)) {
+	  eff.intensity = (value / eff.div) + eff.add;
+	  if ((rgb != nullptr) && !(vmd_zero_vector == *rgb)) {
+		eff.rgb = *rgb;
+	  }
+	  break;
+	}
+  }
+}
+
+void gr_vulkan_post_process_set_defaults()
+{
+  if (graphics::Post_processing_manager == nullptr) {
+	return;
+  }
+
+  auto& postEffects = graphics::Post_processing_manager->getPostEffects();
+  for (auto& eff : postEffects) {
+	eff.intensity = eff.default_intensity;
+  }
+}
+
+void gr_vulkan_post_process_save_zbuffer()
+{
+  // Vulkan uses a separate cockpit depth attachment (OpenGL parity):
+  // - Scene depth remains intact for post-processing
+  // - Cockpit draws render against a cleared cockpit-only depth buffer
+  if (!g_backend || !g_backend->recording.has_value()) {
+	return;
+  }
+  auto ctxBase = currentFrameCtx();
+
+  // Switch to cockpit depth and clear it. Transfers are invalid inside dynamic rendering so we end any active pass.
+  if (auto* session = ctxBase.renderer.renderingSession()) {
+	session->useCockpitDepthAttachment();
+  }
+
+  // Request a depth clear and restart rendering immediately so clears execute even if no draws occur.
+  ctxBase.renderer.zbufferClear(true);
+  (void)ctxBase.renderer.ensureRenderingStarted(ctxBase);
+}
+
+void gr_vulkan_post_process_restore_zbuffer()
+{
+  // Restore main scene depth attachment (OpenGL parity).
+  if (!g_backend || !g_backend->recording.has_value()) {
+	return;
+  }
+
+  auto ctxBase = currentFrameCtx();
+  if (auto* session = ctxBase.renderer.renderingSession()) {
+	session->useMainDepthAttachment();
+  }
+}
+
 void stub_scene_texture_begin() {}
 
 void stub_scene_texture_end() {}
 
 void stub_copy_effect_texture() {}
+
+void gr_vulkan_scene_texture_begin()
+{
+  if (!g_backend || !g_backend->recording.has_value()) {
+	return;
+  }
+
+  // Boundary: ensure the post-processing manager exists so options (bloom/lightshafts) and scripted effects
+  // have a stable home, matching OpenGL's post-processing init behavior.
+  if (graphics::Post_processing_manager == nullptr) {
+	graphics::Post_processing_manager.reset(new graphics::PostProcessingManager());
+	(void)graphics::Post_processing_manager->parse_table();
+  }
+
+  // Match OpenGL's behavior: HDR pipeline is enabled only when post-processing is enabled and not overridden.
+  const bool enableHdrPipeline = Gr_post_processing_enabled && !PostProcessing_override;
+  High_dynamic_range = enableHdrPipeline;
+
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.beginSceneTexture(ctxBase, enableHdrPipeline);
+}
+
+void gr_vulkan_scene_texture_end()
+{
+  if (!g_backend || !g_backend->recording.has_value()) {
+	return;
+  }
+
+  const bool enablePostProcessing = Gr_post_processing_enabled && !PostProcessing_override;
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.endSceneTexture(ctxBase, enablePostProcessing);
+
+  // Reset per-frame HDR flag (OpenGL parity).
+  High_dynamic_range = false;
+}
+
+void gr_vulkan_copy_effect_texture()
+{
+  if (!g_backend || !g_backend->recording.has_value()) {
+	return;
+  }
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.copySceneEffectTexture(ctxBase);
+}
 
 void stub_deferred_lighting_begin(bool /*clearNonColorBufs*/) {
 }
@@ -874,11 +998,11 @@ void gr_vulkan_render_model(model_material* material_info,
 
   // Build push constants - texture indices
   auto& renderer = ctxBase.renderer;
-  auto toIndexOr = [&renderer](int h, uint32_t fallbackSlot) -> uint32_t {
+  auto toIndexOr = [&renderer, &ctxBase](int h, uint32_t fallbackSlot) -> uint32_t {
 	if (h < 0) {
 	  return fallbackSlot;
 	}
-	return renderer.getBindlessTextureIndex(h);
+	return renderer.getBindlessTextureIndex(ctxBase, h);
   };
 
   int baseTex   = material_info->get_texture_map(TM_BASE_TYPE);
@@ -1160,11 +1284,12 @@ void gr_vulkan_render_primitives(material* material_info,
   auto samplerKey = VulkanTextureManager::SamplerKey{};
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
   baseMapInfo = isTextured
-	? ctxBase.renderer.getTextureDescriptor(textureHandle, samplerKey)
+	? ctxBase.renderer.getTextureDescriptor(ctxBase, textureHandle, samplerKey)
 	: ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
 
-  std::array<vk::WriteDescriptorSet, 3> writes{};
-  uint32_t writeCount = 3; // Always bind all push descriptor bindings to avoid state leakage
+  // Push descriptors: bind all declared bindings to avoid state leakage across draw calls
+  std::array<vk::WriteDescriptorSet, 6> writes{};
+  uint32_t writeCount = 6;
 
   writes[0].dstBinding = 0;
   writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
@@ -1180,6 +1305,15 @@ void gr_vulkan_render_primitives(material* material_info,
   writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
   writes[2].descriptorCount = 1;
   writes[2].pImageInfo = &baseMapInfo;
+
+  // Unused extra samplers: bind safe defaults
+  vk::DescriptorImageInfo defaultInfo = ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
+  for (uint32_t i = 3; i <= 5; ++i) {
+	writes[i].dstBinding = i;
+	writes[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	writes[i].descriptorCount = 1;
+	writes[i].pImageInfo = &defaultInfo;
+  }
 
   // Bind pipeline
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
@@ -1378,22 +1512,39 @@ void gr_vulkan_render_nanovg(nanovg_material* material_info,
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
   const int textureHandle = material_info->get_texture_map(TM_BASE_TYPE);
   vk::DescriptorImageInfo textureInfo = material_info->is_textured()
-	? ctxBase.renderer.getTextureDescriptor(textureHandle, samplerKey)
+	? ctxBase.renderer.getTextureDescriptor(ctxBase, textureHandle, samplerKey)
 	: ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
 
-  std::array<vk::WriteDescriptorSet, 2> writes{};
-  writes[0].dstBinding = 1;
+  // Push descriptors: bind all declared bindings to avoid state leakage across draw calls.
+  std::array<vk::WriteDescriptorSet, 6> writes{};
+  writes[0].dstBinding = 0;
   writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
   writes[0].descriptorCount = 1;
+  // NanoVG shaders don't use binding 0, but we must still bind a valid UBO to avoid stale state.
   writes[0].pBufferInfo = &nanovgInfo;
 
-  writes[1].dstBinding = 2;
-  writes[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[1].dstBinding = 1;
+  writes[1].descriptorType = vk::DescriptorType::eUniformBuffer;
   writes[1].descriptorCount = 1;
-  writes[1].pImageInfo = &textureInfo;
+  writes[1].pBufferInfo = &nanovgInfo;
+
+  writes[2].dstBinding = 2;
+  writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[2].descriptorCount = 1;
+  writes[2].pImageInfo = &textureInfo;
+
+  // Unused extra samplers: bind safe defaults
+  vk::DescriptorImageInfo defaultInfo = ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
+  for (uint32_t i = 3; i <= 5; ++i) {
+	writes[i].dstBinding = i;
+	writes[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	writes[i].descriptorCount = 1;
+	writes[i].pImageInfo = &defaultInfo;
+  }
 
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, ctxBase.renderer.getPipelineLayout(), 0, 2, writes.data());
+  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, ctxBase.renderer.getPipelineLayout(), 0,
+	static_cast<uint32_t>(writes.size()), writes.data());
 
   vk::DeviceSize vbOffset = 0;
   cmd.bindVertexBuffers(0, 1, &vertexBuffer, &vbOffset);
@@ -1518,10 +1669,10 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
 
   vk::DescriptorImageInfo baseMapInfo = ctxBase.renderer.getTextureDescriptor(
-	textureHandle, samplerKey);
+	ctxBase, textureHandle, samplerKey);
 
-  // Build push descriptor writes (3 bindings: 0=matrix, 1=generic, 2=texture)
-  std::array<vk::WriteDescriptorSet, 3> writes{};
+  // Push descriptors: bind all declared bindings to avoid state leakage across draw calls.
+  std::array<vk::WriteDescriptorSet, 6> writes{};
 
   writes[0].dstBinding = 0;
   writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
@@ -1538,6 +1689,15 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
   writes[2].descriptorCount = 1;
   writes[2].pImageInfo = &baseMapInfo;
 
+  // Unused extra samplers: bind safe defaults
+  vk::DescriptorImageInfo defaultInfo = ctxBase.renderer.getDefaultTextureDescriptor(samplerKey);
+  for (uint32_t i = 3; i <= 5; ++i) {
+	writes[i].dstBinding = i;
+	writes[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	writes[i].descriptorCount = 1;
+	writes[i].pImageInfo = &defaultInfo;
+  }
+
   // Bind pipeline
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
@@ -1546,7 +1706,7 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material* material_info,
 	vk::PipelineBindPoint::eGraphics,
 	ctxBase.renderer.getPipelineLayout(),
 	0,  // set 0 (per-draw push descriptors)
-	3,  // all three bindings
+	static_cast<uint32_t>(writes.size()),
 	writes.data());
 
   // Bind vertex buffer
@@ -1698,7 +1858,7 @@ void gr_vulkan_render_rocket_primitives(interface_material* material_info,
   if (textureHandle >= 0) {
 	auto samplerKey = VulkanTextureManager::SamplerKey{};
 	samplerKey.address = convertTextureAddressing(material_info->get_texture_addressing());
-	baseMapInfo = ctxBase.renderer.getTextureDescriptor(textureHandle, samplerKey);
+	baseMapInfo = ctxBase.renderer.getTextureDescriptor(ctxBase, textureHandle, samplerKey);
 
 	writes[1].dstBinding = 2;
 	writes[1].descriptorType = vk::DescriptorType::eCombinedImageSampler;
@@ -1826,10 +1986,45 @@ void init_function_pointers()
   gr_screen.gf_flip = gr_vulkan_flip;
   gr_screen.gf_setup_frame = gr_vulkan_setup_frame;
   gr_screen.gf_clear = []() {
-	currentRenderer().requestClear();
+		// Match OpenGL gr_clear() semantics: clear the color buffer, respecting the current clip region.
+		// This is used in multiple places to clear only a sub-rectangle (e.g. comm head ani region).
+		if (!g_backend || !g_backend->recording.has_value()) {
+		  return;
+		}
+
+		auto ctxBase = currentFrameCtx();
+
+		// vkCmdClearAttachments is only valid inside a render pass instance / dynamic rendering.
+		// ensureRenderingStarted() is the capability token that proves we're in one.
+		auto render = currentRenderer().ensureRenderingStarted(ctxBase);
+
+		const vk::Rect2D rect = createClipScissor();
+		if (rect.extent.width == 0 || rect.extent.height == 0) {
+		  return;
+		}
+
+		const float r = gr_screen.current_clear_color.red / 255.0f;
+		const float g = gr_screen.current_clear_color.green / 255.0f;
+		const float b = gr_screen.current_clear_color.blue / 255.0f;
+		const float a = gr_screen.current_clear_color.alpha / 255.0f;
+
+		vk::ClearAttachment attachment{};
+		attachment.aspectMask = vk::ImageAspectFlagBits::eColor;
+		attachment.colorAttachment = 0;
+		attachment.clearValue.color = vk::ClearColorValue(std::array<float, 4>{ r, g, b, a });
+
+		vk::ClearRect clearRect{};
+		clearRect.rect = rect;
+		clearRect.baseArrayLayer = 0;
+		clearRect.layerCount = 1;
+
+		render.cmd.clearAttachments(1, &attachment, 1, &clearRect);
   };
   gr_screen.gf_set_clear_color = [](int r, int g, int b) {
-	currentRenderer().setClearColor(r, g, b);
+		// Keep the shared engine state in sync; other code reads gr_screen.current_clear_color directly.
+		gr_init_color(&gr_screen.current_clear_color, r, g, b);
+
+		currentRenderer().setClearColor(r, g, b);
   };
 
   // Clipping
@@ -1865,6 +2060,17 @@ void init_function_pointers()
   // Bitmap render targets (RTT)
   gr_screen.gf_bm_make_render_target = gr_vulkan_bm_make_render_target;
   gr_screen.gf_bm_set_render_target = gr_vulkan_bm_set_render_target;
+
+  // Scene texture + post-processing hook points (used by main game render loop)
+  gr_screen.gf_scene_texture_begin = gr_vulkan_scene_texture_begin;
+  gr_screen.gf_scene_texture_end = gr_vulkan_scene_texture_end;
+  gr_screen.gf_copy_effect_texture = gr_vulkan_copy_effect_texture;
+
+  // Post-processing controls (SEXP/Lua hooks + cockpit z-buffer)
+  gr_screen.gf_post_process_set_effect = gr_vulkan_post_process_set_effect;
+  gr_screen.gf_post_process_set_defaults = gr_vulkan_post_process_set_defaults;
+  gr_screen.gf_post_process_save_zbuffer = gr_vulkan_post_process_save_zbuffer;
+  gr_screen.gf_post_process_restore_zbuffer = gr_vulkan_post_process_restore_zbuffer;
 
   // Buffer management
   gr_screen.gf_create_buffer = gr_vulkan_create_buffer;

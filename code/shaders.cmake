@@ -8,6 +8,23 @@ set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 			${SHADER_DIR}/vulkan.vert
 			${SHADER_DIR}/copy.frag
 			${SHADER_DIR}/copy.vert
+			${SHADER_DIR}/tonemapping.frag
+			${SHADER_DIR}/tonemapping.vert
+			${SHADER_DIR}/post_uv.vert
+			${SHADER_DIR}/brightpass.frag
+			${SHADER_DIR}/blur_h.frag
+			${SHADER_DIR}/blur_v.frag
+			${SHADER_DIR}/bloom_comp.frag
+			${SHADER_DIR}/smaa_edge.vert
+			${SHADER_DIR}/smaa_edge.frag
+			${SHADER_DIR}/smaa_blend.vert
+			${SHADER_DIR}/smaa_blend.frag
+			${SHADER_DIR}/smaa_neighborhood.vert
+			${SHADER_DIR}/smaa_neighborhood.frag
+			${SHADER_DIR}/fxaa_prepass.frag
+			${SHADER_DIR}/fxaa.frag
+			${SHADER_DIR}/lightshafts.frag
+			${SHADER_DIR}/post_effects.frag
 			${SHADER_DIR}/movie.frag
 			${SHADER_DIR}/movie.vert
 			${SHADER_DIR}/model.frag

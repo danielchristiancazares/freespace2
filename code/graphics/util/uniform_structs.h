@@ -273,8 +273,7 @@ struct lightshaft_data {
 	float falloff;
 	float intensity;
 	float cp_intensity;
-
-	float pad[1];
+	int samplenum;
 };
 
 struct fxaa_data {

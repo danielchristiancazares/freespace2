@@ -47,6 +47,8 @@ void UI_RADIO::draw()
 {
 	int offset;
 
+	auto clip_restore = graphics::save_clip();
+
 
 	if ( uses_bmaps ) {
 
