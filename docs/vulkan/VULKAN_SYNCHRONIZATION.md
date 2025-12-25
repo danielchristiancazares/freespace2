@@ -687,7 +687,7 @@ The following locations use blocking device/queue waits:
 
 | Location | Wait Type | Purpose |
 |----------|-----------|---------|
-| `VulkanRenderer.cpp:1647` | `graphicsQueue().waitIdle()` | `immediateSubmit()` completion |
+| `VulkanRenderer.cpp:3223` | `device().waitSemaphores()` (timeline) | `submitInitCommandsAndWait()` completion |
 | `VulkanRenderer.cpp:1655` | `device().waitIdle()` | Shutdown synchronization |
 | `VulkanDevice.cpp:418` | `device->waitIdle()` | Pre-shutdown cleanup |
 | `VulkanDevice.cpp:1059` | `device->waitIdle()` | Pre-swapchain recreation |

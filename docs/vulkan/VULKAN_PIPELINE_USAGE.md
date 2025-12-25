@@ -790,3 +790,4 @@ See [Render Target Type to Format Mapping](#render-target-type-to-format-mapping
 - [Render Pass Structure](VULKAN_RENDER_PASS_STRUCTURE.md) - Dynamic rendering details
 - [Descriptor Sets](VULKAN_DESCRIPTOR_SETS.md) - Descriptor set management
 
+

@@ -8,6 +8,10 @@ set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 			${SHADER_DIR}/vulkan.vert
 			${SHADER_DIR}/copy.frag
 			${SHADER_DIR}/copy.vert
+			${SHADER_DIR}/decal.vert
+			${SHADER_DIR}/decal_diffuse.frag
+			${SHADER_DIR}/decal_emissive.frag
+			${SHADER_DIR}/decal_normal.frag
 			${SHADER_DIR}/tonemapping.frag
 			${SHADER_DIR}/tonemapping.vert
 			${SHADER_DIR}/post_uv.vert

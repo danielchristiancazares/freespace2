@@ -217,10 +217,22 @@ void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs, bool pres
   m_target = std::make_unique<DeferredGBufferTarget>();
 }
 
+void VulkanRenderingSession::requestDeferredGBufferTarget()
+{
+  endActivePass();
+  m_target = std::make_unique<DeferredGBufferTarget>();
+}
+
 void VulkanRenderingSession::requestGBufferEmissiveTarget()
 {
   endActivePass();
   m_target = std::make_unique<GBufferEmissiveTarget>();
+}
+
+void VulkanRenderingSession::requestGBufferAttachmentTarget(uint32_t gbufferIndex)
+{
+  endActivePass();
+  m_target = std::make_unique<GBufferAttachmentTarget>(gbufferIndex);
 }
 
 void VulkanRenderingSession::captureSwapchainColorToSceneCopy(vk::CommandBuffer cmd, uint32_t imageIndex)
@@ -590,6 +602,48 @@ VulkanRenderingSession::DeferredGBufferTarget::info(const VulkanDevice& device, 
 
 void VulkanRenderingSession::DeferredGBufferTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) {
   s.beginGBufferRenderingInternal(cmd);
+}
+
+VulkanRenderingSession::GBufferAttachmentTarget::GBufferAttachmentTarget(uint32_t gbufferIndex) : m_index(gbufferIndex)
+{
+}
+
+RenderTargetInfo
+VulkanRenderingSession::GBufferAttachmentTarget::info(const VulkanDevice& /*device*/, const VulkanRenderTargets& targets) const
+{
+  RenderTargetInfo out{};
+  out.colorFormat = targets.gbufferFormat();
+  out.colorAttachmentCount = 1;
+  out.depthFormat = vk::Format::eUndefined;
+  return out;
+}
+
+void VulkanRenderingSession::GBufferAttachmentTarget::begin(VulkanRenderingSession& s, vk::CommandBuffer cmd, uint32_t /*imageIndex*/)
+{
+  Assertion(m_index < VulkanRenderTargets::kGBufferCount,
+	"GBufferAttachmentTarget index out of range (%u)", m_index);
+
+  const auto extent = s.m_device.swapchainExtent();
+
+  // Ensure gbuffer images are in color-attachment layout for rendering.
+  s.transitionGBufferToAttachment(cmd);
+
+  vk::RenderingAttachmentInfo colorAttachment{};
+  colorAttachment.imageView = s.m_targets.gbufferView(m_index);
+  colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+  // Always LOAD for decals: we blend into existing gbuffer content.
+  colorAttachment.loadOp = vk::AttachmentLoadOp::eLoad;
+  colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+
+  vk::RenderingInfo renderingInfo{};
+  renderingInfo.renderArea = vk::Rect2D({0, 0}, extent);
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &colorAttachment;
+  renderingInfo.pDepthAttachment = nullptr;
+  renderingInfo.pStencilAttachment = nullptr;
+
+  cmd.beginRendering(renderingInfo);
 }
 
 RenderTargetInfo
