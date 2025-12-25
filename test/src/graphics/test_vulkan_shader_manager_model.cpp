@@ -147,6 +147,45 @@ TEST_F(VulkanShaderManagerModelTest, Scenario_ModelIgnoresVariantFlagsForModules
 	EXPECT_EQ(first.frag, second.frag);
 }
 
+TEST_F(VulkanShaderManagerModelTest, Scenario_ShieldDecalUsesShieldImpactModules)
+{
+	// Provide shader pairs for both shield impact and default-material paths.
+	// The shader manager checks embedded files first by filename, so we provide
+	// filesystem fallbacks. The test verifies that SDR_TYPE_SHIELD_DECAL routes to
+	// different shaders than SDR_TYPE_DEFAULT_MATERIAL (the contract), regardless
+	// of whether they come from embedded files or the filesystem.
+	writeSpirv(m_root, "shield-impact.vert.spv", 8);
+	writeSpirv(m_root, "shield-impact.frag.spv", 12);
+	writeSpirv(m_root, "default-material.vert.spv", 100);
+	writeSpirv(m_root, "default-material.frag.spv", 104);
+
+	vk::Device fakeDevice{reinterpret_cast<VkDevice>(0x1234)};
+	graphics::vulkan::VulkanShaderManager manager(fakeDevice, m_root.string());
+
+	auto shieldModules = manager.getModules(shader_type::SDR_TYPE_SHIELD_DECAL, 0u);
+	auto defaultModules = manager.getModules(shader_type::SDR_TYPE_DEFAULT_MATERIAL, 0u);
+
+	EXPECT_NE(shieldModules.vert, defaultModules.vert)
+		<< "Shield impact vertex shader should differ from default-material vertex shader";
+	EXPECT_NE(shieldModules.frag, defaultModules.frag)
+		<< "Shield impact fragment shader should differ from default-material fragment shader";
+}
+
+TEST_F(VulkanShaderManagerModelTest, Scenario_ShieldDecalIgnoresVariantFlagsForModules)
+{
+	writeSpirv(m_root, "shield-impact.vert.spv", 16);
+	writeSpirv(m_root, "shield-impact.frag.spv", 24);
+
+	vk::Device fakeDevice{reinterpret_cast<VkDevice>(0x1234)};
+	graphics::vulkan::VulkanShaderManager manager(fakeDevice, m_root.string());
+
+	auto first = manager.getModules(shader_type::SDR_TYPE_SHIELD_DECAL, 0u);
+	auto second = manager.getModules(shader_type::SDR_TYPE_SHIELD_DECAL, 0xFFu); // arbitrary flags
+
+	EXPECT_EQ(first.vert, second.vert);
+	EXPECT_EQ(first.frag, second.frag);
+}
+
 TEST_F(VulkanShaderManagerModelTest, Scenario_ModelPipelineKeyIgnoresLayoutHash)
 {
 	graphics::vulkan::PipelineKey a{};

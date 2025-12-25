@@ -44,6 +44,13 @@ TEST(VulkanLayoutContracts, Scenario_DefaultMaterialUsesStandardLayout)
 	EXPECT_EQ(spec.vertexInput, VertexInputMode::VertexAttributes);
 }
 
+TEST(VulkanLayoutContracts, Scenario_ShieldDecalUsesStandardLayoutAndVertexAttributes)
+{
+	const auto& spec = getShaderLayoutSpec(SDR_TYPE_SHIELD_DECAL);
+	EXPECT_EQ(spec.pipelineLayout, PipelineLayoutKind::Standard);
+	EXPECT_EQ(spec.vertexInput, VertexInputMode::VertexAttributes);
+}
+
 
 
 
