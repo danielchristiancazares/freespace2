@@ -21,6 +21,12 @@ layout(binding = 1, std140) uniform genericData {
 
 void main()
 {
+	// Fast path: avoid doing any work if the effect is effectively off.
+	if (u.intensity <= 0.0001 && u.cp_intensity <= 0.0001) {
+		fragOut0 = vec4(0.0);
+		return;
+	}
+
 	// Cockpit depth acts as a mask: pixels with cockpit geometry should bloom with cp_intensity.
 	float mask = texture(cockpit, fragTexCoord).r;
 	if (mask < 1.0) {
@@ -28,7 +34,8 @@ void main()
 		return;
 	}
 
-	const int samples = max(u.samplenum, 1);
+	// Clamp to avoid pathological GPU stalls if a mod sets a very large sample count.
+	const int samples = clamp(u.samplenum, 1, 128);
 	vec2 stepv = fragTexCoord - u.sun_pos;
 	stepv *= (1.0 / float(samples)) * u.density;
 
