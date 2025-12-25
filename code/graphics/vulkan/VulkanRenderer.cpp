@@ -2253,6 +2253,14 @@ void VulkanRenderer::recordLightshaftsPass(const RenderCtx& render, VulkanFrame&
   vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, fsLayout);
   cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
+  // Our pipelines use VK_EXT_extended_dynamic_state3 for colorBlendEnable when available.
+  // VulkanRenderingSession::applyDynamicState sets a baseline of blending OFF at pass start,
+  // so we must explicitly enable it for additive passes like lightshafts.
+  if (m_vulkanDevice->supportsExtendedDynamicState3() && m_vulkanDevice->extDyn3Caps().colorBlendEnable) {
+	vk::Bool32 enable = VK_TRUE;
+	cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &enable));
+  }
+
   const vk::DeviceSize uboAlignment = static_cast<vk::DeviceSize>(getMinUniformBufferAlignment());
   auto uniformAlloc = frame.uniformBuffer().allocate(sizeof(params), uboAlignment);
   std::memcpy(uniformAlloc.mapped, &params, sizeof(params));
