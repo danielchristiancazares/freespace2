@@ -218,6 +218,8 @@ void UI_WINDOW::draw()
 {
 	UI_GADGET *tmp;
 
+	auto clip_restore = graphics::save_clip();
+
 	gr_reset_clip();
 	font::set_font(f_id);
 

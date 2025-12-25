@@ -480,8 +480,9 @@ void HudGaugeMessages::render(float  /*frametime*/, bool config)
 		}
 	}
 
-	reticle_follow = doSlew;
-}
+		reticle_follow = doSlew;
+		resetClip();
+	}
 
 //	Similar to HUD printf, but shows only one message at a time, at a fixed location.
 void HUD_fixed_printf(float duration, color col, const char *format, ...)

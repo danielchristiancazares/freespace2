@@ -1,0 +1,887 @@
+# Vulkan Texture Binding Architecture
+
+This document provides comprehensive documentation of the Vulkan texture binding system in the FreeSpace 2 engine, covering texture management, sampler creation, descriptor set integration, format handling, YCbCr conversion, and caching strategies.
+
+---
+
+## 1. Texture Binding Architecture Overview
+
+### Core Components
+
+The texture binding system consists of several interconnected components:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `VulkanTextureManager` | `VulkanTextureManager.h:98-290` | Central texture lifecycle manager |
+| `VulkanTextureBindings` | `VulkanTextureBindings.h:15-47` | Draw-path API for descriptor access |
+| `VulkanTextureUploader` | `VulkanTextureBindings.h:49-66` | Upload-phase API for GPU work |
+| `TextureId` | `VulkanTextureId.h:18-48` | Strong-typed texture identity wrapper |
+| `VulkanMovieManager` | `VulkanMovieManager.h:19-127` | YCbCr movie texture handling |
+
+### Binding Model
+
+The system employs a hybrid binding strategy:
+
+1. **Bindless Textures (Model Rendering)**: A fixed-size array of up to `kMaxBindlessTextures` (1024) texture slots bound via a descriptor set. Shaders index into this array using per-vertex or per-instance indices.
+
+2. **Push Descriptors (2D/HUD Rendering)**: Per-draw immediate descriptor updates via `vkCmdPushDescriptorSetKHR`, bypassing the bindless array for simpler 2D paths.
+
+```
+VulkanConstants.h:9-20
+constexpr uint32_t kMaxBindlessTextures = 1024;
+constexpr uint32_t kBindlessTextureSlotFallback = 0;     // Black fallback
+constexpr uint32_t kBindlessTextureSlotDefaultBase = 1;  // White default
+constexpr uint32_t kBindlessTextureSlotDefaultNormal = 2; // Flat normal
+constexpr uint32_t kBindlessTextureSlotDefaultSpec = 3;   // Dielectric F0
+constexpr uint32_t kBindlessFirstDynamicTextureSlot = 4;  // Dynamic range start
+```
+
+### State Tracking Model
+
+Texture state is tracked by container membership rather than explicit state fields:
+
+```cpp
+VulkanTextureManager.h:251-261
+// State as location:
+// - presence in m_residentTextures => resident (GPU resources valid)
+// - presence in m_pendingUploads   => queued for upload
+// - presence in m_unavailable      => permanently unavailable
+// - presence in m_bindlessSlots    => has a bindless slot assigned
+std::unordered_map<int, ResidentTexture> m_residentTextures;
+std::unordered_map<int, UnavailableTexture> m_unavailableTextures;
+std::unordered_map<int, uint32_t> m_bindlessSlots;
+std::unordered_set<int> m_pendingBindlessSlots;
+```
+
+---
+
+## 2. Sampler Creation and Management
+
+### Default Sampler Configuration
+
+The texture manager creates a default sampler at initialization with standard filtering and addressing:
+
+```cpp
+VulkanTextureManager.cpp:150-172
+void VulkanTextureManager::createDefaultSampler()
+{
+  vk::SamplerCreateInfo samplerInfo;
+  samplerInfo.magFilter = vk::Filter::eLinear;
+  samplerInfo.minFilter = vk::Filter::eLinear;
+  samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+  samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+  samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+  samplerInfo.anisotropyEnable = VK_FALSE;
+  samplerInfo.maxAnisotropy = 1.0f;
+  samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+  samplerInfo.unnormalizedCoordinates = VK_FALSE;
+  samplerInfo.compareEnable = VK_FALSE;
+  samplerInfo.compareOp = vk::CompareOp::eAlways;
+  samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+  samplerInfo.mipLodBias = 0.0f;
+  samplerInfo.minLod = 0.0f;
+  samplerInfo.maxLod = VK_LOD_CLAMP_NONE;  // Allows all mip levels
+  m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
+}
+```
+
+### Sampler Caching System
+
+The `SamplerKey` structure enables sampler reuse through a hash-based cache:
+
+```cpp
+VulkanTextureManager.h:123-131
+struct SamplerKey {
+    vk::Filter filter = vk::Filter::eLinear;
+    vk::SamplerAddressMode address = vk::SamplerAddressMode::eRepeat;
+
+    bool operator==(const SamplerKey& other) const {
+        return filter == other.filter && address == other.address;
+    }
+};
+```
+
+Sampler lookup and creation occurs on-demand:
+
+```cpp
+VulkanTextureManager.cpp:315-344
+vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key) const
+{
+  // Hash combines filter and address mode
+  const size_t hash = (static_cast<size_t>(key.filter) << 4) ^
+                       static_cast<size_t>(key.address);
+  auto it = m_samplerCache.find(hash);
+  if (it != m_samplerCache.end()) {
+    return it->second.get();  // Cache hit
+  }
+
+  // Cache miss: create new sampler with requested configuration
+  vk::SamplerCreateInfo samplerInfo;
+  samplerInfo.magFilter = key.filter;
+  samplerInfo.minFilter = key.filter;
+  samplerInfo.addressModeU = key.address;
+  samplerInfo.addressModeV = key.address;
+  samplerInfo.addressModeW = key.address;
+  // ... (remaining fields match default sampler)
+
+  auto sampler = m_device.createSamplerUnique(samplerInfo);
+  vk::Sampler handle = sampler.get();
+  m_samplerCache.emplace(hash, std::move(sampler));
+  return handle;
+}
+```
+
+### Supported Sampler Configurations
+
+| Filter Mode | Address Mode | Use Case |
+|-------------|--------------|----------|
+| `eLinear` | `eRepeat` | Default for model textures |
+| `eLinear` | `eClampToEdge` | UI/HUD elements, environment maps |
+| `eNearest` | `eRepeat` | Pixel-art or when filtering causes artifacts |
+| `eNearest` | `eClampToEdge` | HUD icons, text glyphs |
+
+---
+
+## 3. Descriptor Set Integration
+
+### Bindless Descriptor Architecture
+
+Model rendering uses a pre-allocated descriptor set with a large combined-image-sampler array:
+
+```cpp
+VulkanRenderer.cpp:1419-1443
+// Binding 1: Bindless textures
+// Correctness rule: every slot must always point at a valid descriptor
+const vk::DescriptorImageInfo fallbackInfo = m_textureManager->fallbackDescriptor(samplerKey);
+const vk::DescriptorImageInfo defaultBaseInfo = m_textureManager->defaultBaseDescriptor(samplerKey);
+const vk::DescriptorImageInfo defaultNormalInfo = m_textureManager->defaultNormalDescriptor(samplerKey);
+const vk::DescriptorImageInfo defaultSpecInfo = m_textureManager->defaultSpecDescriptor(samplerKey);
+
+std::array<vk::DescriptorImageInfo, kMaxBindlessTextures> desiredInfos{};
+desiredInfos.fill(fallbackInfo);  // All slots default to fallback
+desiredInfos[kBindlessTextureSlotDefaultBase] = defaultBaseInfo;
+desiredInfos[kBindlessTextureSlotDefaultNormal] = defaultNormalInfo;
+desiredInfos[kBindlessTextureSlotDefaultSpec] = defaultSpecInfo;
+
+// Overlay resident textures onto their assigned slots
+for (const auto& [arrayIndex, handle] : textures) {
+    vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
+    desiredInfos[arrayIndex] = info;
+}
+```
+
+### Descriptor Update Caching
+
+The renderer maintains a per-frame cache to minimize redundant descriptor updates:
+
+```cpp
+VulkanRenderer.cpp:1524-1571
+auto& cache = m_modelBindlessCache[frameIndex];
+
+if (!cache.initialized) {
+    // First frame: write all slots
+    vk::WriteDescriptorSet texturesWrite{};
+    texturesWrite.dstBinding = 1;
+    texturesWrite.descriptorCount = kMaxBindlessTextures;
+    // ...
+    cache.infos = desiredInfos;
+    cache.initialized = true;
+} else {
+    // Subsequent frames: only write changed slots
+    uint32_t i = 0;
+    while (i < kMaxBindlessTextures) {
+        if (sameInfo(cache.infos[i], desiredInfos[i])) {
+            ++i;
+            continue;
+        }
+        // Find contiguous run of changed slots
+        const uint32_t start = i;
+        while (i < kMaxBindlessTextures && !sameInfo(cache.infos[i], desiredInfos[i])) {
+            cache.infos[i] = desiredInfos[i];
+            ++i;
+        }
+        // Batch write the changed range
+        writes.push_back(...);
+    }
+}
+```
+
+### Push Descriptor Usage (2D Rendering)
+
+For HUD and 2D rendering, push descriptors provide per-draw texture binding. Push descriptors are used in multiple rendering paths:
+
+**1. Primitive Rendering** (`VulkanGraphics.cpp:1306`):
+- Per-draw uniform and texture binding for primitives, models, and complex geometry
+
+**2. Bitmap Rendering** (`VulkanGraphics.cpp:1530`):
+```cpp
+// Get descriptor for the current batch texture
+auto texDescriptor = m_textureManager->getTextureDescriptor(bitmapHandle);
+
+// Immediate descriptor update without pre-allocation
+cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics,
+                         layout, 0, 1, &writeDescriptor);
+```
+
+**3. String/Font Rendering** (`VulkanGraphics.cpp:1689`):
+- Per-string uniforms and font texture descriptors for NanoVG and VFNT rendering
+
+**4. Model Rendering** (`VulkanGraphics.cpp:1855`):
+- Batched transform and material descriptors for model instances
+
+### Descriptor Binding Layout
+
+The model descriptor set layout (binding 1) uses:
+
+| Binding | Type | Count | Description |
+|---------|------|-------|-------------|
+| 0 | `eStorageBuffer` | 1 | Vertex heap SSBO |
+| 1 | `eCombinedImageSampler` | 1024 | Bindless texture array |
+| 2 | `eUniformBufferDynamic` | 1 | Per-model uniforms |
+| 3 | `eStorageBufferDynamic` | 1 | Batched transforms |
+
+---
+
+## 4. Texture Format Handling and Conversions
+
+### Format Selection
+
+Format selection is based on bitmap flags and bit depth:
+
+```cpp
+VulkanTextureManager.cpp:17-40
+vk::Format selectFormat(const bitmap& bmp)
+{
+  // Block-compressed formats (DDS)
+  if (bmp.flags & BMP_TEX_DXT1) return vk::Format::eBc1RgbaUnormBlock;
+  if (bmp.flags & BMP_TEX_DXT3) return vk::Format::eBc2UnormBlock;
+  if (bmp.flags & BMP_TEX_DXT5) return vk::Format::eBc3UnormBlock;
+  if (bmp.flags & BMP_TEX_BC7)  return vk::Format::eBc7UnormBlock;
+
+  // Single-channel formats (fonts, alpha masks)
+  if ((bmp.flags & BMP_AABITMAP) || bmp.bpp == 8) {
+    return vk::Format::eR8Unorm;
+  }
+
+  // Standard color formats - bmpman stores as BGRA
+  return vk::Format::eB8G8R8A8Unorm;
+}
+```
+
+### Supported Format Matrix
+
+| Source Format | Vulkan Format | Bytes/Pixel | Notes |
+|---------------|---------------|-------------|-------|
+| DXT1/BC1 | `eBc1RgbaUnormBlock` | 0.5 | 4x4 blocks, 8 bytes |
+| DXT3/BC2 | `eBc2UnormBlock` | 1 | 4x4 blocks, 16 bytes |
+| DXT5/BC3 | `eBc3UnormBlock` | 1 | 4x4 blocks, 16 bytes |
+| BC7 | `eBc7UnormBlock` | 1 | 4x4 blocks, 16 bytes |
+| 8bpp/AABITMAP | `eR8Unorm` | 1 | Single channel |
+| 16bpp | `eB8G8R8A8Unorm` | 4 | Expanded during upload |
+| 24bpp | `eB8G8R8A8Unorm` | 4 | Expanded during upload |
+| 32bpp | `eB8G8R8A8Unorm` | 4 | Direct copy |
+
+### Pixel Format Conversions
+
+**16bpp A1R5G5B5 Expansion:**
+```cpp
+VulkanTextureManager.cpp:794-810
+// 16bpp uses A1R5G5B5 packing (see Gr_t_* masks in code/graphics/2d.cpp)
+auto* src = reinterpret_cast<uint16_t*>(frameBmp->data);
+auto* dst = static_cast<uint8_t*>(alloc.mapped);
+for (uint32_t i = 0; i < width * height; ++i) {
+    const uint16_t pixel = src[i];
+    const uint8_t b = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
+    const uint8_t g = static_cast<uint8_t>(((pixel >> 5) & 0x1F) * 255 / 31);
+    const uint8_t r = static_cast<uint8_t>(((pixel >> 10) & 0x1F) * 255 / 31);
+    const uint8_t a = (pixel & 0x8000) ? 255u : 0u;
+
+    dst[i * 4 + 0] = b;
+    dst[i * 4 + 1] = g;
+    dst[i * 4 + 2] = r;
+    dst[i * 4 + 3] = a;
+}
+```
+
+**24bpp RGB Expansion:**
+```cpp
+VulkanTextureManager.cpp:785-793
+auto* src = reinterpret_cast<uint8_t*>(frameBmp->data);
+auto* dst = static_cast<uint8_t*>(alloc.mapped);
+for (uint32_t i = 0; i < width * height; ++i) {
+    dst[i * 4 + 0] = src[i * 3 + 0];  // B
+    dst[i * 4 + 1] = src[i * 3 + 1];  // G
+    dst[i * 4 + 2] = src[i * 3 + 2];  // R
+    dst[i * 4 + 3] = 255;              // A (opaque)
+}
+```
+
+### Block-Compressed Size Calculation
+
+```cpp
+VulkanTextureManager.h:24-30
+inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
+{
+    // BC1 uses 8 bytes per 4x4 block; BC2/BC3/BC7 use 16 bytes
+    const size_t blockSize = (format == vk::Format::eBc1RgbaUnormBlock) ? 8 : 16;
+    const size_t blocksWide = (w + 3) / 4;
+    const size_t blocksHigh = (h + 3) / 4;
+    return blocksWide * blocksHigh * blockSize;
+}
+```
+
+---
+
+## 5. YCbCr Sampler Creation and Hardware Conversion
+
+The `VulkanMovieManager` implements hardware-accelerated YCbCr-to-RGB conversion for video playback.
+
+### Feature Detection
+
+```cpp
+VulkanMovieManager.cpp:83-94
+bool VulkanMovieManager::initialize(uint32_t maxMovieTextures)
+{
+  // Requires Vulkan 1.1 samplerYcbcrConversion feature
+  if (!m_vulkanDevice.features11().samplerYcbcrConversion) {
+    vkprintf("VulkanMovieManager: samplerYcbcrConversion not supported\n");
+    m_available = false;
+    return false;
+  }
+  // ...
+}
+```
+
+### Format Support Query
+
+```cpp
+VulkanMovieManager.cpp:110-157
+bool VulkanMovieManager::queryFormatSupport()
+{
+  const vk::Format format = vk::Format::eG8B8R83Plane420Unorm;  // YUV420P
+
+  vk::FormatProperties2 formatProps{};
+  m_physicalDevice.getFormatProperties2(format, &formatProps);
+
+  const auto features = formatProps.formatProperties.optimalTilingFeatures;
+
+  // Check required features
+  const auto required = vk::FormatFeatureFlagBits::eSampledImage |
+                        vk::FormatFeatureFlagBits::eTransferDst;
+  if ((features & required) != required) {
+    return false;
+  }
+
+  // Determine chroma location support
+  if (features & vk::FormatFeatureFlagBits::eMidpointChromaSamples) {
+    m_chromaLocation = vk::ChromaLocation::eMidpoint;
+  } else if (features & vk::FormatFeatureFlagBits::eCositedChromaSamples) {
+    m_chromaLocation = vk::ChromaLocation::eCositedEven;
+  }
+
+  // Determine chroma filter support
+  if (features & vk::FormatFeatureFlagBits::eSampledImageYcbcrConversionLinearFilter) {
+    m_movieChromaFilter = vk::Filter::eLinear;
+  } else {
+    m_movieChromaFilter = vk::Filter::eNearest;
+  }
+
+  return true;
+}
+```
+
+### YCbCr Configuration Matrix
+
+Four configurations are created to support BT.601/BT.709 colorspaces with full/narrow ranges:
+
+```cpp
+VulkanMovieManager.cpp:159-229
+void VulkanMovieManager::createMovieYcbcrConfigs()
+{
+  for (uint32_t i = 0; i < MOVIE_YCBCR_CONFIG_COUNT; ++i) {  // 4 configs
+    const auto colorspace = static_cast<MovieColorSpace>(i / 2u);
+    const auto range = static_cast<MovieColorRange>(i % 2u);
+
+    vk::SamplerYcbcrConversionCreateInfo convInfo{};
+    convInfo.format = vk::Format::eG8B8R83Plane420Unorm;
+
+    // Select color matrix
+    convInfo.ycbcrModel = (colorspace == MovieColorSpace::BT709)
+      ? vk::SamplerYcbcrModelConversion::eYcbcr709
+      : vk::SamplerYcbcrModelConversion::eYcbcr601;
+
+    // Select value range
+    convInfo.ycbcrRange = (range == MovieColorRange::Full)
+      ? vk::SamplerYcbcrRange::eItuFull
+      : vk::SamplerYcbcrRange::eItuNarrow;
+
+    convInfo.components = { eIdentity, eIdentity, eIdentity, eIdentity };
+    convInfo.xChromaOffset = m_chromaLocation;
+    convInfo.yChromaOffset = m_chromaLocation;
+    convInfo.chromaFilter = m_movieChromaFilter;
+    convInfo.forceExplicitReconstruction = VK_FALSE;
+
+    cfg.conversion = m_device.createSamplerYcbcrConversionUnique(convInfo);
+
+    // Create immutable sampler referencing the conversion
+    vk::SamplerYcbcrConversionInfo samplerConvInfo{};
+    samplerConvInfo.conversion = cfg.conversion.get();
+
+    vk::SamplerCreateInfo samplerInfo{};
+    samplerInfo.pNext = &samplerConvInfo;
+    samplerInfo.magFilter = m_movieChromaFilter;
+    samplerInfo.minFilter = m_movieChromaFilter;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    // ...
+    cfg.sampler = m_device.createSamplerUnique(samplerInfo);
+  }
+}
+```
+
+### YCbCr Configuration Index Mapping
+
+```cpp
+VulkanMovieManager.cpp:737-740
+uint32_t VulkanMovieManager::ycbcrIndex(MovieColorSpace colorspace, MovieColorRange range) const
+{
+  return static_cast<uint32_t>(colorspace) * 2u + static_cast<uint32_t>(range);
+}
+```
+
+| Index | Colorspace | Range | Matrix |
+|-------|------------|-------|--------|
+| 0 | BT.601 | Narrow | ITU-R BT.601 (16-235) |
+| 1 | BT.601 | Full | ITU-R BT.601 (0-255) |
+| 2 | BT.709 | Narrow | ITU-R BT.709 (16-235) |
+| 3 | BT.709 | Full | ITU-R BT.709 (0-255) |
+
+### Multi-Planar Image Upload
+
+Movie frames are uploaded as three separate planes (Y, U, V):
+
+```cpp
+VulkanMovieManager.cpp:496-528
+std::array<vk::BufferImageCopy, 3> copies{};
+
+// Y plane (full resolution)
+copies[0].bufferOffset = alloc.offset + tex.yOffset;
+copies[0].bufferRowLength = tex.uploadYStride;
+copies[0].imageSubresource.aspectMask = vk::ImageAspectFlagBits::ePlane0;
+copies[0].imageExtent = vk::Extent3D{tex.width, tex.height, 1};
+
+// U plane (half resolution)
+copies[1].bufferOffset = alloc.offset + tex.uOffset;
+copies[1].bufferRowLength = tex.uploadUVStride;
+copies[1].imageSubresource.aspectMask = vk::ImageAspectFlagBits::ePlane1;
+copies[1].imageExtent = vk::Extent3D{uvW, uvH, 1};
+
+// V plane (half resolution)
+copies[2].bufferOffset = alloc.offset + tex.vOffset;
+copies[2].bufferRowLength = tex.uploadUVStride;
+copies[2].imageSubresource.aspectMask = vk::ImageAspectFlagBits::ePlane2;
+copies[2].imageExtent = vk::Extent3D{uvW, uvH, 1};
+
+cmd.copyBufferToImage(stagingBuffer, tex.image.get(),
+                      vk::ImageLayout::eTransferDstOptimal, copies);
+```
+
+---
+
+## 6. Texture Caching and Reuse Patterns
+
+### Residency Lifecycle
+
+```
+Upload Request
+     |
+     v
++----------------+     Upload Complete     +----------------+
+| m_pendingUploads| ------------------>   | m_residentTextures |
++----------------+                         +----------------+
+     |                                            |
+     | Upload Failed                              | Delete/Evict
+     v                                            v
++-------------------+                      +------------------+
+| m_unavailableTextures |                  | DeferredReleaseQueue |
++-------------------+                      +------------------+
+```
+
+### LRU Eviction Strategy
+
+When bindless slots are exhausted, the manager evicts the least recently used texture:
+
+```cpp
+VulkanTextureManager.cpp:1309-1339
+if (m_freeBindlessSlots.empty() && allowResidentEvict) {
+  // Only evict textures whose last use has completed on the GPU
+  uint32_t oldestFrame = UINT32_MAX;
+  int oldestHandle = -1;
+
+  for (const auto& [handle, slot] : m_bindlessSlots) {
+    // Skip render targets (pinned)
+    if (m_renderTargets.find(handle) != m_renderTargets.end()) {
+      continue;
+    }
+
+    auto residentIt = m_residentTextures.find(handle);
+    if (residentIt == m_residentTextures.end()) {
+      continue;
+    }
+
+    const auto& other = residentIt->second;
+    // Only evict if GPU is done with this texture
+    if (other.lastUsedSerial <= m_completedSerial) {
+      if (other.lastUsedFrame < oldestFrame) {
+        oldestFrame = other.lastUsedFrame;
+        oldestHandle = handle;
+      }
+    }
+  }
+
+  if (oldestHandle >= 0) {
+    retireTexture(oldestHandle, m_safeRetireSerial);
+  }
+}
+```
+
+### Resident Texture Tracking
+
+```cpp
+VulkanTextureManager.h:113-117
+struct ResidentTexture {
+    VulkanTexture gpu;
+    uint32_t lastUsedFrame = 0;        // CPU frame counter for LRU
+    uint64_t lastUsedSerial = 0;       // GPU submission serial for safety
+};
+```
+
+Frame and serial tracking is updated on texture access:
+
+```cpp
+VulkanTextureManager.cpp:1505-1509
+auto& record = residentIt->second;
+record.lastUsedFrame = m_currentFrameIndex;
+record.lastUsedSerial = m_safeRetireSerial;  // Upcoming submission
+```
+
+### Deferred Resource Release
+
+GPU resources are released only after all referencing command buffers complete:
+
+```cpp
+VulkanDeferredRelease.h:57-84
+class DeferredReleaseQueue {
+  void collect(uint64_t completedSerial)
+  {
+    size_t writeIdx = 0;
+    for (auto& e : m_entries) {
+      if (e.retireSerial <= completedSerial) {
+        e.release();  // GPU done, safe to destroy
+      } else {
+        m_entries[writeIdx++] = std::move(e);  // Keep waiting
+      }
+    }
+    m_entries.resize(writeIdx);
+  }
+};
+```
+
+### Staging Buffer Management
+
+Texture uploads share a per-frame staging buffer with budget tracking:
+
+```cpp
+VulkanTextureManager.cpp:664-756
+vk::DeviceSize stagingBudget = frame.stagingBuffer().size();
+vk::DeviceSize stagingUsed = 0;
+
+for (int baseFrame : m_pendingUploads) {
+  // Calculate required staging space
+  size_t totalUploadSize = /* calculated per-texture */;
+
+  // Textures too large for staging are permanently unavailable
+  if (totalUploadSize > stagingBudget) {
+    markUnavailable(baseFrame, UnavailableReason::TooLargeForStaging);
+    continue;
+  }
+
+  // Defer to next frame if budget exhausted
+  if (stagingUsed + totalUploadSize > stagingBudget) {
+    remaining.push_back(baseFrame);
+    continue;
+  }
+
+  // Allocate from per-frame staging buffer
+  auto allocOpt = frame.stagingBuffer().try_allocate(layerSize);
+  if (!allocOpt) {
+    remaining.push_back(baseFrame);
+    break;
+  }
+}
+```
+
+---
+
+## 7. Mipmap and Array Texture Handling
+
+### Texture Array Detection and Creation
+
+```cpp
+VulkanTextureManager.cpp:355-385
+int numFrames = 1;
+const int resolvedBase = bm_get_base_frame(baseFrame, &numFrames);
+const bool isArray = bm_is_texture_array(baseFrame);
+const uint32_t layers = isArray ? static_cast<uint32_t>(numFrames) : 1u;
+
+// Validate array frames have matching dimensions
+if (isArray) {
+  for (int i = 0; i < numFrames; ++i) {
+    ushort f = 0;
+    int fw = 0, fh = 0;
+    bm_get_info(baseFrame + i, &fw, &fh, &f, nullptr, nullptr);
+    if (static_cast<uint32_t>(fw) != width ||
+        static_cast<uint32_t>(fh) != height ||
+        (f & BMP_TEX_COMP) != (flags & BMP_TEX_COMP)) {
+      validArray = false;
+      break;
+    }
+  }
+}
+```
+
+### Image View Type
+
+All textures (single or array) use `e2DArray` view type for uniform shader access:
+
+```cpp
+VulkanTextureManager.cpp:906-914
+vk::ImageViewCreateInfo viewInfo;
+viewInfo.image = record.gpu.image.get();
+viewInfo.viewType = vk::ImageViewType::e2DArray;  // Uniform for all textures
+viewInfo.format = format;
+viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+viewInfo.subresourceRange.levelCount = 1;
+viewInfo.subresourceRange.layerCount = layers;
+record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
+```
+
+### Render Target Mipmap Generation
+
+Render targets support automatic mipmap generation via blit operations:
+
+```cpp
+VulkanTextureManager.cpp:1646-1647
+const uint32_t mipLevels = wantsMips ? mipLevelsForExtent(width, height) : 1u;
+```
+
+```cpp
+VulkanTextureManager.cpp:104-113
+uint32_t mipLevelsForExtent(uint32_t w, uint32_t h)
+{
+  uint32_t levels = 1;
+  uint32_t size = (w > h) ? w : h;
+  while (size > 1) {
+    size >>= 1;
+    ++levels;
+  }
+  return levels;
+}
+```
+
+**Mipmap Generation Algorithm:**
+
+```cpp
+VulkanTextureManager.cpp:1962-2027
+for (uint32_t level = 1; level < tex.mipLevels; ++level) {
+  const int32_t nextW = (mipW > 1) ? (mipW / 2) : 1;
+  const int32_t nextH = (mipH > 1) ? (mipH / 2) : 1;
+
+  // Transition dst mip to transfer dst
+  vk::ImageMemoryBarrier2 toDst{};
+  toDst.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+  toDst.newLayout = vk::ImageLayout::eTransferDstOptimal;
+  toDst.subresourceRange.baseMipLevel = level;
+  // ...
+
+  // Blit from previous mip to current
+  vk::ImageBlit blit{};
+  blit.srcSubresource.mipLevel = level - 1;
+  blit.srcOffsets[1] = vk::Offset3D(mipW, mipH, 1);
+  blit.dstSubresource.mipLevel = level;
+  blit.dstOffsets[1] = vk::Offset3D(nextW, nextH, 1);
+
+  cmd.blitImage(tex.image.get(), eTransferSrcOptimal,
+                tex.image.get(), eTransferDstOptimal,
+                1, &blit, vk::Filter::eLinear);
+
+  // Transition current mip to transfer src for next iteration
+  // ...
+
+  mipW = nextW;
+  mipH = nextH;
+}
+```
+
+### Cubemap Render Targets
+
+Cubemaps are created with 6 array layers and individual per-face attachment views:
+
+```cpp
+VulkanTextureManager.cpp:1642-1714
+const bool isCubemap = (flags & BMP_FLAG_CUBEMAP) != 0;
+const uint32_t layers = isCubemap ? 6u : 1u;
+
+vk::ImageCreateInfo imageInfo{};
+imageInfo.flags = isCubemap ? vk::ImageCreateFlagBits::eCubeCompatible : vk::ImageCreateFlags{};
+imageInfo.arrayLayers = layers;
+
+// Create per-face attachment views
+const uint32_t faceCount = isCubemap ? 6u : 1u;
+for (uint32_t face = 0; face < faceCount; ++face) {
+  vk::ImageViewCreateInfo faceViewInfo{};
+  faceViewInfo.viewType = vk::ImageViewType::e2D;  // Single-face view
+  faceViewInfo.subresourceRange.baseArrayLayer = face;
+  faceViewInfo.subresourceRange.layerCount = 1;
+  rt.faceViews[face] = m_device.createImageViewUnique(faceViewInfo);
+}
+```
+
+---
+
+## 8. Builtin Textures
+
+Four builtin textures provide fallback and default values:
+
+| Texture | Slot | Color (RGBA) | Purpose |
+|---------|------|--------------|---------|
+| Fallback | 0 | (0,0,0,255) | Black; sampled when texture unavailable |
+| Default Base | 1 | (255,255,255,255) | White; untextured surfaces |
+| Default Normal | 2 | (128,128,255,255) | Flat tangent-space normal (0,0,1) |
+| Default Spec | 3 | (10,10,10,0) | Dielectric F0 (~0.04) |
+
+```cpp
+VulkanTextureManager.cpp:580-607
+void VulkanTextureManager::createFallbackTexture() {
+  const uint8_t black[4] = {0, 0, 0, 255};
+  m_builtins.fallback = createSolidTexture(black);
+}
+
+void VulkanTextureManager::createDefaultTexture() {
+  const uint8_t white[4] = {255, 255, 255, 255};
+  m_builtins.defaultBase = createSolidTexture(white);
+}
+
+void VulkanTextureManager::createDefaultNormalTexture() {
+  // Flat tangent-space normal: (0.5, 0.5, 1.0) -> (0,0,1) after remap
+  const uint8_t flatNormal[4] = {128, 128, 255, 255};
+  m_builtins.defaultNormal = createSolidTexture(flatNormal);
+}
+
+void VulkanTextureManager::createDefaultSpecTexture() {
+  // Default dielectric F0 (~0.04)
+  const uint8_t dielectricF0[4] = {10, 10, 10, 0};
+  m_builtins.defaultSpec = createSolidTexture(dielectricF0);
+}
+```
+
+---
+
+## 9. Image Layout Transitions
+
+The texture manager tracks and transitions image layouts using Vulkan 1.3 synchronization:
+
+```cpp
+VulkanTextureManager.cpp:67-102
+struct StageAccess {
+  vk::PipelineStageFlags2 stageMask{};
+  vk::AccessFlags2 accessMask{};
+};
+
+StageAccess stageAccessForLayout(vk::ImageLayout layout)
+{
+  StageAccess out{};
+  switch (layout) {
+  case vk::ImageLayout::eUndefined:
+    out.stageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+    out.accessMask = {};
+    break;
+  case vk::ImageLayout::eColorAttachmentOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    out.accessMask = vk::AccessFlagBits2::eColorAttachmentRead |
+                     vk::AccessFlagBits2::eColorAttachmentWrite;
+    break;
+  case vk::ImageLayout::eShaderReadOnlyOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+    out.accessMask = vk::AccessFlagBits2::eShaderRead;
+    break;
+  case vk::ImageLayout::eTransferSrcOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
+    out.accessMask = vk::AccessFlagBits2::eTransferRead;
+    break;
+  case vk::ImageLayout::eTransferDstOptimal:
+    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
+    out.accessMask = vk::AccessFlagBits2::eTransferWrite;
+    break;
+  default:
+    out.stageMask = vk::PipelineStageFlagBits2::eAllCommands;
+    out.accessMask = vk::AccessFlagBits2::eMemoryRead |
+                     vk::AccessFlagBits2::eMemoryWrite;
+    break;
+  }
+  return out;
+}
+```
+
+---
+
+## 10. Error Handling and Unavailability
+
+Textures can become unavailable for several reasons:
+
+```cpp
+VulkanTextureManager.h:105-111
+enum class UnavailableReason {
+    InvalidHandle,       // bmpman handle invalid
+    InvalidArray,        // Array frames have mismatched dimensions
+    BmpLockFailed,       // Could not lock bitmap for reading
+    TooLargeForStaging,  // Exceeds per-frame staging buffer size
+    UnsupportedFormat,   // Format not supported
+};
+```
+
+Unavailable textures are tracked separately and never retried:
+
+```cpp
+VulkanTextureManager.cpp:669-682
+auto markUnavailable = [&](int baseFrame, UnavailableReason reason) {
+  m_unavailableTextures.insert_or_assign(baseFrame, UnavailableTexture{reason});
+  m_pendingBindlessSlots.erase(baseFrame);
+
+  // Release any assigned bindless slot
+  auto slotIt = m_bindlessSlots.find(baseFrame);
+  if (slotIt != m_bindlessSlots.end()) {
+    const uint32_t slot = slotIt->second;
+    m_bindlessSlots.erase(slotIt);
+    if (isDynamicBindlessSlot(slot)) {
+      m_freeBindlessSlots.push_back(slot);
+    }
+  }
+};
+```
+
+---
+
+## Key Files Reference
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `VulkanTextureManager.h` | 1-294 | Texture manager class definition |
+| `VulkanTextureManager.cpp` | 1-2028 | Texture manager implementation |
+| `VulkanTextureBindings.h` | 1-70 | Draw-path and upload-path APIs |
+| `VulkanTextureId.h` | 1-52 | Strong-typed texture identity |
+| `VulkanMovieManager.h` | 1-131 | Movie texture manager definition |
+| `VulkanMovieManager.cpp` | 1-744 | YCbCr movie texture implementation |
+| `VulkanConstants.h` | 1-24 | Bindless slot constants |
+| `VulkanDeferredRelease.h` | 1-102 | GPU lifetime management |
+| `VulkanRenderer.cpp` | 1375-1523 | Descriptor sync implementation |

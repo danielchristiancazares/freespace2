@@ -1109,6 +1109,67 @@ inline void gr_set_clip(int x, int y, int w, int h, int resize_mode=GR_RESIZE_FU
 }
 #define gr_reset_clip		GR_CALL(gr_screen.gf_reset_clip)
 
+namespace graphics {
+
+struct ClipRect {
+	int x;
+	int y;
+	int w;
+	int h;
+};
+
+// Capability token: guarantees clip state restoration on scope exit.
+// Store this in a local variable whenever you temporarily modify the clip region.
+class [[nodiscard]] ScopedClipRestore {
+	ClipRect _restore;
+	bool _active = false;
+
+	explicit ScopedClipRestore(const ClipRect& restore) : _restore(restore), _active(true) {}
+
+	void restore()
+	{
+		if (!_active) {
+			return;
+		}
+
+		// Restore in actual pixel space; this avoids needing the original resize mode.
+		gr_set_clip(_restore.x, _restore.y, _restore.w, _restore.h, GR_RESIZE_NONE);
+		_active = false;
+	}
+
+  public:
+	ScopedClipRestore(const ScopedClipRestore&) = delete;
+	ScopedClipRestore& operator=(const ScopedClipRestore&) = delete;
+
+	ScopedClipRestore(ScopedClipRestore&& other) noexcept : _restore(other._restore), _active(other._active)
+	{
+		other._active = false;
+	}
+	ScopedClipRestore& operator=(ScopedClipRestore&& other) noexcept
+	{
+		if (this == &other) {
+			return *this;
+		}
+
+		restore();
+		_restore = other._restore;
+		_active = other._active;
+		other._active = false;
+		return *this;
+	}
+
+	~ScopedClipRestore() { restore(); }
+
+	friend inline ScopedClipRestore save_clip();
+};
+
+[[nodiscard]] inline ScopedClipRestore save_clip()
+{
+	return ScopedClipRestore({gr_screen.offset_x, gr_screen.offset_y, gr_screen.clip_width, gr_screen.clip_height});
+}
+
+} // namespace graphics
+
 void gr_set_bitmap(int bitmap_num, int alphablend = GR_ALPHABLEND_NONE, int bitbltmode = GR_BITBLT_MODE_NORMAL, float alpha = 1.0f);
 
 #define gr_clear				GR_CALL(gr_screen.gf_clear)

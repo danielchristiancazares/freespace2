@@ -51,7 +51,12 @@ add_file_folder("Graphics"
 	   graphics/test_vulkan_blend_enable.cpp
 	   graphics/test_vulkan_device_scoring.cpp
 	   graphics/test_vulkan_swapchain_acquire.cpp
+	   graphics/test_vulkan_buffer_zero_size.cpp
+	   graphics/test_vulkan_clear_ops_oneshot.cpp
+	   graphics/test_vulkan_render_target_state.cpp
+	   graphics/test_vulkan_deferred_release.cpp
 	   graphics/it_vulkan_model_present.cpp
+	   graphics/it_vulkan_subsystems.cpp
 )
 endif()
 

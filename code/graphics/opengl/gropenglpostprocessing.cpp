@@ -473,6 +473,7 @@ void opengl_post_lightshafts()
 						data->weight       = ls_params.weight;
 						data->intensity    = Sun_spot * ls_params.intensity;
 						data->cp_intensity = Sun_spot * ls_params.cpintensity;
+						data->samplenum    = ls_params.samplenum;
 					});
 
 				Current_shader->program->Uniforms.setTextureUniform("scene", 0);

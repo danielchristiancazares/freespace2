@@ -1356,6 +1356,11 @@ void VulkanTextureManager::appendResidentBindlessDescriptors(std::vector<std::pa
   }
 }
 
+bool VulkanTextureManager::hasBindlessSlot(int baseFrameHandle) const
+{
+  return m_bindlessSlots.find(baseFrameHandle) != m_bindlessSlots.end();
+}
+
 bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool isAABitmap)
 {
   const int baseFrame = bm_get_base_frame(bitmapHandle, nullptr);

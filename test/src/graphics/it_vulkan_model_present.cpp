@@ -1,5 +1,6 @@
 #include "cfile/cfile.h"
 #include "graphics/2d.h"
+#include "graphics/matrix.h"
 #include "globalincs/pstypes.h"
 #include "bmpman/bmpman.h"
 #include "graphics/software/font.h"
@@ -239,25 +240,28 @@ TEST(VulkanModelVisible, VisibleShip)
 	}
 	std::cout << "[it] thruster assets ok\n" << std::flush;
 
-	for (int frame = 0; frame < 180; ++frame) {
+	for (int frame = 0; frame < 360; ++frame) {
 		os_poll();
 
-		// Loud clear to verify we're actually drawing to the swapchain.
-		gr_set_clear_color(0, 255, 0); // bright green
-		gr_clear();
+		// Dark blue background for visibility.
+		gr_set_clear_color(20, 30, 80);
 
 		gr_setup_frame();
 		g3_start_frame(1);
 		g3_set_view_matrix(&eye_pos, &eye_orient, fov);
 
+		// Route 3D rendering to scene texture (deferred rendering setup).
+		gr_scene_texture_begin();
+
+		// Push projection + view matrices to the GPU.
+		gr_set_proj_matrix(fov, gr_screen.clip_aspect, 1.0f, 10000.0f);
+		gr_set_view_matrix(&Eye_position, &Eye_matrix);
+
 		model_render_params params;
 		params.set_flags(params.get_model_flags() |
 		                 MR_AUTOCENTER |
 		                 MR_SHOW_THRUSTERS |
-		                 MR_NO_CULL |
-		                 MR_NO_ZBUFFER |
-		                 MR_NO_LIGHTING |
-		                 MR_NO_TEXTURING);
+		                 MR_NO_CULL);
 		params.set_color(255, 255, 255);
 		// Keep thrusters visible: set a small constant plume length and textures.
 		mst_info thruster{};
@@ -266,6 +270,10 @@ TEST(VulkanModelVisible, VisibleShip)
 		thruster.primary_glow_bitmap = thrusters.glow;
 		params.set_thruster_info(thruster);
 		model_render_immediate(&params, model_handle, &obj_orient, &obj_pos);
+
+		gr_end_view_matrix();
+		gr_end_proj_matrix();
+		gr_scene_texture_end();
 
 		// 2D overlay to verify rendering path without fonts.
 		gr_set_color(0, 0, 0);

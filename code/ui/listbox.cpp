@@ -102,6 +102,8 @@ void UI_LISTBOX::draw()
 	int i, x1, y1, stop;
 	int w1, h1;
 
+	auto clip_restore = graphics::save_clip();
+
 	UI_GADGET::draw();
 	font::set_font(my_wnd->f_id);
 
