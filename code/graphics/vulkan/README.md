@@ -157,11 +157,13 @@ Packages everything for one frame in the ring:
 
 ### Pipelines (`VulkanPipelineManager` + `VulkanLayoutContracts`)
 
-Pipelines are “contract-driven” and cached by `PipelineKey`:
+Pipelines are "contract-driven" and cached by `PipelineKey`:
 - `PipelineKey` includes shader type + variant flags, render target contract (color/depth formats, attachment count, sample count), blend mode, and (for vertex-attribute shaders) `vertex_layout::hash()`.
 - Shader layout contracts (`VulkanLayoutContracts`) define, per `shader_type`:
   - which pipeline layout to use (`Standard`, `Model`, `Deferred`)
   - which vertex input mode to use (`VertexAttributes` vs. `VertexPulling`)
+
+**Documentation**: See `docs/vulkan/pipeline_management.md` for architecture details and `docs/vulkan/VULKAN_PIPELINE_USAGE.md` for practical usage patterns, common mistakes, and debugging guidance.
 
 ## Synchronization Primitives
 

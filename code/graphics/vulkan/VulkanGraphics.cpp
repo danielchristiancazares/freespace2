@@ -678,14 +678,6 @@ void gr_vulkan_deferred_lighting_finish()
   g_backend->deferred = std::monostate{};
 }
 
-void stub_set_line_width(float width)
-{
-  // Sanitize input
-  if (!(width > 0.0f)) {
-	width = 1.0f;
-  }
-  g_requestedLineWidth = width;
-}
 
 void stub_draw_sphere(material* /*material_def*/, float /*rad*/) {}
 
@@ -1383,52 +1375,6 @@ void gr_vulkan_render_primitives(material* material_info,
   cmd.draw(static_cast<uint32_t>(n_verts), 1, static_cast<uint32_t>(offset), 0);
 }
 
-void stub_render_primitives(material* material_info,
-  primitive_type prim_type,
-  vertex_layout* layout,
-  int offset,
-  int n_verts,
-  gr_buffer_handle buffer_handle,
-  size_t buffer_offset)
-{
-  gr_vulkan_render_primitives(material_info, prim_type, layout, offset, n_verts, buffer_handle, buffer_offset);
-}
-
-void stub_render_primitives_particle(particle_material* /*material_info*/,
-  primitive_type /*prim_type*/,
-  vertex_layout* /*layout*/,
-  int /*offset*/,
-  int /*n_verts*/,
-  gr_buffer_handle /*buffer_handle*/)
-{
-}
-
-void stub_render_primitives_distortion(distortion_material* /*material_info*/,
-  primitive_type /*prim_type*/,
-  vertex_layout* /*layout*/,
-  int /*offset*/,
-  int /*n_verts*/,
-  gr_buffer_handle /*buffer_handle*/)
-{
-}
-void stub_render_movie(movie_material* /*material_info*/,
-  primitive_type /*prim_type*/,
-  vertex_layout* /*layout*/,
-  int /*n_verts*/,
-  gr_buffer_handle /*buffer*/,
-  size_t /*buffer_offset*/)
-{
-}
-
-void stub_render_nanovg(nanovg_material* /*material_info*/,
-  primitive_type /*prim_type*/,
-  vertex_layout* /*layout*/,
-  int /*offset*/,
-  int /*n_verts*/,
-  gr_buffer_handle /*buffer_handle*/)
-{
-}
-
 void gr_vulkan_render_nanovg(nanovg_material* material_info,
   primitive_type prim_type,
   vertex_layout* layout,
@@ -2096,6 +2042,10 @@ void init_function_pointers()
   gr_screen.gf_render_primitives_batched = gr_vulkan_render_primitives_batched;
   gr_screen.gf_render_nanovg = gr_vulkan_render_nanovg;
   gr_screen.gf_render_rocket_primitives = gr_vulkan_render_rocket_primitives;
+  // Particle/distortion/movie rendering: not used (particles/distortion go through batching system)
+  gr_screen.gf_render_primitives_particle = [](particle_material*, primitive_type, vertex_layout*, int, int, gr_buffer_handle) {};
+  gr_screen.gf_render_primitives_distortion = [](distortion_material*, primitive_type, vertex_layout*, int, int, gr_buffer_handle) {};
+  gr_screen.gf_render_movie = [](movie_material*, primitive_type, vertex_layout*, int, gr_buffer_handle, size_t) {};
   gr_screen.gf_movie_texture_create = gr_vulkan_movie_texture_create;
   gr_screen.gf_movie_texture_upload = gr_vulkan_movie_texture_upload;
   gr_screen.gf_movie_texture_draw = gr_vulkan_movie_texture_draw;
@@ -2114,8 +2064,14 @@ void init_function_pointers()
 	gr_screen.gf_deferred_lighting_finish = stub_deferred_lighting_finish;
   }
 
-  // Line width
-  gr_screen.gf_set_line_width = stub_set_line_width;
+  // Line width: store requested width (applied at frame setup)
+  gr_screen.gf_set_line_width = [](float width) {
+	// Sanitize input
+	if (!(width > 0.0f)) {
+	  width = 1.0f;
+	}
+	g_requestedLineWidth = width;
+  };
 
   // Debug groups
   gr_screen.gf_push_debug_group = gr_vulkan_push_debug_group;

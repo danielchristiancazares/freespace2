@@ -1,134 +1,176 @@
 # Vulkan Architecture (Entry Point)
 
-This document is the entry point for the Vulkan renderer documentation in `docs/vulkan/`. It gives a high-level map of the Vulkan backend, its core invariants, and where to look next depending on what you are changing or debugging.
+This document is the entry point for the Vulkan renderer documentation in `docs/vulkan/`. It provides a high-level map of the Vulkan backend, its core invariants, and where to look next depending on what you are changing or debugging.
 
 ## Design Constraints (Read Before Editing)
 
 The Vulkan renderer is intentionally structured around the principles in `docs/DESIGN_PHILOSOPHY.md`:
 
-- Correctness by construction: encode phase/order invariants in types and APIs where possible.
-- Capability tokens and typestate: make invalid sequencing hard/impossible to compile.
-- Boundaries vs internals: do conditional checks at boundaries; keep internals assumption-safe.
-- State as location: prefer container membership/variants over scattered state enums/flags.
+- **Correctness by construction**: Encode phase/order invariants in types and APIs where possible.
+- **Capability tokens and typestate**: Make invalid sequencing hard/impossible to compile.
+- **Boundaries vs internals**: Do conditional checks at boundaries; keep internals assumption-safe.
+- **State as location**: Prefer container membership/variants over scattered state enums/flags.
 
 When you add new rendering features (post-processing, upscalers like DLSS, new targets), prefer:
 
-- explicit target state transitions
+- Explicit target state transitions
 - RAII scope guards for pass lifetime
-- centralized ownership for resource lifetimes and "previous frame" state
+- Centralized ownership for resource lifetimes and "previous frame" state
 
-## Terminology (Current Core Concepts)
+## Terminology (Core Concepts)
 
-These names are used across the Vulkan docs and (roughly) correspond to types in the Vulkan renderer:
+These names are used across the Vulkan docs and correspond to types in the Vulkan renderer:
 
-- RecordingFrame: "we are recording commands for a frame" (frame-in-flight token).
-- FrameCtx: a boundary token proving we have a current recording frame and a renderer instance.
-- RenderCtx: a capability token proving dynamic rendering is active for a specific target.
-- VulkanRenderTargets: owns images/views/samplers for scene, post, bloom, gbuffer, depth, etc.
-- VulkanRenderingSession: owns render target selection, dynamic rendering begin/end, and layout transitions.
-- ActivePassGuard: RAII guard for dynamic rendering lifetime (begin/end).
+| Token / Type | Description |
+|--------------|-------------|
+| `RecordingFrame` | Move-only token proving "we are recording commands for a frame" (frame-in-flight) |
+| `FrameCtx` | Boundary token proving we have a current recording frame and a renderer instance |
+| `RenderCtx` | Capability token proving dynamic rendering is active for a specific target |
+| `VulkanRenderTargets` | Owns images/views/samplers for scene, post, bloom, G-buffer, depth, etc. |
+| `VulkanRenderingSession` | Owns render target selection, dynamic rendering begin/end, and layout transitions |
+| `ActivePassGuard` | RAII guard for dynamic rendering lifetime (begin/end) |
 
-If you are unsure which token you should have, start with `VULKAN_RENDER_PASS_STRUCTURE.md`.
+If you are unsure which token you should have, start with `VULKAN_RENDER_PASS_STRUCTURE.md` or `VULKAN_CAPABILITY_TOKENS.md`.
 
 ## How the Renderer is Put Together (Bird's Eye View)
 
 At a high level:
 
-1) Frame flow:
-   - acquire swapchain image
-   - record commands
-   - submit to graphics queue
-   - present
+1. **Frame flow**:
+   - Acquire swapchain image
+   - Record commands
+   - Submit to graphics queue
+   - Present
 
-2) Within a frame, rendering is organized around target transitions:
-   - swapchain targets (with/without depth)
-   - scene HDR targets (with/without depth)
-   - deferred G-buffer targets
-   - post-processing targets (bloom ping-pong, tonemap LDR, SMAA targets, etc.)
-   - bitmap render targets (RTT)
+2. **Target transitions within a frame**:
+   - Swapchain targets (with/without depth)
+   - Scene HDR targets (with/without depth)
+   - Deferred G-buffer targets
+   - Post-processing targets (bloom ping-pong, tonemap LDR, SMAA targets, etc.)
+   - Bitmap render targets (RTT)
 
-3) Dynamic rendering is used (not classic VkRenderPass objects):
-   - we begin/end dynamic rendering scopes explicitly
-   - we do explicit sync2 barriers and layout transitions
+3. **Dynamic rendering** (not classic VkRenderPass objects):
+   - Begin/end dynamic rendering scopes explicitly
+   - Explicit sync2 barriers and layout transitions
 
 ## "Start Here" Reading Order
 
 If you are new to this renderer:
 
-1) `VULKAN_RENDER_PASS_STRUCTURE.md`
-   - target typestates
-   - dynamic rendering + RAII pass guard
-   - clear ops and frame lifecycle
+1. `VULKAN_RENDER_PASS_STRUCTURE.md`
+   - Target typestates
+   - Dynamic rendering + RAII pass guard
+   - Clear ops and frame lifecycle
 
-2) `VULKAN_SYNCHRONIZATION.md`
-   - frames-in-flight model
-   - timeline/binary semaphores and fences
-   - layout transitions and sync2 barrier rules
+2. `VULKAN_SYNCHRONIZATION.md`
+   - Frames-in-flight model
+   - Timeline/binary semaphores and fences
+   - Layout transitions and sync2 barrier rules
 
-3) `VULKAN_DESCRIPTOR_SETS.md` and `VULKAN_TEXTURE_BINDING.md`
-   - push descriptors vs bindless model binding
-   - sampler cache and descriptor validity rules
+3. `VULKAN_CAPABILITY_TOKENS.md`
+   - Token types and their purposes
+   - Token creation, consumption, and lifetime
+   - Common patterns and mistakes
 
-4) `VULKAN_2D_PIPELINE.md` and `VULKAN_HUD_RENDERING.md`
+4. `VULKAN_DESCRIPTOR_SETS.md` and `VULKAN_TEXTURE_BINDING.md`
+   - Push descriptors vs bindless model binding
+   - Sampler cache and descriptor validity rules
+
+5. `VULKAN_2D_PIPELINE.md` and `VULKAN_HUD_RENDERING.md`
    - 2D/UI/HUD rendering contracts
-   - clip/scissor behavior and invariants
+   - Clip/scissor behavior and invariants
 
-5) `VULKAN_RECENT_FIXES.md`
-   - context for recent bugfixes and invariants that were tightened
+6. `VULKAN_RECENT_FIXES.md`
+   - Context for recent bugfixes and invariants that were tightened
 
 ## "Where Do I Change X?"
 
-- Frame lifecycle / recording / submit / present:
-  - Start with `VULKAN_SYNCHRONIZATION.md`
+**Frame lifecycle / recording / submit / present**:
+- `VULKAN_SYNCHRONIZATION.md`
 
-- Adding a new render target or changing target sizes:
-  - `VULKAN_RENDER_PASS_STRUCTURE.md` (target types and transitions)
-  - `VULKAN_DYNAMIC_BUFFERS.md` (if new transient buffers are needed)
+**Adding a new render target or changing target sizes**:
+- `VULKAN_RENDER_PASS_STRUCTURE.md` (target types and transitions)
+- `VULKAN_DYNAMIC_BUFFERS.md` (if new transient buffers are needed)
 
-- Adding/adjusting post-processing stages:
-  - `pipeline_management.md` (pipeline and shader integration overview)
-  - `VULKAN_RENDER_PASS_STRUCTURE.md` (where passes occur and how targets switch)
-  - `VULKAN_DESCRIPTOR_SETS.md` (push descriptor bindings and global sets)
+**Adding/adjusting post-processing stages**:
+- `VULKAN_POST_PROCESSING.md` (pipeline flow, target transitions, uniforms)
+- `VULKAN_PIPELINE_MANAGEMENT.md` (pipeline and shader integration overview)
+- `VULKAN_RENDER_PASS_STRUCTURE.md` (where passes occur and how targets switch)
+- `VULKAN_DESCRIPTOR_SETS.md` (push descriptor bindings and global sets)
 
-- Investigating binding/descriptor bugs:
-  - `VULKAN_DESCRIPTOR_SETS.md`
-  - `VULKAN_TEXTURE_BINDING.md`
+**Investigating binding/descriptor bugs**:
+- `VULKAN_DESCRIPTOR_SETS.md`
+- `VULKAN_TEXTURE_BINDING.md`
+- `VULKAN_TEXTURE_RESIDENCY.md` (texture upload and bindless slot assignment)
 
-- HUD/UI rendering issues (clip/scissor, overlay order):
-  - `VULKAN_HUD_RENDERING.md`
-  - `VULKAN_2D_PIPELINE.md`
+**HUD/UI rendering issues (clip/scissor, overlay order)**:
+- `VULKAN_HUD_RENDERING.md`
+- `VULKAN_2D_PIPELINE.md`
 
-- Memory pressure / dynamic allocation / ring buffers:
-  - `VULKAN_DYNAMIC_BUFFERS.md`
+**Memory pressure / dynamic allocation / ring buffers**:
+- `VULKAN_DYNAMIC_BUFFERS.md`
 
-- DLSS / upscaling:
-  - `VULKAN_DLSS_PLAN.md` (implementation plan and required invariants)
+**Pipeline issues / shader variants / cache behavior**:
+- `VULKAN_PIPELINE_MANAGEMENT.md` (architecture and lifecycle)
+- `VULKAN_PIPELINE_USAGE.md` (construction patterns, common mistakes)
+
+**Uniform buffer alignment / std140 layout**:
+- `VULKAN_UNIFORM_ALIGNMENT.md` (alignment rules, adding new structs)
+- `VULKAN_UNIFORM_BINDINGS.md` (binding points, struct definitions)
+
+**Deferred lighting / G-buffer rendering**:
+- `VULKAN_DEFERRED_LIGHTING_FLOW.md` (complete flow, G-buffer channels)
+
+**DLSS / upscaling**:
+- `VULKAN_DLSS_PLAN.md` (implementation plan and required invariants)
 
 ## Testing and Behavioral Invariants
 
 The Vulkan tests are split between:
 
-- "real" unit tests that exercise components with minimal stubs, and
-- behavioral "fake state machine" tests that encode invariants without requiring a GPU.
+- "Real" unit tests that exercise components with minimal stubs
+- Behavioral "fake state machine" tests that encode invariants without requiring a GPU
 
-Entry point:
+Entry point: `VULKAN_INTEGRATION_TESTS.md`
 
-- `VULKAN_INTEGRATION_TESTS.md`
-
-When changing renderer state machines (target switching, pass boundaries, post-processing enablement),
-prefer adding/updating a behavioral invariant test that locks in the expected semantics.
+When changing renderer state machines (target switching, pass boundaries, post-processing enablement), prefer adding/updating a behavioral invariant test that locks in the expected semantics.
 
 ## Document Index
 
-- `VULKAN_RENDER_PASS_STRUCTURE.md`: target typestates, dynamic rendering boundaries, clear ops, frame lifecycle
-- `VULKAN_SYNCHRONIZATION.md`: frames-in-flight, submissions, fences/semaphores, sync2 + layout transitions
-- `VULKAN_DESCRIPTOR_SETS.md`: descriptor layouts, pools, push descriptors, bindless binding, update safety rules
-- `VULKAN_TEXTURE_BINDING.md`: texture lifecycle, sampler cache, bindless slot rules, descriptor validity
-- `VULKAN_DYNAMIC_BUFFERS.md`: ring buffers, managed buffers, orphaning, deferred releases
-- `VULKAN_2D_PIPELINE.md`: interface pipeline, coordinate systems, 2D draw path contracts
+**Core Architecture**:
+- `VULKAN_RENDER_PASS_STRUCTURE.md`: Target typestates, dynamic rendering boundaries, clear ops, frame lifecycle
+- `VULKAN_SYNCHRONIZATION.md`: Frames-in-flight, submissions, fences/semaphores, sync2 + layout transitions
+- `VULKAN_CAPABILITY_TOKENS.md`: Token types (FrameCtx, RenderCtx, etc.), creation, consumption, lifetime
+
+**Descriptors and Textures**:
+- `VULKAN_DESCRIPTOR_SETS.md`: Descriptor layouts, pools, push descriptors, bindless binding, update safety rules
+- `VULKAN_TEXTURE_BINDING.md`: Texture lifecycle, sampler cache, bindless slot rules, descriptor validity
+- `VULKAN_TEXTURE_RESIDENCY.md`: Texture residency state machine, upload batching, fallback handling
+
+**Pipelines and Shaders**:
+- `VULKAN_PIPELINE_MANAGEMENT.md`: Pipeline architecture, cache keys, shader variants, vertex input modes
+- `VULKAN_PIPELINE_USAGE.md`: Pipeline key construction, binding patterns, debugging tips
+
+**Uniforms**:
+- `VULKAN_UNIFORM_BINDINGS.md`: Uniform buffer structs, binding points, std140 layout
+- `VULKAN_UNIFORM_ALIGNMENT.md`: Alignment rules, adding new uniform structs, common mistakes
+
+**Buffers**:
+- `VULKAN_DYNAMIC_BUFFERS.md`: Ring buffers, managed buffers, orphaning, deferred releases
+
+**Rendering Paths**:
+- `VULKAN_2D_PIPELINE.md`: Interface pipeline, coordinate systems, 2D draw path contracts
 - `VULKAN_HUD_RENDERING.md`: HUD draw order and shaders, clip/scissor, RTT cockpit displays
-- `pipeline_management.md`: pipeline/shader management, compilation and caching
-- `VULKAN_RECENT_FIXES.md`: recent bug history and the invariants that resulted
-- `VULKAN_DLSS_PLAN.md`: upscaling plan (render vs display extents, jitter, motion vectors, pass placement)
-- `VULKAN_INTEGRATION_TESTS.md`: test philosophy and key invariant tests
+- `VULKAN_DEFERRED_LIGHTING_FLOW.md`: Complete deferred lighting flow, G-buffer channels, light volumes
+- `VULKAN_POST_PROCESSING.md`: Post-processing pipeline chain, target transitions, uniform data flow
+- `VULKAN_MODEL_RENDERING_PIPELINE.md`: Model rendering path, vertex pulling, bindless textures
+
+**Plans and History**:
+- `VULKAN_DLSS_PLAN.md`: Upscaling plan (render vs display extents, jitter, motion vectors, pass placement)
+- `VULKAN_RECENT_FIXES.md`: Recent bug history and the invariants that resulted
+
+**Testing and Debugging**:
+- `VULKAN_INTEGRATION_TESTS.md`: Test philosophy and key invariant tests
+- `VULKAN_ERROR_HANDLING.md`: Error handling patterns, validation, debugging
+- `VULKAN_PERFORMANCE_OPTIMIZATION.md`: Performance considerations and optimization strategies
 
