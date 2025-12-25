@@ -1,155 +1,485 @@
-# NVIDIA DLSS Integration Plan
+# NVIDIA DLSS (Super Resolution) Integration Plan (Vulkan)
 
-This document outlines the architectural changes and implementation steps required to integrate NVIDIA DLSS (Deep Learning Super Sampling) into the FreeSpace 2 Open Vulkan renderer.
+This document describes a concrete, phased implementation plan to integrate NVIDIA DLSS Super Resolution into the FreeSpace Open Vulkan renderer.
 
-## 1. Overview
+This plan is intentionally written to align with the project's "correctness by construction" principles in `docs/DESIGN_PHILOSOPHY.md` and the existing Vulkan renderer architecture docs in `docs/vulkan/`.
 
-DLSS uses AI to upscale a lower-resolution rendered image to a higher output resolution, reconstructing high-frequency details and providing temporal stability (anti-aliasing).
+## References (Read These First)
 
-### Goals
-*   Integrate NVIDIA NGX SDK into the Vulkan backend.
-*   Implement specific rendering requirements: Motion Vectors and Projection Jitter.
-*   Decouple **Render Resolution** from **Display Resolution**.
-*   Insert the DLSS Evaluation pass into the frame graph.
+Design constraints and vocabulary used below:
 
-### Scope
-*   **Target Backend:** Vulkan (`code/graphics/vulkan/`)
-*   **Target Hardware:** NVIDIA RTX 20-series and newer.
-*   **DLSS Version:** Latest available (assumed 3.x or 2.x Super Resolution).
+- `docs/DESIGN_PHILOSOPHY.md` (capability tokens, typestate, state-as-location, boundary-only conditionals)
+- `docs/vulkan/VULKAN_RENDER_PASS_STRUCTURE.md` (dynamic rendering, `ActivePassGuard`, target typestates)
+- `docs/vulkan/VULKAN_SYNCHRONIZATION.md` (sync2 barriers, layout transitions, frames-in-flight)
+- `docs/vulkan/VULKAN_DESCRIPTOR_SETS.md` and `docs/vulkan/VULKAN_TEXTURE_BINDING.md` (push descriptors, bindless textures, sampler cache)
+- `docs/vulkan/VULKAN_HUD_RENDERING.md` (HUD/UI ordering and clip/scissor invariants)
 
----
+## 0. Scope and Non-Goals
 
-## 2. Technical Requirements
+### 0.1 In-Scope
 
-DLSS requires specific inputs from the rendering engine:
+- Vulkan-only DLSS **Super Resolution** (temporal upscaler + TAA) on supported NVIDIA GPUs.
+- Decouple **render resolution** (3D scene) from **display resolution** (swapchain/UI).
+- Required inputs: motion vectors + projection jitter (+ depth, HDR color).
+- Integrate DLSS evaluation as a distinct "compute-like" pass between scene rendering and post-processing.
 
-1.  **Color Buffer:** Low-resolution, aliased, HDR input.
-2.  **Depth Buffer:** Low-resolution depth buffer.
-3.  **Motion Vectors:** High-precision screen-space motion vectors (Velocity buffer).
-4.  **Exposure:** Exposure value (if auto-exposure is used).
-5.  **Jittered Projection:** Sub-pixel jitter applied to the camera projection matrix (e.g., Halton sequence).
-6.  **Texture LOD Bias:** Adjusted mipmap selection for lower render resolution.
+### 0.2 Non-Goals (Separate Work)
 
----
+- DLSS Frame Generation (DLSS 3 FG) and Reflex (different integration surface + pacing model).
+- OpenGL backend support.
+- DLAA-only mode (can be built on top of SR once SR is working).
 
-## 3. Architecture Changes
+## 1. Terminology and Invariants
 
-### 3.1. Resolution Management
-Currently, `gr_screen.max_w` / `max_h` drive both render target sizing and swapchain extent.
-*   **New State:** Introduce `RenderResolution` vs `DisplayResolution`.
-    *   `DisplayResolution`: Size of the Swapchain and UI targets.
-    *   `RenderResolution`: Size of the G-Buffer, Depth, and pre-upscale Scene Color.
-*   **Scaling:** `VulkanRenderTargets::resize()` must accept `RenderResolution` for 3D assets and `DisplayResolution` for Post-Process/UI buffers.
+### 1.1 Extents / Resolutions
 
-### 3.2. New G-Buffer Attachment: Velocity
-A generic G-buffer layout update is required.
-*   **Format:** `VK_FORMAT_R16G16_SFLOAT` (recommended) or `R32G32_SFLOAT`.
-*   **Content:** Screen-space velocity `(CurrentPosNDC - PreviousPosNDC)`.
-*   **Location:** Add as G-Buffer Attachment #5 (or repurpose an existing slot if bandwidth constrained, though slot 5 is cleanest).
+- DisplayExtent: swapchain size (what the OS presents). HUD/UI coordinates live here.
+- RenderExtent: internal 3D size (G-buffer, depth, scene HDR pre-upscale).
 
-### 3.3. Jitter System
-*   **Camera:** Implement a jitter generator (Halton sequence 2x3).
-*   **Matrices:**
-    *   Apply jitter to `gr_projection_matrix` used for rendering geometry.
-    *   **Crucial:** Keep an *unjittered* copy of the matrix for:
-        *   Frustum culling.
-        *   DLSS input (DLSS needs to know the jitter offset).
-        *   Motion vector calculation (optional, depending on formulation).
-*   **Phase:** Update jitter offset every frame index.
+Invariant A: HUD/UI must continue rendering at DisplayExtent, never at RenderExtent.
 
-### 3.4. NGX SDK Wrapper
-*   Create `VulkanDLSS` manager class.
-*   Manage `VkInstance` / `VkDevice` creation with required NV extensions (`VK_NVX_binary_import`, `VK_KHR_push_descriptor`, etc., check SDK docs).
-*   Initialize NGX feature (`NGX_VULKAN_EVALUATE_DLSS_EXT`).
+Invariant B: When DLSS is disabled, RenderExtent == DisplayExtent (no behavior change).
 
----
+### 1.2 Buffers (Conceptual)
 
-## 4. Implementation Tasks
+DLSS SR consumes:
 
-### Phase 1: Foundation (NGX & Resolution)
+- ColorInHDR: low-res HDR scene color at RenderExtent
+- Depth: low-res depth at RenderExtent
+- MotionVectors: low-res motion/velocity at RenderExtent
+- JitterOffset: per-frame jitter offset (in pixels or normalized units, per SDK conventions)
+- ResetHistory: per-frame flag for camera cuts / discontinuities
 
-1.  **SDK Integration:**
-    *   Add NVIDIA NGX SDK to `lib/` or `code/external`.
-    *   Update CMake/build system to link against NGX.
-2.  **VulkanDevice Extension:**
-    *   In `VulkanDevice.cpp`, query and enable `VK_NV_ngx` (or relevant extensions).
-    *   Initialize NGX context on startup.
-3.  **Resolution Decoupling:**
-    *   Modify `VulkanRenderTargets` to store separate `m_renderExtent` and `m_displayExtent`.
-    *   Update `createGBufferResources` to use `m_renderExtent`.
-    *   Update `createPostProcessResources` to use `m_displayExtent`.
-    *   Update `gr_screen` or `VulkanGraphics` to handle the scaling factor logic.
+DLSS SR produces:
 
-### Phase 2: Motion Vectors (The "Hard" Part)
+- ColorOutHDR: upscaled HDR scene color at DisplayExtent
 
-1.  **RenderTarget Update:**
-    *   Add `m_velocityImage`, `m_velocityView` to `VulkanRenderTargets`.
-    *   Update `kGBufferCount` to 6.
-2.  **Pipeline Update:**
-    *   Update `VulkanLayoutContracts` and `VulkanPipelineManager` to reflect the new attachment.
-    *   Update `DeferredGBufferTarget` definition in `VulkanRenderingSession.h` to include the velocity attachment.
-3.  **Shader Update (`model.vert` / `model.frag`):**
-    *   **Vertex Shader:** Need `uPrevModelViewProj` matrix.
-        *   *Challenge:* The engine currently uploads `uModel` matrices per-draw via a storage buffer. We need to store the *previous* frame's matrix for every object or calculate it.
-        *   *Alternative:* For static objects, only Camera moves. `PrevPos = uPrevViewProj * WorldPos`.
-        *   *Dynamic Objects:* Need history tracking in `code/graphics` or `code/object`.
-    *   **Fragment Shader:** Calculate `Velocity = (CurrentPosNDC.xy / CurrentPosNDC.w) - (PrevPosNDC.xy / PrevPosNDC.w)`.
-    *   **Output:** Write to G-Buffer Target 5. Note: Mask out jitter from calculation if possible, or let DLSS handle it (DLSS expects motion vectors *without* jitter usually, or specific handling).
+Post-processing then consumes ColorOutHDR (bloom, tonemap, post effects), and finally HUD/UI draws on top.
 
-### Phase 3: Jitter & LOD Bias
+### 1.3 Implementation Constraints from `docs/DESIGN_PHILOSOPHY.md`
 
-1.  **Matrix System:**
-    *   In `gr_set_proj_matrix`, apply sub-pixel offset if DLSS is active.
-    *   Offset formula: `(sampleX - 0.5) / RenderWidth, (sampleY - 0.5) / RenderHeight`.
-2.  **Texture Manager:**
-    *   Apply `mipLodBias` to samplers in `VulkanTextureManager`.
-    *   Formula: `log2(RenderWidth / DisplayWidth) - 1.0` (approx).
+1) Boundary-only conditionals:
+   - "Is DLSS available?" is decided once at initialization and when settings change.
+   - Draw paths should not be littered with `if (dlss)` checks.
 
-### Phase 4: The DLSS Pass
+2) Capability tokens for phase validity:
+   - DLSS evaluate should be callable only with an explicit token proving "resources exist and are ready".
 
-1.  **Placement:**
-    *   Insert after `deferredLightingFinish()` but *before* `recordTonemappingToSwapchain` (or replace the copy to swapchain).
-    *   DLSS usually outputs to a separate resource (Upscaled Color).
-2.  **Resource Transitions:**
-    *   Transition G-Buffer colors, Depth, and Velocity to `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`.
-    *   Transition Output Image to `VK_IMAGE_LAYOUT_GENERAL` or `STORAGE` (NGX requirement dependent).
-3.  **Command Recording:**
-    *   Call `NGX_VULKAN_EVALUATE_DLSS_EXT`.
-    *   Inputs:
-        *   Source: `sceneHdrImage` (Render Resolution)
-        *   Depth: `depthImage`
-        *   Motion: `velocityImage`
-        *   Output: `displayHdrImage` (Display Resolution - new target needed)
-4.  **Post-Process Integration:**
-    *   The Post-Process pipeline (Bloom, Tonemap) must now operate on the **Upscaled** image (Display Resolution).
-    *   Currently, post-processing happens on `sceneHdrImage` (Render Res).
-    *   *Change:* DLSS becomes the bridge. `Scene (Low)` -> `DLSS` -> `Upscaled (High)` -> `PostFX (High)` -> `Swapchain`.
+3) State as location:
+   - DLSS enabled/disabled is modeled as a state object (variant) owned by the renderer, not scattered bools.
 
----
+## 2. Current Vulkan Frame Structure (Anchor Points)
 
-## 5. Files to Modify
+The Vulkan renderer uses:
 
-| File | Changes |
-|------|---------|
-| `code/graphics/vulkan/VulkanRenderTargets.h` | Add Velocity image; split Render/Display extents. |
-| `code/graphics/vulkan/VulkanRenderingSession.h` | Update `DeferredGBufferTarget` definition. |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Initialize NGX; Orchestrate Jitter, Motion Vectors, DLSS Pass. |
-| `code/graphics/vulkan/VulkanDevice.cpp` | Enable NV extensions. |
-| `code/graphics/vulkan/VulkanTextureManager.cpp` | Apply LOD bias to samplers. |
-| `code/graphics/shaders/model.vert/frag` | Calculate and output motion vectors. |
-| `code/graphics/render.cpp` | Update projection matrix logic. |
+- Dynamic rendering (`vkCmdBeginRendering`/`vkCmdEndRendering`) with RAII (`ActivePassGuard`)
+- A rendering session (`VulkanRenderingSession`) that owns target selection and layout transitions
+- Capability tokens in code (e.g., `RecordingFrame`, `FrameCtx`, `RenderCtx`) to enforce "valid-in-phase" APIs
 
-## 6. Challenges & Risks
+DLSS must respect this architecture:
 
-1.  **Motion Vector Accuracy:** Incorrect MVs cause "ghosting" or "smearing". Dynamic objects (ships) need precise previous-frame matrices.
-2.  **Transparent Objects:** Particles/Glass usually don't write to depth/motion vectors. DLSS handles this but might produce artifacts on transparency if not careful.
-    *   *Mitigation:* Render transparency *after* DLSS? No, transparency needs to be upscaled too. Usually, transparency is rendered at low-res on top of opaque, then whole image upscaled.
-3.  **Pipeline Barriers:** NGX is internal; we must ensure correct barriers before passing resources to it.
-4.  **Memory:** Extra G-buffer channel (Velocity) increases VRAM usage.
+- DLSS evaluation should run outside an active dynamic rendering scope.
+- Resource layout transitions should follow the same explicit sync2 discipline as other transitions.
 
-## 7. Validation
+## 3. Proposed High-Level Frame Flow (With DLSS Enabled)
 
-1.  **Debug View:** Implement a debug mode to visualize the Velocity buffer (Red/Green channels).
-    *   Static objects should show velocity when camera moves.
-    *   Moving objects should show velocity relative to camera.
-2.  **Jitter Check:** Disable TAA/DLSS; scene should "shake" by <1 pixel.
+1) Record frame (existing).
+2) Opaque geometry at RenderExtent:
+   - Write G-buffer attachments (existing deferred path)
+   - Write MotionVectors attachment (new; see Section 6)
+3) Deferred lighting resolves to ColorInHDR at RenderExtent (existing scene HDR target).
+4) Transparency/effects policy (see Section 8):
+   - Phase 1: render most "scene-affecting" transparencies into ColorInHDR before upscaling.
+5) DLSS evaluation pass (new):
+   - End/suspend active dynamic rendering
+   - Transition ColorInHDR/Depth/MotionVectors to required layouts
+   - Evaluate DLSS into ColorOutHDR at DisplayExtent
+6) Post-processing at DisplayExtent:
+   - Bloom + tonemap + post effects on ColorOutHDR
+7) HUD/UI at DisplayExtent (existing ordering).
+8) Present (existing).
+
+When DLSS is disabled:
+
+- RenderExtent == DisplayExtent
+- ColorOutHDR is either unused or aliases ColorInHDR (implementation detail)
+- Post-processing pipeline remains as it is today
+
+## 4. New Modules and Types (Correctness by Construction)
+
+### 4.1 `DlssManager` as a boundary
+
+Create a Vulkan-only module (suggested location): `code/graphics/vulkan/dlss/`.
+
+Goals:
+
+- Encapsulate all NGX/DLSS SDK calls and vendor-specific requirements.
+- Expose a small "engine-friendly" interface to the Vulkan renderer.
+- Concentrate all availability checks at the boundary.
+
+### 4.2 DLSS typestate: unavailable vs ready
+
+Model DLSS availability as typestate (variant), not nullable pointers:
+
+```cpp
+struct DlssUnavailable {
+  SCP_string reason; // one-time log message
+};
+
+struct DlssReady {
+  // Owns NGX context + feature handle for a specific feature key
+};
+
+using DlssState = std::variant<DlssUnavailable, DlssReady>;
+```
+
+Invariant: once you hold a `DlssReady&`, DLSS calls are valid; no further "is available?" checks are needed.
+
+### 4.3 `DlssFeatureKey` (defines recreation boundaries)
+
+DLSS features must be recreated when any of these changes:
+
+- RenderExtent
+- DisplayExtent
+- DLSS quality mode (Quality/Balanced/Performance/UltraPerformance)
+- HDR pipeline enablement (if DLSS configuration differs)
+- Any SDK preset selection we decide to expose (optional in Phase E)
+
+Represent this as a single struct:
+
+```cpp
+struct DlssFeatureKey {
+  vk::Extent2D renderExtent;
+  vk::Extent2D displayExtent;
+  DlssQualityMode mode;
+  bool hdr = false;
+};
+```
+
+### 4.4 DLSS evaluation capability token
+
+Create a token that proves all prerequisites for evaluation:
+
+- A `DlssReady` exists for the current `DlssFeatureKey`
+- Motion vectors are available for this frame
+- Jitter offset computed for this frame
+- Required layout transitions have been applied for the inputs and output
+
+This should be constructed only by the renderer boundary immediately before the evaluate call. All internal DLSS evaluate functions require this token.
+
+## 5. Resolution Decoupling (Render vs Display)
+
+This is required even before the DLSS SDK integration is useful.
+
+### 5.1 Resolution policy
+
+Introduce a single "resolution policy" that computes RenderExtent from DisplayExtent + mode scale.
+
+Rules:
+
+- Clamp to at least 1x1.
+- Preserve aspect ratio.
+- Respect any alignment constraints discovered from the DLSS SDK (treat those as boundary data, not magic constants).
+- Recompute when display resolution changes (swapchain recreate) or DLSS mode changes.
+
+### 5.2 Render target ownership changes
+
+`VulkanRenderTargets` must become explicitly dual-extent:
+
+- RenderExtent targets:
+  - G-buffer attachments
+  - Depth attachment (main + cockpit if needed)
+  - Scene HDR input (ColorInHDR)
+  - MotionVectors (new)
+- DisplayExtent targets:
+  - DLSS output HDR (ColorOutHDR)
+  - Post-processing intermediates that assume display resolution
+  - Swapchain (existing)
+
+### 5.3 Render session/target typestates
+
+Extend `VulkanRenderingSession` target selection so "render to low-res scene HDR" and "render to display-res post-processing" are distinct, explicit target states (like existing SwapchainWithDepth vs SceneHdrWithDepth patterns).
+
+Invariant: The dynamic rendering renderArea must match the active target extent.
+
+## 6. Motion Vectors (Velocity Buffer)
+
+### 6.1 Buffer format and meaning
+
+Default format: `R16G16_SFLOAT`.
+
+If SDK requires higher precision, upgrade to `R32G32_SFLOAT` (make this a feature flag decided at boundary after querying SDK requirements).
+
+Define one motion-vector convention and stick to it:
+
+- Recommended internal representation: NDC delta (current - previous) using *unjittered* projections.
+- Convert to DLSS-required units (if different) only at the DLSS boundary.
+
+### 6.2 Where motion vectors are generated
+
+Primary producer: deferred G-buffer pass (opaque geometry).
+
+This avoids "special case motion vectors everywhere"; most pixels come from opaque geometry.
+
+### 6.3 Previous-transform cache (renderer-owned)
+
+We need per-object previous-frame transforms for correct object motion (ships, weapons, debris, rotating submodels).
+
+Design goal (state as location + boundary ownership):
+
+- The renderer owns a cache mapping a stable RenderKey -> previous model matrix.
+- Cache is updated once per frame, centrally, without scattering "prev" fields across unrelated systems.
+
+Concrete plan:
+
+1) Define a RenderKey that uniquely identifies a draw's transform history:
+   - object instance id
+   - submodel id (if drawn independently)
+   - additional disambiguator if a single object issues multiple draws with different transforms
+
+2) At draw submission:
+   - compute current model matrix (existing)
+   - look up prev model matrix (if missing: use current, yielding zero motion for first appearance)
+   - send both current and previous transform to the shader path that writes motion vectors
+
+3) After the draw:
+   - update cache[RenderKey] = current model matrix
+
+4) Cache lifecycle:
+   - on mission start / scene load / large camera discontinuity: clear cache (or mark resetHistory)
+   - on object destruction: allow entry to expire (optional: compact periodically)
+
+### 6.4 Camera cuts / resets
+
+DLSS must be told when history is invalid.
+
+Boundary signal sources:
+
+- Mission start/load
+- Cutscenes / viewpoint mode changes
+- RenderExtent/DisplayExtent changes (swapchain recreate or mode change)
+
+Implementation plan:
+
+- Produce a per-frame ResetHistory flag at the renderer boundary.
+- Thread it into DLSS evaluation parameters.
+
+## 7. Projection Jitter
+
+### 7.1 Jitter sequence
+
+Implement a deterministic jitter generator (e.g., Halton base 2/3) keyed by frame index modulo a fixed period.
+
+Output:
+
+- jitterPx: jitter in pixel units relative to RenderExtent, typically within (-0.5 .. +0.5)
+
+### 7.2 Jittered vs unjittered matrices
+
+Do not replace the global projection with jittered projection without preserving the unjittered version.
+
+Maintain:
+
+- unjittered projection (for culling + stable motion-vector math)
+- jittered projection (for rasterization)
+
+This reduces invalid state propagation: systems that should not "know about DLSS" can keep using the unjittered projection.
+
+## 8. Transparency, Particles, and HUD Policy
+
+### 8.1 HUD/UI
+
+HUD/UI must not feed into DLSS input; it stays at DisplayExtent (consistent with `docs/vulkan/VULKAN_HUD_RENDERING.md`).
+
+### 8.2 Transparency/effects (Phase decisions)
+
+Phase 1 (simple and consistent):
+
+- Render most scene-affecting transparencies into low-res ColorInHDR before upscaling, so they are temporally stable with the scene.
+
+Phase 2 (quality improvement):
+
+- Add an optional reactive/transparency mask if the SDK supports it and we see ghosting around particles.
+
+## 9. DLSS Evaluation Pass (Vulkan Integration Details)
+
+### 9.1 Placement
+
+Place DLSS evaluation:
+
+- After low-res ColorInHDR is complete
+- Before post-processing that assumes display-res input
+
+### 9.2 Dynamic rendering boundaries
+
+DLSS evaluate should not run inside an active dynamic rendering scope.
+
+Plan:
+
+- Call `VulkanRenderingSession::suspendRendering()` (or equivalent) before DLSS evaluate.
+- Do not rely on "it happens to work"; make the boundary explicit.
+
+### 9.3 Layout transitions (sync2)
+
+Add explicit transitions for DLSS inputs/outputs, consistent with `docs/vulkan/VULKAN_SYNCHRONIZATION.md`.
+
+Inputs:
+
+- ColorInHDR: color attachment -> shader read
+- Depth: depth attachment -> shader read
+- MotionVectors: color attachment -> shader read
+
+Output:
+
+- ColorOutHDR: ensure layout suitable for DLSS writes (likely general/storage; exact requirement is SDK-defined)
+
+After evaluate:
+
+- Transition ColorOutHDR to shader read for post-processing, or directly to color attachment if the next step renders into it.
+
+Important correctness rule:
+
+- The DLSS module should not "guess" current image layouts. The renderer boundary transitions resources and then hands them to DLSS evaluate with the capability token.
+
+## 10. Post-Processing and AA Interactions
+
+### 10.1 Anti-aliasing mode interactions
+
+DLSS SR includes temporal AA; running SMAA/FXAA on top is usually redundant and may harm quality.
+
+Plan:
+
+- When DLSS is enabled, force AA mode to "None" (or expose "DLSS handles AA") and disable FXAA/SMAA post passes.
+- Optional later: allow a sharpening-only post step, if desired.
+
+### 10.2 Post-processing resolution
+
+Once DLSS is enabled:
+
+- Bloom/tonemap/post effects should operate on ColorOutHDR at DisplayExtent.
+
+## 11. Texture LOD Bias
+
+Lower render resolution changes mip selection; without LOD bias, textures can look overly blurry.
+
+Plan:
+
+- Add a global LOD bias derived from renderScale at the renderer boundary.
+- Extend Vulkan sampler caching to include a quantized mipLodBias component in the sampler key (avoid raw float keys).
+- Ensure descriptor validity rules remain satisfied (all descriptor slots always valid, per `docs/vulkan/VULKAN_TEXTURE_BINDING.md`).
+
+## 12. Build, Packaging, and Runtime Availability
+
+These are boundary concerns; do not leak them into core draw code.
+
+### 12.1 Build-time
+
+- Add a CMake option (e.g., `FSO_ENABLE_DLSS`) default OFF.
+- Do not commit proprietary SDK binaries/headers into the repo.
+- When enabled, require developer-supplied SDK path(s).
+
+### 12.2 Runtime
+
+DLSS is "Ready" only if:
+
+- GPU is NVIDIA + DLSS-capable
+- required runtime components are present
+- feature creation succeeds for current `DlssFeatureKey`
+
+Otherwise:
+
+- Log one clear reason (once).
+- Continue without DLSS (RenderExtent == DisplayExtent).
+
+## 13. Testing and Validation
+
+### 13.1 Debug visualizations
+
+- Motion vector view:
+  - camera pan over static geometry produces coherent vectors
+  - moving ships produce vectors consistent with their motion
+- Jitter view:
+  - with DLSS disabled but jitter enabled, scene should wobble subpixel (< 1 px)
+
+### 13.2 Automated tests (Vulkan-focused)
+
+- Unit test: jitter sequence determinism and bounds.
+- Integration test: render-target resize logic maintains valid extents (no 0-sized images) and correct allocation split (render vs display).
+- Optional: GPU test that the velocity attachment is writable and sampled (format/usage).
+
+## 14. Phased Implementation Checklist (Concrete Tasks)
+
+### Phase A: Resolution decoupling without DLSS
+
+Goal: prove plumbing without introducing NGX complexity.
+
+1) Add a `ResolutionState` (DisplayExtent, RenderExtent) owned by the Vulkan renderer boundary.
+2) Teach `VulkanRenderTargets` to allocate dual-extent resources.
+3) Add a simple non-DLSS upsample/copy step (bilinear) to map RenderExtent scene HDR to DisplayExtent.
+4) Ensure HUD/UI and post-processing still behave correctly.
+
+Exit criteria:
+
+- RenderExtent can be set to a smaller size and the game remains visually correct (minus expected quality loss).
+
+### Phase B: Motion vectors + jitter (still no DLSS)
+
+1) Add MotionVectors render target and wiring into the deferred geometry pass.
+2) Implement previous-transform cache keyed by RenderKey.
+3) Implement jitter generator + jittered/unjittered projection split.
+4) Add debug visualizations.
+
+Exit criteria:
+
+- Velocity buffer looks correct in debug view.
+- Jitter wobble behaves as expected.
+
+### Phase C: DLSS module integration (boundary only)
+
+1) Add `DlssManager` module and `FSO_ENABLE_DLSS` build option.
+2) Initialize SDK context at startup; create `DlssState` (Unavailable/Ready).
+3) Implement feature (re)creation keyed by `DlssFeatureKey`.
+
+Exit criteria:
+
+- On supported hardware, feature initializes and logs success.
+- On unsupported hardware, logs a clear reason once and continues.
+
+### Phase D: DLSS evaluation pass integration
+
+1) Insert DLSS evaluate pass after low-res scene HDR completion and before post-processing.
+2) Implement explicit layout transitions.
+3) Wire inputs (ColorInHDR/Depth/MotionVectors/Jitter/ResetHistory) and output (ColorOutHDR).
+4) Route post-processing to use ColorOutHDR.
+
+Exit criteria:
+
+- DLSS mode toggles on/off correctly.
+- No validation errors; stable output in motion.
+
+### Phase E: Quality options, LOD bias, and polish
+
+1) Add UI/config options:
+   - enable/disable DLSS
+   - quality mode selection
+   - optional sharpening control (if desired)
+2) Implement sampler LOD bias keyed by render scale.
+3) Optional reactive mask integration (only if artifacts warrant it).
+
+## 15. Code Areas Expected to Change (Non-Exhaustive)
+
+- `code/graphics/vulkan/VulkanRenderTargets.*` (dual extents; motion vectors; DLSS output HDR)
+- `code/graphics/vulkan/VulkanRenderingSession.*` (target selection + transitions)
+- `code/graphics/vulkan/VulkanRenderer.*` (frame orchestration; jitter; history reset)
+- `code/graphics/vulkan/VulkanTextureManager.*` (sampler LOD bias)
+- `code/graphics/shaders/*` (motion vector output; potentially new variants)
+- New: `code/graphics/vulkan/dlss/*` (isolated SDK integration)
+
+## 16. Open Questions (Explicitly Tracked)
+
+These must be answered during implementation by consulting the specific NGX SDK version we integrate:
+
+1) DLSS input conventions (motion vector units, depth range conventions, jitter representation).
+2) Required Vulkan extensions/features for NGX on our Vulkan baseline.
+3) Whether exposure is required for stable brightness; if yes, where exposure is computed (engine currently lacks full auto-exposure).
+4) How to handle cockpit render-to-texture displays when RenderExtent != DisplayExtent (may need per-RT policy).

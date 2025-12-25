@@ -906,6 +906,14 @@ void VulkanRenderer::endSceneTexture(const FrameCtx& ctx, bool enablePostProcess
 		  ls.samplenum = 50;
 		}
 
+		// Defensive clamp: avoid pathological stalls/hangs if a table sets an extreme sample count.
+		// OpenGL bakes SAMPLE_NUM into the shader at compile time; Vulkan uses a uniform loop bound.
+		const int requestedSamples = ls.samplenum;
+		CLAMP(ls.samplenum, 1, 128);
+		if (ls.samplenum != requestedSamples) {
+		  mprintf(("Vulkan lightshafts: clamping sample count %d -> %d\n", requestedSamples, ls.samplenum));
+		}
+
 		// Depth textures must be shader-readable for sampling.
 		m_renderingSession->transitionMainDepthToShaderRead(cmd);
 		m_renderingSession->transitionCockpitDepthToShaderRead(cmd);
@@ -937,6 +945,7 @@ void VulkanRenderer::endSceneTexture(const FrameCtx& ctx, bool enablePostProcess
   graphics::generic_data::post_data post{};
   post.timer = i2fl(timer_get_milliseconds() % 100 + 1);
   post.noise_amount = 0.0f;
+  // Identity defaults (effects disabled unless explicitly enabled)
   post.saturation = 1.0f;
   post.brightness = 1.0f;
   post.contrast = 1.0f;
@@ -953,9 +962,12 @@ void VulkanRenderer::endSceneTexture(const FrameCtx& ctx, bool enablePostProcess
   if (enablePostProcessing && graphics::Post_processing_manager != nullptr) {
 	const auto& effects = graphics::Post_processing_manager->getPostEffects();
 	for (const auto& eff : effects) {
-	  if (eff.always_on || eff.intensity != eff.default_intensity) {
-		doPostEffects = true;
+	  // Match OpenGL semantics: effects are only applied when flagged on (always_on OR intensity != default).
+	  const bool enabled = eff.always_on || eff.intensity != eff.default_intensity;
+	  if (!enabled) {
+		continue;
 	  }
+	  doPostEffects = true;
 
 	  switch (eff.uniform_type) {
 	  case graphics::PostEffectUniformType::NoiseAmount:
