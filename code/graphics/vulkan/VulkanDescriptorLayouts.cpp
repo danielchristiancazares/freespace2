@@ -52,7 +52,11 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 
 	m_globalLayout = m_device.createDescriptorSetLayoutUnique(globalLayoutInfo);
 
-	std::array<vk::DescriptorSetLayoutBinding, 3> perDrawBindings{};
+	// Per-draw push descriptors (set 0):
+	// - binding 0: matrices UBO
+	// - binding 1: generic UBO
+	// - binding 2..5: texture samplers (multi-texture materials + post-processing)
+	std::array<vk::DescriptorSetLayoutBinding, 6> perDrawBindings{};
 	perDrawBindings[0].binding = 0;
 	perDrawBindings[0].descriptorCount = 1;
 	perDrawBindings[0].descriptorType = vk::DescriptorType::eUniformBuffer;
@@ -63,10 +67,12 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 	perDrawBindings[1].descriptorType = vk::DescriptorType::eUniformBuffer;
 	perDrawBindings[1].stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
 
-	perDrawBindings[2].binding = 2;
-	perDrawBindings[2].descriptorCount = 1;
-	perDrawBindings[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
-	perDrawBindings[2].stageFlags = vk::ShaderStageFlagBits::eFragment;
+	for (uint32_t i = 2; i <= 5; ++i) {
+		perDrawBindings[i].binding = i;
+		perDrawBindings[i].descriptorCount = 1;
+		perDrawBindings[i].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		perDrawBindings[i].stageFlags = vk::ShaderStageFlagBits::eFragment;
+	}
 
 	vk::DescriptorSetLayoutCreateInfo perDrawLayoutInfo;
 	perDrawLayoutInfo.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor;

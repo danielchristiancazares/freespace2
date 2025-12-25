@@ -46,6 +46,8 @@ void UI_CHECKBOX::draw()
 {
 	int offset;
 
+	auto clip_restore = graphics::save_clip();
+
 	if ( uses_bmaps ) {
 
 		if ( disabled_flag ) {

@@ -1200,6 +1200,10 @@ void neb2_pre_render(camid cid)
 		return;
 	}
 
+	// Save/restore clip state by construction (RAII). This function temporarily modifies clip-related
+	// globals for a tiny off-screen-ish sample render; leaking that state would corrupt the rest of the frame.
+	auto clip_restore = graphics::save_clip();
+
 	// set the view clip
 	gr_screen.clip_width = this_esize;
 	gr_screen.clip_height = this_esize;
