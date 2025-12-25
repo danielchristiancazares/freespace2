@@ -99,7 +99,8 @@ bool VulkanRenderer::initialize() {
   createRenderingSession();
 
   createDeferredLightingResources();
-  createSmaaLookupTextures();
+  const InitCtx initCtx{};
+  createSmaaLookupTextures(initCtx);
 
   m_inFlightFrames.clear();
 
@@ -2747,6 +2748,22 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(const FrameCtx& ctx
   return m_textureBindings->descriptor(*id, m_frameCounter, samplerKey);
 }
 
+void VulkanRenderer::beginDecalPass(const FrameCtx& ctx)
+{
+  Assertion(&ctx.renderer == this, "beginDecalPass called with FrameCtx from a different VulkanRenderer instance");
+  Assertion(m_renderingSession != nullptr, "beginDecalPass called before rendering session initialization");
+
+  vk::CommandBuffer cmd = ctx.m_recording.cmd();
+  Assertion(cmd, "beginDecalPass called with null command buffer");
+
+  // Decals sample depth; transitions are invalid inside dynamic rendering.
+  m_renderingSession->suspendRendering();
+  m_renderingSession->transitionMainDepthToShaderRead(cmd);
+
+  // Decal shaders sample the scene depth via the global (set=1) descriptor set.
+  bindDeferredGlobalDescriptors();
+}
+
 void VulkanRenderer::setViewport(const FrameCtx& ctx, const vk::Viewport& viewport)
 {
   Assertion(&ctx.renderer == this, "setViewport called with FrameCtx from a different VulkanRenderer instance");
@@ -3219,30 +3236,100 @@ void VulkanRenderer::releaseMovieTexture(MovieTextureHandle handle)
   m_movieManager->releaseMovieTexture(handle);
 }
 
-void VulkanRenderer::immediateSubmit(const std::function<void(vk::CommandBuffer)>& recorder) {
-  vk::CommandBufferAllocateInfo allocInfo;
+void VulkanRenderer::submitInitCommandsAndWait(const InitCtx& /*init*/,
+  const std::function<void(vk::CommandBuffer)>& recorder)
+{
+  Assertion(m_vulkanDevice != nullptr, "submitInitCommandsAndWait requires VulkanDevice");
+  Assertion(m_uploadCommandPool, "submitInitCommandsAndWait requires an upload command pool");
+  Assertion(m_submitTimeline, "submitInitCommandsAndWait requires a submit timeline semaphore");
+
+  vk::CommandBufferAllocateInfo allocInfo{};
   allocInfo.level = vk::CommandBufferLevel::ePrimary;
   allocInfo.commandPool = m_uploadCommandPool.get();
   allocInfo.commandBufferCount = 1;
 
-  auto cmdBuffers = m_vulkanDevice->device().allocateCommandBuffersUnique(allocInfo);
-  auto& cmdBuffer = cmdBuffers[0];
+  vk::CommandBuffer cmd{};
+#if defined(VULKAN_HPP_NO_EXCEPTIONS)
+  const auto allocRv = m_vulkanDevice->device().allocateCommandBuffers(allocInfo);
+  if (allocRv.result != vk::Result::eSuccess || allocRv.value.empty()) {
+	throw std::runtime_error("Failed to allocate init command buffer");
+  }
+  cmd = allocRv.value[0];
+#else
+  const auto cmdBuffers = m_vulkanDevice->device().allocateCommandBuffers(allocInfo);
+  Assertion(!cmdBuffers.empty(), "Failed to allocate init command buffer");
+  cmd = cmdBuffers[0];
+#endif
 
-  vk::CommandBufferBeginInfo beginInfo;
+  vk::CommandBufferBeginInfo beginInfo{};
   beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-  cmdBuffer->begin(beginInfo);
+#if defined(VULKAN_HPP_NO_EXCEPTIONS)
+  const auto beginResult = cmd.begin(beginInfo);
+  if (beginResult != vk::Result::eSuccess) {
+	throw std::runtime_error("Failed to begin init command buffer");
+  }
+#else
+  cmd.begin(beginInfo);
+#endif
 
-  recorder(cmdBuffer.get());
+  recorder(cmd);
 
-  cmdBuffer->end();
+#if defined(VULKAN_HPP_NO_EXCEPTIONS)
+  const auto endResult = cmd.end();
+  if (endResult != vk::Result::eSuccess) {
+	throw std::runtime_error("Failed to end init command buffer");
+  }
+#else
+  cmd.end();
+#endif
 
-  vk::SubmitInfo submitInfo;
-  submitInfo.commandBufferCount = 1;
-  auto cmdBufferHandle = cmdBuffer.get();
-  submitInfo.pCommandBuffers = &cmdBufferHandle;
+  // Integrate with the renderer's global serial model by signaling the timeline semaphore.
+  const uint64_t submitSerial = ++m_submitSerial;
 
-  m_vulkanDevice->graphicsQueue().submit(submitInfo, nullptr);
-  m_vulkanDevice->graphicsQueue().waitIdle();
+  vk::CommandBufferSubmitInfo cmdInfo{};
+  cmdInfo.commandBuffer = cmd;
+
+  vk::SemaphoreSubmitInfo signal{};
+  signal.semaphore = m_submitTimeline.get();
+  signal.value = submitSerial;
+  signal.stageMask = vk::PipelineStageFlagBits2::eAllCommands;
+
+  vk::SubmitInfo2 submitInfo{};
+  submitInfo.commandBufferInfoCount = 1;
+  submitInfo.pCommandBufferInfos = &cmdInfo;
+  submitInfo.signalSemaphoreInfoCount = 1;
+  submitInfo.pSignalSemaphoreInfos = &signal;
+
+  m_vulkanDevice->graphicsQueue().submit2(submitInfo, nullptr);
+
+  // Block until the submitted work is complete. This avoids the global stall of queue.waitIdle().
+  vk::Semaphore semaphore = m_submitTimeline.get();
+  vk::SemaphoreWaitInfo waitInfo{};
+  waitInfo.semaphoreCount = 1;
+  waitInfo.pSemaphores = &semaphore;
+  waitInfo.pValues = &submitSerial;
+
+#if defined(VULKAN_HPP_NO_EXCEPTIONS)
+  const auto waitResult =
+	m_vulkanDevice->device().waitSemaphores(waitInfo, std::numeric_limits<uint64_t>::max());
+  if (waitResult != vk::Result::eSuccess) {
+	throw std::runtime_error("Failed waiting for init submit to complete");
+  }
+#else
+  m_vulkanDevice->device().waitSemaphores(waitInfo, std::numeric_limits<uint64_t>::max());
+#endif
+
+  m_completedSerial = std::max(m_completedSerial, submitSerial);
+
+  // Safe after wait: recycle command buffer allocations from the init command pool.
+#if defined(VULKAN_HPP_NO_EXCEPTIONS)
+  const auto resetResult = m_vulkanDevice->device().resetCommandPool(m_uploadCommandPool.get());
+  if (resetResult != vk::Result::eSuccess) {
+	throw std::runtime_error("Failed to reset init upload command pool");
+  }
+#else
+  m_vulkanDevice->device().resetCommandPool(m_uploadCommandPool.get());
+#endif
 }
 
 void VulkanRenderer::shutdown() {
@@ -3452,7 +3539,7 @@ void VulkanRenderer::createDeferredLightingResources() {
   m_cylinderMesh.indexCount = static_cast<uint32_t>(cylIndices.size());
 }
 
-void VulkanRenderer::createSmaaLookupTextures()
+void VulkanRenderer::createSmaaLookupTextures(const InitCtx& init)
 {
   Assertion(m_vulkanDevice != nullptr, "createSmaaLookupTextures requires VulkanDevice");
 
@@ -3517,7 +3604,7 @@ void VulkanRenderer::createSmaaLookupTextures()
 	std::memcpy(mapped, pixels, sizeBytes);
 	m_vulkanDevice->device().unmapMemory(stagingMem.get());
 
-	immediateSubmit([&](vk::CommandBuffer cmd) {
+	submitInitCommandsAndWait(init, [&](vk::CommandBuffer cmd) {
 	  // Undefined -> transfer dst
 	  vk::ImageMemoryBarrier2 toTransfer{};
 	  toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;

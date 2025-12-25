@@ -313,6 +313,10 @@ static void gr_vulkan_bind_uniform_buffer(uniform_block_type type,
 	renderer.setModelUniformBinding(frame, handle, offset, size);
   } else if (type == uniform_block_type::NanoVGData) {
 	frame.nanovgData = { handle, offset, size };
+  } else if (type == uniform_block_type::DecalGlobals) {
+	frame.decalGlobalsData = { handle, offset, size };
+  } else if (type == uniform_block_type::DecalInfo) {
+	frame.decalInfoData = { handle, offset, size };
   } else if (type == uniform_block_type::Matrices) {
 	renderer.setSceneUniformBinding(frame, handle, offset, size);
   } else {
@@ -814,6 +818,258 @@ void stub_render_shield_impact(shield_material* /*material_info*/,
   gr_buffer_handle /*buffer_handle*/,
   int /*n_verts*/)
 {
+}
+
+static void gr_vulkan_start_decal_pass()
+{
+  if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
+	return;
+  }
+  Assertion(std::holds_alternative<DeferredGeometryCtx>(g_backend->deferred),
+	"Vulkan decal pass requires deferred geometry to be active");
+
+  auto ctxBase = currentFrameCtx();
+  ctxBase.renderer.beginDecalPass(ctxBase);
+}
+
+static void gr_vulkan_stop_decal_pass()
+{
+  if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
+	return;
+  }
+  auto ctxBase = currentFrameCtx();
+  auto* session = ctxBase.renderer.renderingSession();
+  if (!session) {
+	return;
+  }
+
+  // Restore the deferred target so gr_deferred_lighting_end() can transition it.
+  session->requestDeferredGBufferTarget();
+}
+
+struct DecalTextureBindings {
+  vk::DescriptorImageInfo diffuseMap{};
+  vk::DescriptorImageInfo glowMap{};
+  vk::DescriptorImageInfo normalMap{};
+};
+
+static DecalTextureBindings buildDecalTextureBindings(const FrameCtx& ctx, const decal_material& material)
+{
+  auto samplerKey = VulkanTextureManager::SamplerKey{};
+  samplerKey.filter = vk::Filter::eLinear;
+  samplerKey.address = convertTextureAddressing(material.get_texture_addressing());
+
+  auto& renderer = ctx.renderer;
+  const vk::DescriptorImageInfo fallback = renderer.getDefaultTextureDescriptor(samplerKey);
+
+  DecalTextureBindings out{};
+  out.diffuseMap = fallback;
+  out.glowMap = fallback;
+  out.normalMap = fallback;
+
+  const int diffuseHandle = material.get_texture_map(TM_BASE_TYPE);
+  if (diffuseHandle >= 0) {
+	out.diffuseMap = renderer.getTextureDescriptor(ctx, diffuseHandle, samplerKey);
+  }
+
+  const int glowHandle = material.get_texture_map(TM_GLOW_TYPE);
+  if (glowHandle >= 0) {
+	out.glowMap = renderer.getTextureDescriptor(ctx, glowHandle, samplerKey);
+  }
+
+  const int normalHandle = material.get_texture_map(TM_NORMAL_TYPE);
+  if (normalHandle >= 0) {
+	out.normalMap = renderer.getTextureDescriptor(ctx, normalHandle, samplerKey);
+  }
+
+  return out;
+}
+
+static void draw_decal_pass(const DecalBoundFrame& bound,
+  const ShaderModules& modules,
+  const DecalTextureBindings& textures,
+  gr_alpha_blend blendMode,
+  const bvec4& colorMask,
+  const indexed_vertex_source& source,
+  gr_buffer_handle instanceBufferHandle,
+  const vertex_layout& layout,
+  int numElements,
+  int numInstances,
+  uint32_t gbufferIndex)
+{
+  auto& renderer = bound.ctx.renderer;
+  auto* session = renderer.renderingSession();
+  Assertion(session != nullptr, "Decal render requires a rendering session");
+
+  // Route rendering into a single G-buffer attachment so each output can have its own blend mode.
+  session->requestGBufferAttachmentTarget(gbufferIndex);
+  auto render = renderer.ensureRenderingStarted(bound.ctx);
+  vk::CommandBuffer cmd = render.cmd;
+
+  PipelineKey key{};
+  key.type = SDR_TYPE_DECAL;
+  key.variant_flags = 0;
+  key.color_format = static_cast<VkFormat>(render.targetInfo.colorFormat);
+  key.depth_format = static_cast<VkFormat>(render.targetInfo.depthFormat);
+  key.sample_count = static_cast<VkSampleCountFlagBits>(renderer.getSampleCount());
+  key.color_attachment_count = render.targetInfo.colorAttachmentCount;
+  key.blend_mode = blendMode;
+  key.layout_hash = layout.hash();
+  key.color_write_mask = convertColorWriteMask(colorMask);
+
+  vk::Pipeline pipeline = renderer.getPipeline(key, modules, layout);
+  Assertion(pipeline, "Decal pipeline creation failed");
+
+  // Bind global descriptors (set=1) for depth sampling.
+  const vk::DescriptorSet globalSet = renderer.globalDescriptorSet();
+  cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+						 renderer.getPipelineLayout(),
+						 1, 1,
+						 &globalSet,
+						 0, nullptr);
+
+  // Push per-draw descriptors (set=0): decal globals/info + textures.
+  vk::Buffer globalsBuf = renderer.getBuffer(bound.globalsUbo.handle);
+  Assertion(globalsBuf, "DecalGlobals buffer must resolve to a Vulkan buffer");
+  vk::DescriptorBufferInfo globalsInfo{};
+  globalsInfo.buffer = globalsBuf;
+  globalsInfo.offset = bound.globalsUbo.offset;
+  globalsInfo.range = bound.globalsUbo.size;
+
+  vk::Buffer infoBuf = renderer.getBuffer(bound.infoUbo.handle);
+  Assertion(infoBuf, "DecalInfo buffer must resolve to a Vulkan buffer");
+  vk::DescriptorBufferInfo infoInfo{};
+  infoInfo.buffer = infoBuf;
+  infoInfo.offset = bound.infoUbo.offset;
+  infoInfo.range = bound.infoUbo.size;
+
+  std::array<vk::WriteDescriptorSet, 5> writes{};
+  writes[0].dstBinding = 0;
+  writes[0].descriptorType = vk::DescriptorType::eUniformBuffer;
+  writes[0].descriptorCount = 1;
+  writes[0].pBufferInfo = &globalsInfo;
+
+  writes[1].dstBinding = 1;
+  writes[1].descriptorType = vk::DescriptorType::eUniformBuffer;
+  writes[1].descriptorCount = 1;
+  writes[1].pBufferInfo = &infoInfo;
+
+  writes[2].dstBinding = 2;
+  writes[2].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[2].descriptorCount = 1;
+  writes[2].pImageInfo = &textures.diffuseMap;
+
+  writes[3].dstBinding = 3;
+  writes[3].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[3].descriptorCount = 1;
+  writes[3].pImageInfo = &textures.glowMap;
+
+  writes[4].dstBinding = 4;
+  writes[4].descriptorType = vk::DescriptorType::eCombinedImageSampler;
+  writes[4].descriptorCount = 1;
+  writes[4].pImageInfo = &textures.normalMap;
+
+  cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+  cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, renderer.getPipelineLayout(), 0,
+						   static_cast<uint32_t>(writes.size()), writes.data());
+
+  // Bind geometry + instance buffers
+  vk::Buffer vb0 = renderer.getBuffer(source.Vbuffer_handle);
+  vk::Buffer vb1 = renderer.getBuffer(instanceBufferHandle);
+  vk::Buffer ib = renderer.getBuffer(source.Ibuffer_handle);
+  Assertion(vb0, "Decal vertex buffer must resolve to a Vulkan buffer");
+  Assertion(vb1, "Decal instance buffer must resolve to a Vulkan buffer");
+  Assertion(ib, "Decal index buffer must resolve to a Vulkan buffer");
+
+  std::array<vk::Buffer, 2> vbs{ vb0, vb1 };
+  std::array<vk::DeviceSize, 2> offs{ 0, 0 };
+  cmd.bindVertexBuffers(0, static_cast<uint32_t>(vbs.size()), vbs.data(), offs.data());
+  cmd.bindIndexBuffer(ib, 0, vk::IndexType::eUint32);
+
+  // Dynamic state
+  cmd.setPrimitiveTopology(convertPrimitiveType(primitive_type::PRIM_TYPE_TRIS));
+  cmd.setCullMode(vk::CullModeFlagBits::eNone);
+  cmd.setFrontFace(vk::FrontFace::eClockwise);
+  cmd.setDepthTestEnable(VK_FALSE);
+  cmd.setDepthWriteEnable(VK_FALSE);
+  cmd.setStencilTestEnable(VK_FALSE);
+
+  // Fullscreen viewport/scissor (decals are screen-space projected via depth reconstruction).
+  vk::Viewport viewport = createFullScreenViewport();
+  cmd.setViewport(0, 1, &viewport);
+  vk::Rect2D scissor = createFullScreenScissor();
+  cmd.setScissor(0, 1, &scissor);
+
+  cmd.drawIndexed(static_cast<uint32_t>(numElements), static_cast<uint32_t>(numInstances), 0, 0, 0);
+}
+
+static void gr_vulkan_render_decals(decal_material* material_info,
+  primitive_type prim_type,
+  vertex_layout* layout,
+  int num_elements,
+  const indexed_vertex_source& buffers,
+  const gr_buffer_handle& instance_buffer,
+  int num_instances)
+{
+  (void)prim_type; // decals are always tris
+
+  if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
+	return;
+  }
+  if (material_info == nullptr || layout == nullptr) {
+	return;
+  }
+
+  auto ctxBase = currentFrameCtx();
+  auto bound = requireDecalBound(ctxBase);
+
+  // Ensure decal shaders are available (Vulkan-only, filename-based).
+  auto& renderer = ctxBase.renderer;
+  const ShaderModules diffuseModules = renderer.getShaderModulesByFilenames("decal.vert.spv", "decal_diffuse.frag.spv");
+  const ShaderModules emissiveModules = renderer.getShaderModulesByFilenames("decal.vert.spv", "decal_emissive.frag.spv");
+  const ShaderModules normalModules = renderer.getShaderModulesByFilenames("decal.vert.spv", "decal_normal.frag.spv");
+
+  const DecalTextureBindings textures = buildDecalTextureBindings(ctxBase, *material_info);
+  const bvec4& mask = material_info->get_color_mask();
+
+  // Diffuse into gbuffer[0]
+  draw_decal_pass(bound,
+	diffuseModules,
+	textures,
+	material_info->get_blend_mode(0),
+	mask,
+	buffers,
+	instance_buffer,
+	*layout,
+	num_elements,
+	num_instances,
+	0);
+
+  // Normal into gbuffer[1] (additive)
+  draw_decal_pass(bound,
+	normalModules,
+	textures,
+	material_info->get_blend_mode(1),
+	mask,
+	buffers,
+	instance_buffer,
+	*layout,
+	num_elements,
+	num_instances,
+	1);
+
+  // Emissive into gbuffer[4]
+  draw_decal_pass(bound,
+	emissiveModules,
+	textures,
+	material_info->get_blend_mode(2),
+	mask,
+	buffers,
+	instance_buffer,
+	*layout,
+	num_elements,
+	num_instances,
+	4);
 }
 
 struct ModelDrawContext {
@@ -2042,6 +2298,10 @@ void init_function_pointers()
   gr_screen.gf_render_primitives_batched = gr_vulkan_render_primitives_batched;
   gr_screen.gf_render_nanovg = gr_vulkan_render_nanovg;
   gr_screen.gf_render_rocket_primitives = gr_vulkan_render_rocket_primitives;
+  // Decals (deferred)
+  gr_screen.gf_start_decal_pass = gr_vulkan_start_decal_pass;
+  gr_screen.gf_render_decals = gr_vulkan_render_decals;
+  gr_screen.gf_stop_decal_pass = gr_vulkan_stop_decal_pass;
   // Particle/distortion/movie rendering: not used (particles/distortion go through batching system)
   gr_screen.gf_render_primitives_particle = [](particle_material*, primitive_type, vertex_layout*, int, int, gr_buffer_handle) {};
   gr_screen.gf_render_primitives_distortion = [](distortion_material*, primitive_type, vertex_layout*, int, int, gr_buffer_handle) {};
