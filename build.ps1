@@ -1,29 +1,21 @@
 Param(
     [string]$Config = "Debug",
     [string]$BuildDir = "build",
-    [string]$Vulkan = "true",
-    [string]$ShaderCompilation = "true",
+    [switch]$Vulkan = $true,
+    [switch]$ShaderCompilation = $true,
     [string]$CxxStandard = "",
-    [string]$ConfigureOnly = "false",
-    [string]$Clean = "false",
+    [switch]$ConfigureOnly,
+    [switch]$Clean,
     [string]$Target = "",
     [string]$ShaderToolPath = "",
-    [string]$Tests = "false",
-    [string]$Verbose = "false",
-    [string]$ForceShaders = "true"
+    [switch]$Tests,
+    [switch]$Verbose,
+    [switch]$ForceShaders = $true,
+    [switch]$FormatVulkan = $true
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-
-# Convert string params to booleans (handles "true", "false", "1", "0", etc.)
-function ConvertTo-Bool([string]$value) {
-    switch ($value.ToLower()) {
-        { $_ -in "true", "1", "yes", "on" } { return $true }
-        { $_ -in "false", "0", "no", "off" } { return $false }
-        default { return [bool]$value }
-    }
-}
 
 # Run a command, capturing output. Show output only on failure (unless verbose).
 function Invoke-Quietly {
@@ -62,13 +54,72 @@ function Invoke-Quietly {
     return 0
 }
 
-$EnableVulkan = ConvertTo-Bool $Vulkan
-$EnableShaderCompilation = ConvertTo-Bool $ShaderCompilation
-$EnableConfigureOnly = ConvertTo-Bool $ConfigureOnly
-$EnableClean = ConvertTo-Bool $Clean
-$EnableTests = ConvertTo-Bool $Tests
-$EnableVerbose = ConvertTo-Bool $Verbose
-$EnableForceShaders = ConvertTo-Bool $ForceShaders
+# Format Vulkan sources, excluding vendored vk_mem_alloc.h.
+function Format-Vulkan {
+    param(
+        [bool]$Enable,
+        [bool]$Verbose
+    )
+
+    if (-not $Enable) {
+        return 0
+    }
+
+    $clangFormat = Get-Command clang-format -ErrorAction SilentlyContinue
+    if (-not $clangFormat) {
+        Write-Warning "clang-format not found; skipping Vulkan format."
+        return 0
+    }
+
+    $files = Get-ChildItem -Path "code/graphics/vulkan" -Recurse -File -Include *.h, *.hpp, *.cpp, *.cc |
+        Where-Object { $_.Name -ne "vk_mem_alloc.h" } |
+        ForEach-Object { $_.FullName }
+
+    if (-not $files -or $files.Count -eq 0) {
+        return 0
+    }
+
+    Write-Host "Formatting Vulkan sources... " -NoNewline
+
+    $batchSize = 200
+    $output = @()
+    $exitCode = 0
+    for ($i = 0; $i -lt $files.Count; $i += $batchSize) {
+        $end = [Math]::Min($i + $batchSize - 1, $files.Count - 1)
+        $slice = $files[$i..$end]
+        $chunkOutput = & $clangFormat.Source -i @slice 2>&1
+        $chunkExit = $LASTEXITCODE
+        if ($Verbose -or $chunkExit -ne 0) {
+            $output += $chunkOutput
+        }
+        if ($chunkExit -ne 0) {
+            $exitCode = $chunkExit
+            break
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        Write-Host "FAILED" -ForegroundColor Red
+        Write-Host ""
+        $output | ForEach-Object { Write-Host $_ }
+        return $exitCode
+    }
+
+    Write-Host "OK" -ForegroundColor Green
+    if ($Verbose -and $output.Count -gt 0) {
+        $output | ForEach-Object { Write-Host $_ }
+    }
+    return 0
+}
+
+$EnableVulkan = [bool]$Vulkan
+$EnableShaderCompilation = [bool]$ShaderCompilation
+$EnableConfigureOnly = [bool]$ConfigureOnly
+$EnableClean = [bool]$Clean
+$EnableTests = [bool]$Tests
+$EnableVerbose = [bool]$Verbose
+$EnableForceShaders = [bool]$ForceShaders
+$EnableFormatVulkan = [bool]$FormatVulkan
 
 # Auto-enable tests if we're explicitly building the test target
 if (-not $EnableTests -and $Target -match "unittests") {
@@ -162,6 +213,12 @@ if ($EnableConfigureOnly) {
     Write-Host ""
     Write-Host "Configure succeeded." -ForegroundColor Green
     exit 0
+}
+
+# Format Vulkan sources before building.
+$result = Format-Vulkan -Enable $EnableFormatVulkan -Verbose $EnableVerbose
+if ($result -ne 0) {
+    exit $result
 }
 
 # Build

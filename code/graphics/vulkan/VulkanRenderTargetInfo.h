@@ -16,4 +16,3 @@ struct RenderTargetInfo {
 
 } // namespace vulkan
 } // namespace graphics
-
