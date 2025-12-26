@@ -1,25 +1,98 @@
-# Vulkan Integration Tests - Behavioral State Machine Testing
+# Vulkan Integration Tests
 
-This document describes the integration test suites for the Vulkan renderer subsystems. These tests validate critical behavioral invariants using lightweight "Fake" state machines that mirror the production implementation logic.
+This document describes the test suites for the Vulkan renderer subsystems. The tests validate behavioral invariants using lightweight "Fake" state machines and, optionally, real GPU integration tests.
 
 ---
 
 ## Table of Contents
 
-1. [Testing Philosophy](#testing-philosophy)
-2. [Fake State Machine Pattern](#fake-state-machine-pattern)
-3. [Test Suites](#test-suites)
+1. [Overview](#overview)
+2. [Prerequisites](#prerequisites)
+3. [Test Categories](#test-categories)
+4. [Testing Philosophy](#testing-philosophy)
+5. [Fake State Machine Pattern](#fake-state-machine-pattern)
+6. [Unit Test Suites](#unit-test-suites)
    - [Depth Attachment Switching](#depth-attachment-switching)
    - [Post-Effects Semantics](#post-effects-semantics)
    - [Texture Render Targets](#texture-render-targets)
-4. [Relationship to Production Code](#relationship-to-production-code)
-5. [Test Files Reference](#test-files-reference)
+7. [Additional Unit Tests](#additional-unit-tests)
+8. [GPU Integration Tests](#gpu-integration-tests)
+9. [Relationship to Production Code](#relationship-to-production-code)
+10. [Running the Tests](#running-the-tests)
+11. [Adding New Tests](#adding-new-tests)
+12. [Troubleshooting](#troubleshooting)
+13. [Design Rationale](#design-rationale)
+14. [Related Documentation](#related-documentation)
+
+---
+
+## Overview
+
+The Vulkan test suite provides comprehensive coverage of the renderer subsystems through two distinct testing approaches:
+
+| Test Type | File Prefix | GPU Required | Purpose |
+|-----------|-------------|--------------|---------|
+| Unit Tests | `test_vulkan_*.cpp` | No | Validate state machine logic using Fake classes |
+| Integration Tests | `it_vulkan_*.cpp` | Yes | Validate real GPU resource management |
+
+Unit tests run on any machine (including CI without graphics hardware) and execute in milliseconds. Integration tests require a Vulkan-capable device and validate actual GPU behavior.
+
+---
+
+## Prerequisites
+
+**Build Requirements:**
+
+- CMake 3.14 or later
+- C++17 compatible compiler
+- GoogleTest (included as submodule)
+- Vulkan SDK (for `FSO_BUILD_WITH_VULKAN=ON`)
+
+**Build Configuration:**
+
+Vulkan tests are conditionally compiled. Enable with:
+
+```bash
+cmake -DFSO_BUILD_WITH_VULKAN=ON ..
+```
+
+The test executable links against:
+- `gtest` - GoogleTest framework
+- `code` - Main FreeSpace2 code library
+- `Vulkan::Vulkan` - Vulkan SDK (when enabled)
+
+**Runtime Requirements (Integration Tests Only):**
+
+- Vulkan-capable GPU with driver installed
+- Set `FS2_VULKAN_IT=1` environment variable to enable GPU tests
+
+---
+
+## Test Categories
+
+### Unit Tests (Fake State Machines)
+
+Files matching `test_vulkan_*.cpp` use the Fake State Machine pattern. These tests:
+
+- Run without a GPU
+- Execute in milliseconds
+- Validate behavioral invariants
+- Use simplified C++ classes that mirror production logic
+
+### GPU Integration Tests
+
+Files matching `it_vulkan_*.cpp` use real Vulkan resources. These tests:
+
+- Require a Vulkan device
+- Create actual GPU resources (buffers, textures, pipelines)
+- Validate driver-specific behavior
+- Run with Vulkan validation layers enabled
 
 ---
 
 ## Testing Philosophy
 
-The Vulkan integration tests focus on **behavioral invariants** rather than implementation details. Each test suite:
+The Vulkan unit tests focus on **behavioral invariants** rather than implementation details. Each test suite:
 
 1. **Isolates a specific subsystem** - Tests one logical concern without dependencies on the full Vulkan stack
 2. **Uses Fake state machines** - Lightweight C++ classes that replicate production state transitions
@@ -36,7 +109,7 @@ This approach enables:
 
 ## Fake State Machine Pattern
 
-Each test file defines a `Fake*` class that mirrors the relevant portion of a production component:
+Each unit test file defines a `Fake*` class that mirrors the relevant portion of a production component:
 
 ```cpp
 // Example pattern from test_vulkan_depth_attachment_switch.cpp
@@ -70,7 +143,7 @@ class FakeDepthAttachmentSession {
 
 ---
 
-## Test Suites
+## Unit Test Suites
 
 ### Depth Attachment Switching
 
@@ -284,6 +357,114 @@ Cubemap render targets (`kFlagCubemap`) create 6 layers with valid attachment vi
 
 ---
 
+## Additional Unit Tests
+
+The test suite includes many additional unit tests beyond the three documented in detail above. These are organized by subsystem:
+
+### Pipeline and Shader Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_pipeline_manager.cpp` | Vertex layout conversion, pipeline key generation |
+| `test_vulkan_shader_manager_model.cpp` | Shader compilation and caching model |
+| `test_vulkan_shader_alignment.cpp` | Uniform buffer std140 alignment |
+| `test_vulkan_shader_layout_contracts.cpp` | Descriptor set layout contracts |
+| `test_vulkan_descriptor_layouts.cpp` | Descriptor pool and set allocation |
+
+### Buffer Management Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_buffer_manager_retirement.cpp` | Buffer retirement and reuse |
+| `test_vulkan_buffer_zero_size.cpp` | Zero-size buffer allocation handling |
+| `test_vulkan_dynstate.cpp` | Dynamic state management |
+
+### Texture Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_texture_contract.cpp` | Texture lifecycle contracts |
+| `test_vulkan_texture_helpers.cpp` | Texture format conversion utilities |
+| `test_vulkan_texture_upload_alignment.cpp` | Texture upload row alignment |
+| `test_vulkan_fallback_texture.cpp` | Missing texture fallback behavior |
+
+### Frame Lifecycle Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_frame_lifecycle.cpp` | Frame begin/end state machine |
+| `test_vulkan_recordingframe_sealed.cpp` | Command buffer sealing |
+| `test_vulkan_scene_texture_lifecycle.cpp` | Scene texture acquire/release |
+| `test_vulkan_swapchain_acquire.cpp` | Swapchain image acquisition retry logic |
+
+### Rendering State Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_clip_scissor.cpp` | Clip rectangle and scissor state |
+| `test_vulkan_blend_enable.cpp` | Blend state management |
+| `test_vulkan_render_target_state.cpp` | Render target state tracking |
+| `test_vulkan_clear_ops_oneshot.cpp` | One-shot clear operation semantics |
+
+### Device and Initialization Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_device_scoring.cpp` | GPU device selection scoring |
+| `test_vulkan_depth_format_selection.cpp` | Depth buffer format selection |
+| `test_vulkan_renderer_shutdown.cpp` | Renderer cleanup on shutdown |
+| `test_vulkan_deferred_release.cpp` | Deferred GPU resource release |
+
+### Post-Processing Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_post_process_targets.cpp` | Post-processing render target management |
+| `test_vulkan_perdraw_bindings.cpp` | Per-draw uniform bindings |
+
+### Specialized Feature Tests
+
+| File | Purpose |
+|------|---------|
+| `test_vulkan_decal_instancing.cpp` | Instanced decal rendering with matrix4 transforms |
+
+---
+
+## GPU Integration Tests
+
+Integration tests validate behavior with real Vulkan resources. These require a GPU and are disabled by default.
+
+### Enabling Integration Tests
+
+Set the environment variable before running:
+
+```bash
+# Linux/macOS
+export FS2_VULKAN_IT=1
+
+# Windows (PowerShell)
+$env:FS2_VULKAN_IT = "1"
+
+# Windows (cmd)
+set FS2_VULKAN_IT=1
+```
+
+### Integration Test Files
+
+| File | Purpose |
+|------|---------|
+| `it_vulkan_subsystems.cpp` | Full subsystem validation with real GPU resources |
+| `it_vulkan_model_present.cpp` | Model rendering and presentation |
+
+### Integration Test Requirements
+
+- Vulkan-capable GPU
+- Vulkan driver installed
+- SDL2 for window creation
+- Tests create actual windows and render frames
+
+---
+
 ## Relationship to Production Code
 
 The Fake classes mirror specific portions of the production implementation:
@@ -296,40 +477,186 @@ The Fake classes mirror specific portions of the production implementation:
 
 **Source File References:**
 
-| Production File | Relevant Test File |
-|-----------------|-------------------|
-| `code/graphics/vulkan/VulkanRenderingSession.cpp` | `test_vulkan_depth_attachment_switch.cpp` |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | `test_vulkan_post_effects_semantics.cpp` |
-| `code/graphics/vulkan/VulkanTextureManager.cpp` | `test_vulkan_texture_render_target.cpp` |
-
----
-
-## Test Files Reference
-
-| File | Lines | Test Count | Purpose |
-|------|-------|------------|---------|
-| `test/src/graphics/test_vulkan_depth_attachment_switch.cpp` | ~250 | 8 | Depth attachment state machine |
-| `test/src/graphics/test_vulkan_post_effects_semantics.cpp` | ~443 | 10 | Post-effects processing |
-| `test/src/graphics/test_vulkan_texture_render_target.cpp` | ~385 | 14 | Render target management |
+| Production File | Relevant Test Files |
+|-----------------|---------------------|
+| `code/graphics/vulkan/VulkanRenderingSession.cpp` | `test_vulkan_depth_attachment_switch.cpp`, `test_vulkan_frame_lifecycle.cpp` |
+| `code/graphics/vulkan/VulkanRenderer.cpp` | `test_vulkan_post_effects_semantics.cpp`, `test_vulkan_renderer_shutdown.cpp` |
+| `code/graphics/vulkan/VulkanTextureManager.cpp` | `test_vulkan_texture_render_target.cpp`, `test_vulkan_texture_contract.cpp` |
+| `code/graphics/vulkan/VulkanPipelineManager.cpp` | `test_vulkan_pipeline_manager.cpp` |
+| `code/graphics/vulkan/VulkanBufferManager.cpp` | `test_vulkan_buffer_manager_retirement.cpp`, `test_vulkan_buffer_zero_size.cpp` |
 
 ---
 
 ## Running the Tests
 
-Build and run with CTest or GoogleTest runner:
+### Building Tests
 
 ```bash
-# Build tests
-cmake --build build --target vulkan_tests
+# Configure with Vulkan support
+cmake -B build -DFSO_BUILD_WITH_VULKAN=ON
 
-# Run all Vulkan integration tests
-ctest -R Vulkan --output-on-failure
-
-# Run specific test suite
-./build/test/vulkan_tests --gtest_filter="VulkanDepthAttachmentSwitch.*"
-./build/test/vulkan_tests --gtest_filter="VulkanPostEffectsSemantics.*"
-./build/test/vulkan_tests --gtest_filter="VulkanTextureRenderTarget.*"
+# Build the test executable
+cmake --build build --target unittests
 ```
+
+### Running All Vulkan Unit Tests
+
+```bash
+# Run all Vulkan tests (unit tests only, no GPU required)
+./build/bin/unittests --gtest_filter="Vulkan*"
+
+# With CTest
+ctest -R Vulkan --output-on-failure
+```
+
+### Running Specific Test Suites
+
+```bash
+# Depth attachment tests
+./build/bin/unittests --gtest_filter="VulkanDepthAttachmentSwitch.*"
+
+# Post-effects tests
+./build/bin/unittests --gtest_filter="VulkanPostEffectsSemantics.*"
+
+# Texture render target tests
+./build/bin/unittests --gtest_filter="VulkanTextureRenderTarget.*"
+
+# Pipeline tests
+./build/bin/unittests --gtest_filter="VulkanPipelineManager.*"
+```
+
+### Running GPU Integration Tests
+
+```bash
+# Enable integration tests
+export FS2_VULKAN_IT=1
+
+# Run integration tests
+./build/bin/unittests --gtest_filter="VulkanSubsystems.*"
+```
+
+### Verbose Output
+
+```bash
+# Show test names as they run
+./build/bin/unittests --gtest_filter="Vulkan*" --gtest_print_time=1
+
+# List all available Vulkan tests without running
+./build/bin/unittests --gtest_filter="Vulkan*" --gtest_list_tests
+```
+
+---
+
+## Adding New Tests
+
+### Creating a New Unit Test
+
+1. **Create the test file** in `test/src/graphics/` with the naming convention `test_vulkan_<feature>.cpp`
+
+2. **Define a Fake class** that mirrors the relevant production logic:
+
+```cpp
+// test_vulkan_my_feature.cpp
+#include <gtest/gtest.h>
+
+namespace {
+
+class FakeMyFeature {
+  public:
+    // Mirror production methods
+    void doSomething();
+
+    // Add observability for assertions
+    int getSomeState() const;
+
+  private:
+    // Mirror relevant production state
+    int m_state = 0;
+};
+
+} // namespace
+
+TEST(VulkanMyFeature, DescriptiveTestName)
+{
+    FakeMyFeature fake;
+    fake.doSomething();
+    EXPECT_EQ(fake.getSomeState(), expectedValue);
+}
+```
+
+3. **Register the file** in `test/src/source_groups.cmake`:
+
+```cmake
+if(FSO_BUILD_WITH_VULKAN)
+add_file_folder("Graphics"
+    # ... existing files ...
+    graphics/test_vulkan_my_feature.cpp
+)
+endif()
+```
+
+4. **Document the test** in this file if it validates a significant behavioral invariant
+
+### Test Naming Conventions
+
+- **Test suite name**: `Vulkan<ComponentName>` (e.g., `VulkanDepthAttachmentSwitch`)
+- **Test name**: `<Scenario>_<ExpectedBehavior>` (e.g., `FrameStart_SelectsMainDepth`)
+
+### Keeping Fakes in Sync
+
+When modifying production code:
+
+1. Identify which Fake class mirrors the changed functionality
+2. Update the Fake to reflect new state machine logic
+3. Add tests for new behavioral invariants
+4. Ensure existing tests still pass (or update them if invariants changed intentionally)
+
+---
+
+## Troubleshooting
+
+### Tests Not Found
+
+**Symptom:** `--gtest_filter="Vulkan*"` returns no tests
+
+**Cause:** Vulkan tests not compiled
+
+**Solution:** Ensure `FSO_BUILD_WITH_VULKAN=ON` in CMake configuration
+
+### Integration Tests Skipped
+
+**Symptom:** `VulkanSubsystems.*` tests report as skipped
+
+**Cause:** `FS2_VULKAN_IT` environment variable not set
+
+**Solution:** Set `export FS2_VULKAN_IT=1` before running
+
+### Linker Errors
+
+**Symptom:** Undefined references to Vulkan symbols
+
+**Cause:** Vulkan SDK not found or not linked
+
+**Solution:** Ensure Vulkan SDK is installed and `VULKAN_SDK` environment variable is set
+
+### Test Failures After Production Changes
+
+**Symptom:** Previously passing tests fail after code changes
+
+**Diagnosis Steps:**
+
+1. Read the test assertion message - it describes the expected invariant
+2. Check if the invariant intentionally changed
+3. If intentional, update the Fake class to match new behavior
+4. If unintentional, the production change introduced a regression
+
+### Fake State Mismatch
+
+**Symptom:** Tests pass but production code behaves differently
+
+**Cause:** Fake class drifted from production implementation
+
+**Solution:** Audit the Fake class against the production source file and sync the state machine logic
 
 ---
 
@@ -353,13 +680,76 @@ Mocking `vk::*` types would:
 
 The Fake pattern tests **what** the system does (state transitions, computed values) rather than **how** it communicates with Vulkan.
 
-### Keeping Fakes in Sync
+### Two-Tier Testing Strategy
 
-When modifying production code:
+| Tier | Tests | Purpose |
+|------|-------|---------|
+| Unit (Fakes) | 30+ test files | Validate logic without GPU |
+| Integration | 2 test files | Validate real GPU behavior |
 
-1. Identify which Fake class mirrors the changed functionality
-2. Update the Fake to reflect new state machine logic
-3. Add tests for new behavioral invariants
-4. Ensure existing tests still pass (or update them if invariants changed intentionally)
+Most invariants are tested at the unit level. Integration tests catch driver-specific issues and validate the full rendering pipeline.
 
-The Fake implementations serve as executable documentation of expected behavior.
+---
+
+## Related Documentation
+
+For deeper understanding of the Vulkan renderer architecture, see:
+
+| Document | Description |
+|----------|-------------|
+| [VULKAN_ARCHITECTURE.md](VULKAN_ARCHITECTURE.md) | Overall Vulkan renderer design |
+| [VULKAN_RENDER_PASS_STRUCTURE.md](VULKAN_RENDER_PASS_STRUCTURE.md) | Render pass organization |
+| [VULKAN_POST_PROCESSING.md](VULKAN_POST_PROCESSING.md) | Post-processing pipeline details |
+| [VULKAN_DESCRIPTOR_SETS.md](VULKAN_DESCRIPTOR_SETS.md) | Descriptor set management |
+| [VULKAN_PIPELINE_MANAGEMENT.md](VULKAN_PIPELINE_MANAGEMENT.md) | Pipeline creation and caching |
+| [VULKAN_SYNCHRONIZATION.md](VULKAN_SYNCHRONIZATION.md) | Synchronization primitives |
+| [VULKAN_ERROR_HANDLING.md](VULKAN_ERROR_HANDLING.md) | Error handling patterns |
+
+---
+
+## Test File Reference
+
+### Documented Unit Tests (Detailed Coverage)
+
+| File | Lines | Test Count | Purpose |
+|------|-------|------------|---------|
+| `test_vulkan_depth_attachment_switch.cpp` | ~248 | 8 | Depth attachment state machine |
+| `test_vulkan_post_effects_semantics.cpp` | ~442 | 10 | Post-effects processing |
+| `test_vulkan_texture_render_target.cpp` | ~384 | 14 | Render target management |
+
+### All Vulkan Test Files
+
+| File | Category |
+|------|----------|
+| `test_vulkan_blend_enable.cpp` | Rendering State |
+| `test_vulkan_buffer_manager_retirement.cpp` | Buffer Management |
+| `test_vulkan_buffer_zero_size.cpp` | Buffer Management |
+| `test_vulkan_clear_ops_oneshot.cpp` | Rendering State |
+| `test_vulkan_clip_scissor.cpp` | Rendering State |
+| `test_vulkan_decal_instancing.cpp` | Specialized Features |
+| `test_vulkan_deferred_release.cpp` | Device/Initialization |
+| `test_vulkan_depth_attachment_switch.cpp` | Frame Lifecycle |
+| `test_vulkan_depth_format_selection.cpp` | Device/Initialization |
+| `test_vulkan_descriptor_layouts.cpp` | Pipeline/Shader |
+| `test_vulkan_device_scoring.cpp` | Device/Initialization |
+| `test_vulkan_dynstate.cpp` | Buffer Management |
+| `test_vulkan_fallback_texture.cpp` | Texture |
+| `test_vulkan_frame_lifecycle.cpp` | Frame Lifecycle |
+| `test_vulkan_perdraw_bindings.cpp` | Post-Processing |
+| `test_vulkan_pipeline_manager.cpp` | Pipeline/Shader |
+| `test_vulkan_post_effects_semantics.cpp` | Post-Processing |
+| `test_vulkan_post_process_targets.cpp` | Post-Processing |
+| `test_vulkan_recordingframe_sealed.cpp` | Frame Lifecycle |
+| `test_vulkan_render_target_state.cpp` | Rendering State |
+| `test_vulkan_renderer_shutdown.cpp` | Device/Initialization |
+| `test_vulkan_scene_texture_lifecycle.cpp` | Frame Lifecycle |
+| `test_vulkan_shader_alignment.cpp` | Pipeline/Shader |
+| `test_vulkan_shader_layout_contracts.cpp` | Pipeline/Shader |
+| `test_vulkan_shader_manager_model.cpp` | Pipeline/Shader |
+| `test_vulkan_swapchain_acquire.cpp` | Frame Lifecycle |
+| `test_vulkan_texture_contract.cpp` | Texture |
+| `test_vulkan_texture_helpers.cpp` | Texture |
+| `test_vulkan_texture_render_target.cpp` | Texture |
+| `test_vulkan_texture_upload_alignment.cpp` | Texture |
+| `it_vulkan_model_present.cpp` | GPU Integration |
+| `it_vulkan_subsystems.cpp` | GPU Integration |

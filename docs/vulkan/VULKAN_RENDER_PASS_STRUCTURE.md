@@ -1,6 +1,7 @@
 # Vulkan Render Pass Structure - Complete Reference
 
-This document provides comprehensive documentation of the Vulkan dynamic rendering architecture.
+This document provides comprehensive documentation of the Vulkan dynamic rendering
+architecture used in the FreeSpace 2 Vulkan backend.
 
 ---
 
@@ -8,209 +9,407 @@ This document provides comprehensive documentation of the Vulkan dynamic renderi
 
 1. [Architecture Overview](#architecture-overview)
 2. [Render Target Types](#render-target-types)
-3. [G-Buffer Content Specification](#g-buffer-content-specification)
-4. [Active Pass (RAII)](#active-pass-raii)
-5. [Layout Transition System](#layout-transition-system)
-6. [Dynamic State Management](#dynamic-state-management)
-7. [Scene Color Copy Pipeline](#scene-color-copy-pipeline)
-8. [Bitmap Target and Cubemap Rendering](#bitmap-target-and-cubemap-rendering)
+3. [G-Buffer Specification](#g-buffer-specification)
+4. [Depth Attachment System](#depth-attachment-system)
+5. [Scene Capture Resources](#scene-capture-resources)
+6. [Active Pass (RAII)](#active-pass-raii)
+7. [Layout Transition System](#layout-transition-system)
+8. [Dynamic State Management](#dynamic-state-management)
 9. [Clear Operations](#clear-operations)
 10. [Frame Lifecycle](#frame-lifecycle)
 11. [Code Reference Summary](#code-reference-summary)
+12. [Design Principles](#design-principles)
 
 ---
 
 ## Architecture Overview
 
-The renderer uses **Vulkan dynamic rendering** (`vkCmdBeginRendering`/`vkCmdEndRendering`) instead of traditional `VkRenderPass` objects. This design:
+The renderer uses **Vulkan dynamic rendering** (`vkCmdBeginRendering` / `vkCmdEndRendering`)
+instead of traditional `VkRenderPass` objects. This design:
 
 - Avoids `VkSubpass` complexity and implicit subpass dependencies
 - Uses explicit layout transitions via `pipelineBarrier2()` with `VkImageMemoryBarrier2`
 - Leverages the **synchronization2** extension for fine-grained memory barriers
 - Employs RAII pattern (`ActivePass`) for automatic pass lifecycle management
+- Supports selectable depth attachments (main scene depth vs cockpit depth)
 
 **Key Source Files:**
 
 | File | Purpose |
 |------|---------|
-| `VulkanRenderingSession.h` | Render pass state machine, target type definitions |
+| `VulkanRenderingSession.h` | Render pass state machine, target type definitions, RAII guard |
 | `VulkanRenderingSession.cpp` | Dynamic rendering, layout transitions, barrier logic |
-| `VulkanRenderTargets.h` | G-buffer image ownership and definitions |
-| `VulkanRenderTargetInfo.h` | Attachment format contract interface |
+| `VulkanRenderTargets.h` | G-buffer, depth, and post-process image ownership |
+| `VulkanRenderTargetInfo.h` | Pipeline-compatible attachment format contract |
 | `VulkanRenderer.cpp` | Deferred lighting pipeline, frame management |
+| `VulkanTextureManager.h/cpp` | Bitmap render target management for RTT |
 
 ---
 
 ## Render Target Types
 
-The render target state machine uses polymorphic `RenderTargetState` classes (`VulkanRenderingSession.h`):
+The render target state machine uses polymorphic `RenderTargetState` classes defined
+in `VulkanRenderingSession.h`. Each target type specifies the attachment configuration
+through the `RenderTargetInfo` contract used for pipeline cache keying.
+
+### Pipeline Contract Structure
+
+```cpp
+// VulkanRenderTargetInfo.h
+struct RenderTargetInfo {
+    vk::Format colorFormat = vk::Format::eUndefined;
+    uint32_t colorAttachmentCount = 1;
+    vk::Format depthFormat = vk::Format::eUndefined;  // eUndefined => no depth
+};
+```
 
 ### 1. SwapchainWithDepthTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
-| Color 0 | Swapchain format (`B8G8R8A8Srgb` typical) | Final composited output |
-| Depth | `D32Sfloat` or `D24UnormS8Uint` | 3D scene depth testing |
+| Color 0 | Swapchain format (typically `B8G8R8A8Srgb`) | Final composited output |
+| Depth | Device-selected (see [Depth Format Selection](#depth-format-selection)) | 3D scene depth testing |
 
-**Usage:** Main 3D scene rendering, post-deferred composition with depth.
+**Request:** `requestSwapchainTarget()`
 
-### 2. SceneHdrWithDepthTarget
+**Usage:** Main 3D scene rendering, post-deferred composition with depth. This is
+the default target at frame start.
 
-| Attachment | Format | Purpose |
-|------------|--------|---------|
-| Color 0 | `R16G16B16A16Sfloat` | HDR scene color buffer |
-| Depth | `D32Sfloat` (shared) | 3D scene depth testing |
-
-**Usage:** Main scene rendering when HDR post-processing is enabled.
-
-### 3. SceneHdrNoDepthTarget
-
-| Attachment | Format | Purpose |
-|------------|--------|---------|
-| Color 0 | `R16G16B16A16Sfloat` | HDR scene color buffer |
-
-**Usage:** HDR compositing passes that do not require depth testing.
-
-### 4. PostLdrTarget
-
-| Attachment | Format | Purpose |
-|------------|--------|---------|
-| Color 0 | `R8G8B8A8Unorm` | LDR post-processing target |
-
-**Usage:** Post-tonemapping effects (film grain, color grading).
-
-### 5. PostLuminanceTarget
-
-| Attachment | Format | Purpose |
-|------------|--------|---------|
-| Color 0 | `R8G8B8A8Unorm` | Luminance for FXAA |
-
-**Usage:** FXAA prepass luminance calculation.
-
-### 6. SmaaEdgesTarget / SmaaBlendTarget / SmaaOutputTarget
-
-| Target | Attachment | Format | Purpose |
-|--------|------------|--------|---------|
-| Edges | Color 0 | `R8G8B8A8Unorm` | Edge detection output |
-| Blend | Color 0 | `R8G8B8A8Unorm` | Blending weight calculation |
-| Output | Color 0 | Swapchain/LDR format | Final SMAA output |
-
-**Usage:** SMAA anti-aliasing pipeline stages.
-
-### 7. BloomMipTarget
-
-| Attachment | Format | Purpose |
-|------------|--------|---------|
-| Color 0 | `R16G16B16A16Sfloat` | Bloom ping-pong mip level |
-
-**Usage:** Bloom downsample/upsample passes with configurable mip level and ping-pong index.
-
-### 8. DeferredGBufferTarget
-
-| Attachment | Index | Format |
-|------------|-------|--------|
-| Albedo | 0 | `R16G16B16A16Sfloat` |
-| Normal | 1 | `R16G16B16A16Sfloat` |
-| Position | 2 | `R16G16B16A16Sfloat` |
-| Specular | 3 | `R16G16B16A16Sfloat` |
-| Emissive | 4 | `R16G16B16A16Sfloat` |
-| Depth | - | `D32Sfloat` (shared) |
-
-**Usage:** Deferred geometry pass - renders material properties to G-buffer.
-
-### 9. SwapchainNoDepthTarget
+### 2. SwapchainNoDepthTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
 | Color 0 | Swapchain format | 2D overlay rendering |
 
-**Key:** `depthFormat = vk::Format::eUndefined`
+**Request:** `requestSwapchainNoDepthTarget()`
 
 **Usage:** Deferred lighting composition, HUD/UI overlay, NanoVG rendering.
+Automatically selected after `endDeferredGeometry()`.
 
-### 10. GBufferEmissiveTarget
+### 3. SceneHdrWithDepthTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | HDR scene color buffer |
+| Depth | Device-selected (shared) | 3D scene depth testing |
+
+**Request:** `requestSceneHdrTarget()`
+
+**Usage:** Main scene rendering when HDR post-processing is enabled (scene texture mode).
+
+### 4. SceneHdrNoDepthTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | HDR scene color buffer |
+
+**Request:** `requestSceneHdrNoDepthTarget()`
+
+**Usage:** HDR compositing passes that do not require depth testing. Also used for
+deferred lighting output when scene texture mode is active.
+
+### 5. DeferredGBufferTarget
+
+| Attachment | Index | Format | Content |
+|------------|-------|--------|---------|
+| Albedo | 0 | `R16G16B16A16Sfloat` | Diffuse color + roughness |
+| Normal | 1 | `R16G16B16A16Sfloat` | World normal + metalness |
+| Position | 2 | `R16G16B16A16Sfloat` | World position + linear depth |
+| Specular | 3 | `R16G16B16A16Sfloat` | Specular color + AO |
+| Emissive | 4 | `R16G16B16A16Sfloat` | Self-illumination + intensity |
+| Depth | - | Device-selected (shared) | Scene depth |
+
+**Request:** `beginDeferredPass(clearNonColorBufs, preserveEmissive)`
+
+**Alternative:** `requestDeferredGBufferTarget()` - Selects the G-buffer target without
+modifying clear/load ops (used by decal pass to restore G-buffer target after individual
+attachment rendering).
+
+**Usage:** Deferred geometry pass - renders material properties to G-buffer.
+
+**Parameters:**
+- `clearNonColorBufs`: Reserved for API parity; Vulkan always clears non-emissive attachments
+- `preserveEmissive`: When `true`, loads emissive attachment (for pre-deferred scene content)
+
+### 6. GBufferAttachmentTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | Single G-buffer attachment |
+
+**Request:** `requestGBufferAttachmentTarget(uint32_t gbufferIndex)`
+
+**Usage:** Decal rendering - renders into a single G-buffer attachment with
+alpha blending. Always uses `eLoad` for load op to preserve existing content.
+No depth attachment is bound for this target.
+
+### 7. GBufferEmissiveTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
 | Color 0 | `R16G16B16A16Sfloat` | Emissive G-buffer only |
 
-**Usage:** Pre-deferred scene color snapshot capture.
+**Request:** `requestGBufferEmissiveTarget()`
 
-### 11. BitmapTarget
+**Usage:** Pre-deferred scene color snapshot capture. Uses `eDontCare` load op
+since the fullscreen copy shader overwrites all pixels. No depth attachment.
+
+### 8. PostLdrTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `B8G8R8A8Unorm` | LDR post-processing target |
+
+**Request:** `requestPostLdrTarget()`
+
+**Usage:** Post-tonemapping effects (film grain, color grading).
+
+### 9. PostLuminanceTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `B8G8R8A8Unorm` | Luminance for FXAA |
+
+**Request:** `requestPostLuminanceTarget()`
+
+**Usage:** FXAA prepass luminance calculation.
+
+### 10. SmaaEdgesTarget / SmaaBlendTarget / SmaaOutputTarget
+
+| Target | Attachment | Format | Purpose |
+|--------|------------|--------|---------|
+| Edges | Color 0 | `B8G8R8A8Unorm` | Edge detection output |
+| Blend | Color 0 | `B8G8R8A8Unorm` | Blending weight calculation |
+| Output | Color 0 | `B8G8R8A8Unorm` | Final SMAA output |
+
+**Request:** `requestSmaaEdgesTarget()`, `requestSmaaBlendTarget()`, `requestSmaaOutputTarget()`
+
+**Usage:** SMAA anti-aliasing pipeline stages.
+
+### 11. BloomMipTarget
+
+| Attachment | Format | Purpose |
+|------------|--------|---------|
+| Color 0 | `R16G16B16A16Sfloat` | Bloom ping-pong mip level |
+
+**Request:** `requestBloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel)`
+
+**Constraints:**
+- `pingPongIndex`: 0 or 1 (see `kBloomPingPongCount`)
+- `mipLevel`: 0 to 3 (see `kBloomMipLevels`)
+- Base resolution is half of swapchain extent, further halved per mip level
+
+**Usage:** Bloom downsample/upsample passes with configurable mip level and
+ping-pong index.
+
+### 12. BitmapTarget
 
 | Attachment | Format | Purpose |
 |------------|--------|---------|
 | Color 0 | Texture format (varies) | Render-to-texture output |
-| Depth | Optional | RTT with depth testing |
+
+**Request:** `requestBitmapTarget(int bitmapHandle, int face)`
+
+**Parameters:**
+- `bitmapHandle`: Engine bitmap handle (must be a valid render target)
+- `face`: Cubemap face index (0-5) or 0 for 2D textures
 
 **Usage:** Cockpit displays, cubemap faces, dynamic texture generation.
 
 ---
 
-## G-Buffer Content Specification
+## G-Buffer Specification
 
-**File:** `VulkanRenderTargets.h:15-22`
+**Constants from `VulkanRenderTargets.h`:**
 
-Complete channel definitions for all G-buffer attachments:
+```cpp
+static constexpr uint32_t kGBufferCount = 5;
+static constexpr uint32_t kGBufferEmissiveIndex = 4;
+```
 
-### Index 0: Albedo/Color (`R16G16B16A16Sfloat`)
+### Channel Definitions
 
+All G-buffer attachments use `R16G16B16A16Sfloat` format.
+
+**Index 0: Albedo/Color**
 ```
 .rgb = Diffuse albedo color (linear color space)
 .a   = Surface roughness (0.0 = mirror smooth, 1.0 = fully rough)
 ```
 
-### Index 1: Normal (`R16G16B16A16Sfloat`)
-
+**Index 1: Normal**
 ```
 .rgb = World-space surface normal (normalized, range -1.0 to +1.0)
 .a   = Metalness factor (0.0 = dielectric/non-metal, 1.0 = pure metal)
 ```
 
-### Index 2: Position (`R16G16B16A16Sfloat`)
-
+**Index 2: Position**
 ```
 .rgb = World-space fragment position (absolute world coordinates)
 .a   = Linear depth (eye-space Z distance from camera)
 ```
 
-### Index 3: Specular (`R16G16B16A16Sfloat`)
-
+**Index 3: Specular**
 ```
 .rgb = Specular reflectance color (F0 for dielectrics, albedo-tinted for metals)
 .a   = Ambient occlusion factor (1.0 = fully lit, 0.0 = fully occluded)
 ```
 
-### Index 4: Emissive (`R16G16B16A16Sfloat`)
-
+**Index 4: Emissive**
 ```
 .rgb = Self-illumination color (HDR capable, values > 1.0 supported)
 .a   = Emission intensity multiplier
 ```
 
-**G-Buffer Memory Layout:**
+### Memory Organization
 
 ```cpp
-// VulkanRenderTargets.h:65-91
-class VulkanRenderTargets {
-    std::array<VkImage, 5> m_gbufferImages;      // All 5 G-buffer images
-    std::array<VkImageView, 5> m_gbufferViews;   // Corresponding views
-    VkDeviceMemory m_gbufferMemory;              // Single allocation block
+// VulkanRenderTargets.h (private members)
+std::array<vk::UniqueImage, kGBufferCount> m_gbufferImages;
+std::array<vk::UniqueDeviceMemory, kGBufferCount> m_gbufferMemories;
+std::array<vk::UniqueImageView, kGBufferCount> m_gbufferViews;
+std::array<vk::ImageLayout, kGBufferCount> m_gbufferLayouts{};
+vk::UniqueSampler m_gbufferSampler;  // Linear filtering
+vk::Format m_gbufferFormat = vk::Format::eR16G16B16A16Sfloat;
+```
 
-    VkImage m_depthImage;                         // Shared depth buffer
-    VkImageView m_depthView;
-    VkDeviceMemory m_depthMemory;
+Each G-buffer image has its own memory allocation for flexibility. The sampler uses
+linear filtering for the lighting pass.
 
-    std::vector<VkImage> m_sceneColorImages;      // Per-swapchain-index
-    std::vector<VkImageView> m_sceneColorViews;
+---
+
+## Depth Attachment System
+
+The renderer supports two selectable depth attachments to enable proper depth
+handling for cockpit rendering (OpenGL parity):
+
+### Depth Selection API
+
+```cpp
+void useMainDepthAttachment();      // Scene depth (default)
+void useCockpitDepthAttachment();   // Cockpit-only depth
+```
+
+### Depth Resources
+
+| Resource | Purpose |
+|----------|---------|
+| Main Depth | Primary scene depth buffer, shared between swapchain/deferred targets |
+| Cockpit Depth | Separate depth for cockpit geometry, populated between save/restore zbuffer calls |
+
+### Depth Format Selection
+
+The depth format is selected at initialization from a preference order that prioritizes
+formats with stencil support for future extensibility:
+
+```cpp
+// VulkanRenderTargets.cpp - findDepthFormat()
+const std::vector<vk::Format> candidates = {
+    vk::Format::eD32SfloatS8Uint,   // 32-bit depth + 8-bit stencil (preferred)
+    vk::Format::eD24UnormS8Uint,    // 24-bit depth + 8-bit stencil
+    vk::Format::eD32Sfloat,         // 32-bit depth only (fallback)
 };
 ```
+
+The first format that supports both `eDepthStencilAttachment` and `eSampledImage`
+features is selected. This ensures the depth buffer can be used both for rendering
+and for deferred lighting/post-processing sampling.
+
+### Depth Layout Helpers
+
+```cpp
+vk::ImageLayout depthAttachmentLayout() const;
+// Returns: eDepthStencilAttachmentOptimal (if stencil) or eDepthAttachmentOptimal
+
+vk::ImageLayout depthReadLayout() const;
+// Returns: eDepthStencilReadOnlyOptimal (if stencil) or eShaderReadOnlyOptimal
+
+vk::ImageAspectFlags depthAttachmentAspectMask() const;
+// Returns: eDepth (if no stencil) or eDepth | eStencil
+```
+
+The layout helpers account for whether the depth format includes a stencil component.
+
+### Depth Sampler
+
+Depth sampling uses nearest-neighbor filtering because linear filtering is often
+unsupported for depth formats:
+
+```cpp
+vk::SamplerCreateInfo depthSamplerInfo{};
+depthSamplerInfo.magFilter = vk::Filter::eNearest;
+depthSamplerInfo.minFilter = vk::Filter::eNearest;
+```
+
+---
+
+## Scene Capture Resources
+
+### Scene Color Snapshot (Pre-Deferred)
+
+Captures swapchain content before deferred pass for emissive background compositing.
+
+```cpp
+// One image per swapchain index
+SCP_vector<vk::UniqueImage> m_sceneColorImages;
+SCP_vector<vk::UniqueImageView> m_sceneColorViews;
+// Format: matches swapchain format
+```
+
+**Capture:** `captureSwapchainColorToSceneCopy(cmd, imageIndex)`
+
+**Requirement:** Swapchain must be created with `TRANSFER_SRC` usage flag.
+
+### Scene HDR Color
+
+Float-format scene color for HDR post-processing pipeline.
+
+```cpp
+vk::UniqueImage m_sceneHdrImage;
+vk::UniqueImageView m_sceneHdrView;
+vk::UniqueSampler m_sceneHdrSampler;
+vk::Format m_sceneHdrFormat = vk::Format::eR16G16B16A16Sfloat;
+```
+
+**Transition:** `transitionSceneHdrToShaderRead(cmd)`
+
+### Scene Effect Snapshot
+
+Mid-scene capture for distortion and effects that sample the scene.
+
+```cpp
+vk::UniqueImage m_sceneEffectImage;
+vk::UniqueImageView m_sceneEffectView;
+vk::UniqueSampler m_sceneEffectSampler;
+// Format: matches sceneHdrFormat
+```
+
+**Copy:** `copySceneHdrToEffect(cmd)` - ends active pass, copies, transitions for sampling
+
+### Bloom Resources
+
+**Constants:**
+```cpp
+static constexpr uint32_t kBloomPingPongCount = 2;
+static constexpr uint32_t kBloomMipLevels = 4;
+```
+
+```cpp
+std::array<vk::UniqueImage, kBloomPingPongCount> m_bloomImages;
+std::array<vk::UniqueImageView, kBloomPingPongCount> m_bloomViews;  // Full mip chain views
+std::array<std::array<vk::UniqueImageView, kBloomMipLevels>, kBloomPingPongCount> m_bloomMipViews;
+// Format: R16G16B16A16Sfloat
+// Resolution: half of swapchain, with 4 mip levels
+```
+
+Each bloom image has both a full-image view (`m_bloomViews`) for sampling the entire
+mip chain, and per-mip views (`m_bloomMipViews`) for rendering to individual mip levels.
 
 ---
 
 ## Active Pass (RAII)
 
-**File:** `VulkanRenderingSession.h:102-129`
+**Location:** `VulkanRenderingSession.h`, private struct
 
 The `ActivePass` struct implements RAII-based render pass lifecycle management:
 
@@ -218,278 +417,279 @@ The `ActivePass` struct implements RAII-based render pass lifecycle management:
 struct ActivePass {
     vk::CommandBuffer cmd{};
 
-    // Constructor: stores command buffer for endRendering()
     explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
 
-    // Destructor: automatically calls cmd.endRendering() if cmd is valid
     ~ActivePass() {
         if (cmd) {
             cmd.endRendering();
         }
     }
 
-    // Move-only semantics (no copy)
+    // Move-only semantics
     ActivePass(const ActivePass&) = delete;
     ActivePass& operator=(const ActivePass&) = delete;
-    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd) {
-        other.cmd = vk::CommandBuffer{};
-    }
+    ActivePass(ActivePass&& other) noexcept;
     ActivePass& operator=(ActivePass&& other) noexcept;
 };
 ```
 
-**Lifecycle Guarantees:**
+### Storage and State
+
+```cpp
+// VulkanRenderingSession.h (private members)
+std::optional<ActivePass> m_activePass;
+RenderTargetInfo m_activeInfo{};
+```
+
+### Lifecycle Guarantees
 
 1. **Automatic Termination:** Destructor ensures `vkCmdEndRendering()` is called
 2. **Exception Safety:** Pass ends correctly even during stack unwinding
 3. **Move Semantics:** Guard ownership can transfer between scopes
-4. **Lazy Initialization:** Pass begins on first draw/clear, not guard construction
+4. **Lazy Initialization:** Pass begins on first `ensureRendering()` call
 
-**Usage Pattern:**
+### Usage Pattern
 
 ```cpp
-void renderScene(VulkanRenderingSession& session, vk::CommandBuffer cmd) {
-    // Guard created but pass not yet begun
-    session.requestSwapchainTarget();
+RenderTargetInfo VulkanRenderingSession::ensureRendering(
+    vk::CommandBuffer cmd, uint32_t imageIndex)
+{
+    if (m_activePass.has_value()) {
+        return m_activeInfo;  // Already rendering
+    }
 
-    // First draw triggers beginRendering() internally
-    session.ensureRendering(cmd);  // Called by draw functions
-    cmd.draw(...);
+    auto info = m_target->info(m_device, m_targets);
+    m_target->begin(*this, cmd, imageIndex);
+    m_activeInfo = info;
+    applyDynamicState(cmd);
+    m_activePass.emplace(cmd);  // Store guard
+    return info;
+}
+```
 
-    // Additional draws reuse active pass
-    cmd.draw(...);
+**Suspension for Transfers:**
 
-}  // Destructor calls vkCmdEndRendering() automatically
+```cpp
+void suspendRendering() { endActivePass(); }  // For texture updates
 ```
 
 ---
 
 ## Layout Transition System
 
-**File:** `VulkanRenderingSession.cpp:520-702`
+All layout transitions use the **synchronization2** extension with `VkImageMemoryBarrier2`.
 
-All layout transitions use the **synchronization2** extension with `VkImageMemoryBarrier2`:
-
-### Transition Functions
-
-| Function | Line | Source Layout | Destination Layout |
-|----------|------|---------------|-------------------|
-| `transitionSwapchainToAttachment()` | 522 | `ePresentSrcKHR` or `eUndefined` | `eColorAttachmentOptimal` |
-| `transitionDepthToAttachment()` | 545 | `eShaderReadOnlyOptimal` or `eUndefined` | `eDepthStencilAttachmentOptimal` |
-| `transitionSwapchainToPresent()` | 569 | `eColorAttachmentOptimal` | `ePresentSrcKHR` |
-| `transitionGBufferToAttachment()` | 594 | `eShaderReadOnlyOptimal` or `eUndefined` | `eColorAttachmentOptimal` |
-| `transitionGBufferToShaderRead()` | 623 | `eColorAttachmentOptimal` | `eShaderReadOnlyOptimal` |
-
-### Barrier Structure
+### Stage/Access Mapping
 
 ```cpp
-// Typical barrier using synchronization2
-vk::ImageMemoryBarrier2 barrier{
-    .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-    .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-    .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
-    .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
-    .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
-    .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-    .image = gbufferImage,
-    .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}
-};
-
-vk::DependencyInfo depInfo{
-    .imageMemoryBarrierCount = 1,
-    .pImageMemoryBarriers = &barrier
-};
-
-cmd.pipelineBarrier2(depInfo);
+// VulkanRenderingSession.cpp - anonymous namespace
+StageAccess stageAccessForLayout(vk::ImageLayout layout) {
+    switch (layout) {
+    case eUndefined:
+        return {eTopOfPipe, {}};
+    case eColorAttachmentOptimal:
+        return {eColorAttachmentOutput, eColorAttachmentRead | eColorAttachmentWrite};
+    case eDepthAttachmentOptimal:
+    case eDepthStencilAttachmentOptimal:
+        return {eEarlyFragmentTests | eLateFragmentTests,
+                eDepthStencilAttachmentRead | eDepthStencilAttachmentWrite};
+    case eShaderReadOnlyOptimal:
+        return {eFragmentShader, eShaderRead};
+    case eTransferSrcOptimal:
+        return {eTransfer, eTransferRead};
+    case eTransferDstOptimal:
+        return {eTransfer, eTransferWrite};
+    case eDepthStencilReadOnlyOptimal:
+        return {eFragmentShader, eShaderRead};
+    case ePresentSrcKHR:
+        return {{}, {}};  // External to pipeline
+    default:
+        return {eAllCommands, eMemoryRead | eMemoryWrite};
+    }
+}
 ```
 
-### Layout Tracking State
+### Public Transition Methods
 
-**File:** `VulkanRenderingSession.h:73-104`
+| Method | Description |
+|--------|-------------|
+| `transitionSceneHdrToShaderRead(cmd)` | Scene HDR to shader-read for post-process |
+| `transitionMainDepthToShaderRead(cmd)` | Main depth for lightshafts/effects |
+| `transitionCockpitDepthToShaderRead(cmd)` | Cockpit depth for depth-aware effects |
+| `transitionPostLdrToShaderRead(cmd)` | LDR target for subsequent passes |
+| `transitionPostLuminanceToShaderRead(cmd)` | Luminance for FXAA |
+| `transitionSmaaEdgesToShaderRead(cmd)` | SMAA edges for blend pass |
+| `transitionSmaaBlendToShaderRead(cmd)` | SMAA blend weights for output |
+| `transitionSmaaOutputToShaderRead(cmd)` | SMAA output for final composite |
+| `transitionBloomToShaderRead(cmd, index)` | Bloom ping-pong for sampling |
+
+### Internal Transition Methods
+
+| Method | Source Layout | Destination Layout |
+|--------|---------------|-------------------|
+| `transitionSwapchainToAttachment()` | `ePresentSrcKHR` / `eUndefined` | `eColorAttachmentOptimal` |
+| `transitionSwapchainToPresent()` | `eColorAttachmentOptimal` | `ePresentSrcKHR` |
+| `transitionDepthToAttachment()` | varies | `eDepthStencilAttachmentOptimal` or `eDepthAttachmentOptimal` |
+| `transitionGBufferToAttachment()` | `eShaderReadOnlyOptimal` / `eUndefined` | `eColorAttachmentOptimal` |
+| `transitionGBufferToShaderRead()` | `eColorAttachmentOptimal` | `eShaderReadOnlyOptimal` |
+
+### Barrier Example
 
 ```cpp
-// Per-image layout tracking
-std::vector<vk::ImageLayout> m_swapchainLayouts;  // Line 200, per swapchain image
-std::array<vk::ImageLayout, 5> m_gbufferLayouts;  // Line 80, per G-buffer
-vk::ImageLayout m_depthLayout;                     // Line 73, single depth buffer
-std::vector<vk::ImageLayout> m_sceneColorLayouts;  // Line 89, per swapchain index
+vk::ImageMemoryBarrier2 barrier{};
+const auto src = stageAccessForLayout(oldLayout);
+const auto dst = stageAccessForLayout(newLayout);
+barrier.srcStageMask = src.stageMask;
+barrier.srcAccessMask = src.accessMask;
+barrier.dstStageMask = dst.stageMask;
+barrier.dstAccessMask = dst.accessMask;
+barrier.oldLayout = oldLayout;
+barrier.newLayout = newLayout;
+barrier.image = image;
+barrier.subresourceRange = {aspectMask, 0, 1, 0, 1};
+
+vk::DependencyInfo dep{};
+dep.imageMemoryBarrierCount = 1;
+dep.pImageMemoryBarriers = &barrier;
+cmd.pipelineBarrier2(dep);
+```
+
+### Layout Tracking
+
+```cpp
+// VulkanRenderingSession.h
+std::vector<vk::ImageLayout> m_swapchainLayouts;  // Per swapchain image
+
+// VulkanRenderTargets.h
+std::array<vk::ImageLayout, kGBufferCount> m_gbufferLayouts{};
+vk::ImageLayout m_depthLayout = vk::ImageLayout::eUndefined;
+vk::ImageLayout m_cockpitDepthLayout = vk::ImageLayout::eUndefined;
+vk::ImageLayout m_sceneHdrLayout = vk::ImageLayout::eUndefined;
+SCP_vector<vk::ImageLayout> m_sceneColorLayouts;  // Per swapchain index
+std::array<vk::ImageLayout, kBloomPingPongCount> m_bloomLayouts{};
+// ... and other post-process image layouts
 ```
 
 ---
 
 ## Dynamic State Management
 
-**File:** `VulkanRenderingSession.cpp:706-742`
+The renderer uses Vulkan dynamic state extensively to reduce pipeline permutations.
 
-The renderer uses Vulkan dynamic state extensively to reduce pipeline permutations:
-
-### Viewport and Scissor (Lines 706-720)
+### State Tracking
 
 ```cpp
-void setViewportScissor(vk::CommandBuffer cmd, const vk::Extent2D& extent) {
-    vk::Viewport viewport{
-        .x = 0.0f,
-        .y = 0.0f,
-        .width = static_cast<float>(extent.width),
-        .height = static_cast<float>(extent.height),
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f
-    };
-    cmd.setViewport(0, 1, &viewport);
+// VulkanRenderingSession.h (private members)
+vk::CullModeFlagBits m_cullMode = vk::CullModeFlagBits::eBack;
+bool m_depthTest = true;
+bool m_depthWrite = true;
+```
 
-    vk::Rect2D scissor{
-        .offset = {0, 0},
-        .extent = extent
-    };
-    cmd.setScissor(0, 1, &scissor);
+### Public State API
+
+```cpp
+void setCullMode(vk::CullModeFlagBits mode);
+void setDepthTest(bool enable);
+void setDepthWrite(bool enable);
+
+vk::CullModeFlagBits cullMode() const;
+bool depthTestEnabled() const;
+bool depthWriteEnabled() const;
+```
+
+### Dynamic State Application
+
+Applied automatically when `ensureRendering()` begins a pass:
+
+```cpp
+void VulkanRenderingSession::applyDynamicState(vk::CommandBuffer cmd) {
+    const uint32_t attachmentCount = m_activeInfo.colorAttachmentCount;
+    const bool hasDepthAttachment = (m_activeInfo.depthFormat != vk::Format::eUndefined);
+
+    cmd.setCullMode(m_cullMode);
+    cmd.setFrontFace(vk::FrontFace::eClockwise);  // CW for negative viewport Y-flip
+    cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+
+    const bool depthTest = hasDepthAttachment && m_depthTest;
+    const bool depthWrite = hasDepthAttachment && m_depthWrite;
+    cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
+    cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
+    cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
+    cmd.setStencilTestEnable(VK_FALSE);
+
+    // Extended dynamic state 3 (if supported)
+    if (m_device.supportsExtendedDynamicState3()) {
+        const auto& caps = m_device.extDyn3Caps();
+        if (caps.colorBlendEnable) {
+            // Baseline: blending OFF. Draw paths enable per-material.
+            std::array<vk::Bool32, kGBufferCount> blendEnables{};
+            blendEnables.fill(VK_FALSE);
+            cmd.setColorBlendEnableEXT(0, attachmentCount, blendEnables.data());
+        }
+        if (caps.colorWriteMask) {
+            // Full RGBA write mask for all attachments
+            cmd.setColorWriteMaskEXT(0, attachmentCount, ...);
+        }
+        if (caps.polygonMode) {
+            cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
+        }
+        if (caps.rasterizationSamples) {
+            cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+        }
+    }
 }
 ```
 
-### Cull Mode (Lines 721-728)
+### Supported Cull Modes
 
-```cpp
-void setCullMode(vk::CommandBuffer cmd, vk::CullModeFlags mode) {
-    cmd.setCullMode(mode);  // VK_EXT_extended_dynamic_state
-}
-```
-
-**Supported Modes:**
-- `vk::CullModeFlagBits::eNone` - HUD/UI rendering
-- `vk::CullModeFlagBits::eBack` - Standard 3D geometry
-- `vk::CullModeFlagBits::eFront` - Inside-out rendering (cubemaps)
-
-### Depth State (Lines 729-742)
-
-```cpp
-void setDepthState(vk::CommandBuffer cmd, bool testEnable, bool writeEnable,
-                   vk::CompareOp compareOp) {
-    cmd.setDepthTestEnable(testEnable ? VK_TRUE : VK_FALSE);
-    cmd.setDepthWriteEnable(writeEnable ? VK_TRUE : VK_FALSE);
-    cmd.setDepthCompareOp(compareOp);
-}
-```
-
-### Blend State
-
-Blend enable and equations set per draw via `VK_EXT_extended_dynamic_state3`:
-
-```cpp
-cmd.setColorBlendEnableEXT(0, blendEnable);
-cmd.setColorBlendEquationEXT(0, blendEquation);
-```
-
----
-
-## Scene Color Copy Pipeline
-
-**File:** `VulkanRenderingSession.cpp:50-56` (image definitions)
-
-The scene color copy captures rendered content before deferred lighting for background compositing:
-
-### Image Resources
-
-```cpp
-// One image per swapchain index
-std::vector<VkImage> m_sceneColorImages;      // Lines 50-56
-std::vector<VkImageView> m_sceneColorViews;
-// Format: R16G16B16A16Sfloat (HDR capable)
-```
-
-### Copy Pipeline Stages
-
-```
-Stage 1: Prepare Destination
-    m_sceneColorImages[index]: eUndefined -> eTransferDstOptimal
-
-Stage 2: Execute Copy
-    vkCmdCopyImage(cmd,
-        swapchainImage, eTransferSrcOptimal,
-        sceneColorImage, eTransferDstOptimal,
-        region);
-
-Stage 3: Prepare for Sampling
-    m_sceneColorImages[index]: eTransferDstOptimal -> eShaderReadOnlyOptimal
-
-Stage 4: Bind in Deferred Lighting
-    Descriptor updated to reference scene color image
-    Shader samples for emissive background blend
-```
-
----
-
-## Bitmap Target and Cubemap Rendering
-
-**File:** `VulkanRenderingSession.h:129-139`
-
-### BitmapTarget Structure
-
-```cpp
-struct BitmapTargetState {
-    VkImage targetImage;           // Destination texture
-    VkImageView targetView;        // View for specific mip/layer
-    uint32_t cubemapFace;          // 0-5 for cubemap, 0 for 2D
-    uint32_t mipLevel;             // Target mip level
-    vk::Extent2D dimensions;       // Render area size
-    vk::Format colorFormat;        // Target color format
-    bool hasDepth;                 // Depth attachment presence
-};
-```
-
-### Cubemap Face Indices
-
-| Index | Face | GL Constant | View Direction |
-|-------|------|-------------|----------------|
-| 0 | +X | `GL_TEXTURE_CUBE_MAP_POSITIVE_X` | Right |
-| 1 | -X | `GL_TEXTURE_CUBE_MAP_NEGATIVE_X` | Left |
-| 2 | +Y | `GL_TEXTURE_CUBE_MAP_POSITIVE_Y` | Up |
-| 3 | -Y | `GL_TEXTURE_CUBE_MAP_NEGATIVE_Y` | Down |
-| 4 | +Z | `GL_TEXTURE_CUBE_MAP_POSITIVE_Z` | Front |
-| 5 | -Z | `GL_TEXTURE_CUBE_MAP_NEGATIVE_Z` | Back |
-
-### RTT Rendering Flow
-
-```cpp
-// Request RTT target
-session.requestBitmapTarget(textureImage, textureView,
-    cubemapFace, mipLevel, extent, format, hasDepth);
-
-// Render to texture
-session.ensureRendering(cmd);
-cmd.bindPipeline(...);
-cmd.draw(...);
-
-// Return to swapchain (ends RTT pass automatically)
-session.requestSwapchainTarget();
-
-// Transition RTT for sampling
-transitionImageLayout(textureImage,
-    eColorAttachmentOptimal, eShaderReadOnlyOptimal);
-```
+| Mode | Usage |
+|------|-------|
+| `eNone` | HUD/UI rendering, double-sided geometry |
+| `eBack` | Standard 3D geometry (default) |
+| `eFront` | Inside-out rendering (skybox/cubemaps) |
 
 ---
 
 ## Clear Operations
 
-**File:** `VulkanRenderingSession.h:141-160`
-
 ### ClearOps Structure
 
 ```cpp
+// VulkanRenderingSession.h (private)
 struct ClearOps {
-    vk::AttachmentLoadOp colorLoadOp;      // eClear or eLoad
-    vk::AttachmentLoadOp depthLoadOp;      // eClear or eLoad
-    vk::AttachmentLoadOp stencilLoadOp;    // eClear or eLoad
-    vk::ClearValue colorClear;             // RGBA clear color
-    vk::ClearValue depthStencilClear;      // Depth + stencil values
+    vk::AttachmentLoadOp color = vk::AttachmentLoadOp::eLoad;
+    vk::AttachmentLoadOp depth = vk::AttachmentLoadOp::eLoad;
+    vk::AttachmentLoadOp stencil = vk::AttachmentLoadOp::eLoad;
+
+    static ClearOps clearAll() {
+        return {eClear, eClear, eClear};
+    }
+
+    static ClearOps loadAll() {
+        return {eLoad, eLoad, eLoad};
+    }
+
+    ClearOps withDepthStencilClear() const {
+        return {color, eClear, eClear};
+    }
 };
 ```
 
-### Factory Methods
+### Clear State
 
 ```cpp
-static ClearOps clearAll();              // Clear everything
-static ClearOps loadAll();               // Preserve all contents
-static ClearOps withDepthStencilClear(); // Clear depth/stencil, load color
+std::array<float, 4> m_clearColor{0.f, 0.f, 0.f, 1.f};
+float m_clearDepth = 1.0f;
+ClearOps m_clearOps = ClearOps::clearAll();
+std::array<vk::AttachmentLoadOp, kGBufferCount> m_gbufferLoadOps{};
+```
+
+### Public Clear API
+
+```cpp
+void requestClear();          // Sets clearAll()
+void requestDepthClear();     // Sets withDepthStencilClear()
+void setClearColor(float r, float g, float b, float a);
 ```
 
 ### One-Shot Clear Behavior
@@ -497,15 +697,16 @@ static ClearOps withDepthStencilClear(); // Clear depth/stencil, load color
 Clears automatically revert to load after first use within a pass:
 
 ```cpp
-// VulkanRenderingSession.cpp:378, 429, 482, 517
-void afterBeginRendering() {
-    m_clearOps.colorLoadOp = vk::AttachmentLoadOp::eLoad;
-    m_clearOps.depthLoadOp = vk::AttachmentLoadOp::eLoad;
-    m_clearOps.stencilLoadOp = vk::AttachmentLoadOp::eLoad;
-}
+// Inside beginSwapchainRenderingInternal, beginGBufferRenderingInternal, etc.
+cmd.beginRendering(renderingInfo);
+
+// Reset after consumption
+m_clearOps = ClearOps::loadAll();
+m_gbufferLoadOps.fill(vk::AttachmentLoadOp::eLoad);
 ```
 
-This prevents redundant clears across multiple draw calls in the same pass.
+This prevents redundant clears across multiple draw calls if rendering is suspended
+and resumed (e.g., for texture updates).
 
 ---
 
@@ -514,72 +715,137 @@ This prevents redundant clears across multiple draw calls in the same pass.
 ### Complete Frame Flow
 
 ```
-flip()
-|-- wait for GPU (fence from previous frame)
-|-- acquire swapchain image (imageAvailableSemaphore)
-|-- beginFrame()
-|   |-- transition swapchain -> eColorAttachmentOptimal
-|   |-- transition depth -> eDepthStencilAttachmentOptimal
-|   +-- set target to SwapchainWithDepthTarget
+VulkanRenderer::beginFrame()
 |
-|-- [First draw/clear]
-|   +-- beginRendering() via ensureRendering()
++-- VulkanRenderingSession::beginFrame(cmd, imageIndex)
+|   |-- Resize swapchain layout tracking if needed
+|   |-- endActivePass() (safety reset)
+|   |-- Set target to SwapchainWithDepthTarget
+|   |-- Set depth attachment to Main
+|   |-- Set clearOps to clearAll()
+|   |-- transitionSwapchainToAttachment()
+|   +-- transitionDepthToAttachment()
 |
-|-- [3D Scene Rendering]
-|   |-- geometry draws to swapchain
-|   +-- (or to DeferredGBufferTarget if deferred enabled)
++-- [First draw/clear]
+|   +-- ensureRendering() -> beginRendering() + applyDynamicState()
 |
-|-- [Deferred Path - if enabled]
-|   |-- beginDeferredPass()
-|   |   +-- switch to DeferredGBufferTarget
-|   |-- record geometry to G-buffer
-|   |-- endDeferredGeometry()
-|   |   |-- transition G-buffer -> eShaderReadOnlyOptimal
-|   |   +-- switch to SwapchainNoDepthTarget
-|   +-- deferredLightingFinish()
-|       +-- light volumes to swapchain
++-- [3D Scene Rendering]
+|   |-- Geometry draws to swapchain (or SceneHdr if HDR enabled)
+|   +-- (or beginDeferredPass for deferred)
 |
-|-- [HUD Rendering]
-|   |-- (already on SwapchainNoDepthTarget)
++-- [Deferred Path - if enabled]
+|   |
+|   +-- VulkanRenderer::beginDeferredLighting(rec, clearNonColorBufs)
+|   |   |-- captureSwapchainColorToSceneCopy() (if swapchain has TRANSFER_SRC)
+|   |   |   OR transitionSceneHdrToShaderRead() (if scene texture mode)
+|   |   |-- requestGBufferEmissiveTarget() + fullscreen copy
+|   |   |-- beginDeferredPass(clearNonColorBufs, preserveEmissive)
+|   |   +-- ensureRendering() (begin G-buffer rendering)
+|   |
+|   +-- [Geometry Pass]
+|   |   |-- Record geometry to G-buffer (5 MRT attachments)
+|   |   +-- Decals via requestGBufferAttachmentTarget (per-attachment blending)
+|   |
+|   +-- VulkanRenderer::endDeferredGeometry(cmd)
+|   |   |-- VulkanRenderingSession::endDeferredGeometry(cmd)
+|   |   |   |-- endActivePass()
+|   |   |   |-- transitionGBufferToShaderRead() (includes depth)
+|   |   |   +-- Switch to SwapchainNoDepthTarget
+|   |   +-- If scene texture mode: requestSceneHdrNoDepthTarget()
+|   |
+|   +-- [Lighting Pass]
+|   |   +-- VulkanRenderer::deferredLightingFinish()
+|   |       |-- bindDeferredGlobalDescriptors() (G-buffer + depth)
+|   |       |-- buildDeferredLights() + recordDeferredLighting()
+|   |       +-- requestMainTargetWithDepth() (restore scene target)
+|
++-- [Post-Processing - if enabled]
+|   |-- Scene HDR -> shader read
+|   |-- Bloom (ping-pong mip chain)
+|   |-- Tonemapping -> PostLdrTarget or swapchain
+|   |-- FXAA (PostLuminanceTarget) or SMAA (edges/blend/output)
+|   +-- Final composite to swapchain
+|
++-- [HUD Rendering]
+|   |-- requestSwapchainNoDepthTarget() (if needed)
 |   |-- NanoVG text/vector graphics
-|   +-- interface elements
+|   +-- Interface elements
 |
-+-- endFrame()
-    |-- end active rendering pass
-    |-- transition swapchain -> ePresentSrcKHR
-    +-- submit (renderFinishedSemaphore signaled)
++-- VulkanRenderingSession::endFrame(cmd, imageIndex)
+    |-- endActivePass()
+    +-- transitionSwapchainToPresent()
 ```
+
+### Deferred Lighting API (Typestate Pattern)
+
+The deferred lighting API uses context types to enforce correct sequencing:
+
+```cpp
+// VulkanRenderer.h
+struct DeferredGeometryCtx { uint32_t frameIndex; };  // Geometry pass active
+struct DeferredLightingCtx { uint32_t frameIndex; };  // Lighting pass active
+
+DeferredGeometryCtx deferredLightingBegin(RecordingFrame& rec, bool clearNonColorBufs);
+DeferredLightingCtx deferredLightingEnd(RecordingFrame& rec, DeferredGeometryCtx&& geometry);
+void deferredLightingFinish(RecordingFrame& rec, DeferredLightingCtx&& lighting, const vk::Rect2D& restoreScissor);
+```
+
+Context objects encode the frame index for validation; mismatched contexts trigger assertions.
 
 ---
 
 ## Code Reference Summary
 
-| Component | File | Lines | Notes |
-|-----------|------|-------|-------|
-| Render pass state machine | `VulkanRenderingSession.h` | 18-202 | Target types, state tracking |
-| Target type enum | `VulkanRenderingSession.h` | - | 11 target definitions |
-| Active Pass | `VulkanRenderingSession.h` | 102-129 | RAII pass management |
-| Clear operations | `VulkanRenderingSession.h` | 141-160 | Load/store config |
-| Dynamic rendering begin | `VulkanRenderingSession.cpp` | 332-518 | Per-target begin logic |
-| Layout transitions | `VulkanRenderingSession.cpp` | 520-702 | Barrier functions |
-| Dynamic state | `VulkanRenderingSession.cpp` | 706-742 | Viewport/scissor/cull |
-| G-buffer definitions | `VulkanRenderTargets.h` | 15-22, 41-48 | Image formats |
-| G-buffer ownership | `VulkanRenderTargets.h` | 65-91 | Memory allocation |
-| Attachment contract | `VulkanRenderTargetInfo.h` | 11-15 | Format specification |
-| Deferred lighting | `VulkanRenderer.cpp` | 588-639 | Light volume rendering |
+| Component | File | Key Elements |
+|-----------|------|--------------|
+| Target state machine | `VulkanRenderingSession.h` | `RenderTargetState` base class, 12+ target types |
+| Pipeline contract | `VulkanRenderTargetInfo.h` | `RenderTargetInfo` struct |
+| RAII pass guard | `VulkanRenderingSession.h` | `ActivePass` struct |
+| Clear operations | `VulkanRenderingSession.h` | `ClearOps` struct |
+| Dynamic rendering | `VulkanRenderingSession.cpp` | `begin*RenderingInternal()` methods |
+| Layout transitions | `VulkanRenderingSession.cpp` | `transition*()` methods, `stageAccessForLayout()` |
+| Dynamic state | `VulkanRenderingSession.cpp` | `applyDynamicState()` |
+| G-buffer constants | `VulkanRenderTargets.h` | `kGBufferCount`, `kGBufferEmissiveIndex` |
+| Bloom constants | `VulkanRenderTargets.h` | `kBloomPingPongCount`, `kBloomMipLevels` |
+| Depth format selection | `VulkanRenderTargets.cpp` | `findDepthFormat()` |
+| Image ownership | `VulkanRenderTargets.h` | Memory allocation, layout tracking |
+| Deferred lighting | `VulkanRenderer.cpp` | `deferredLighting*()`, `beginDeferredLighting()` |
+| Bitmap RTT | `VulkanTextureManager.h` | Render target management |
 
 ---
 
 ## Design Principles
 
-1. **Type-Driven State:** Target types encode valid attachment configurations, preventing invalid transitions at compile time.
+1. **Type-Driven State:** Target types encode valid attachment configurations,
+   preventing invalid combinations. Each target's `info()` method returns a
+   consistent `RenderTargetInfo` for pipeline cache keying.
 
-2. **Explicit Synchronization:** All layout transitions use explicit barriers rather than implicit subpass dependencies.
+2. **Explicit Synchronization:** All layout transitions use explicit barriers
+   (`pipelineBarrier2`) with precise stage/access masks rather than implicit
+   subpass dependencies. The `stageAccessForLayout()` helper centralizes this logic.
 
-3. **RAII Lifecycle:** `ActivePass` ensures proper pass termination even during exceptions.
+3. **RAII Lifecycle:** `ActivePass` stored in `std::optional` ensures proper pass
+   termination even during exceptions. The guard is move-only to prevent accidental
+   copies.
 
-4. **Lazy Initialization:** Passes begin on first draw/clear, not on target request.
+4. **Lazy Initialization:** Passes begin on first `ensureRendering()` call, not on
+   target request. This allows target switching without beginning empty passes.
 
-5. **Layout Tracking:** Per-image layout state prevents redundant transitions.
+5. **Layout Tracking:** Per-image layout state (in `VulkanRenderTargets` and
+   `VulkanRenderingSession`) prevents redundant transitions. Each transition method
+   checks current layout before issuing barriers.
 
-6. **One-Shot Clears:** Clear operations automatically become loads after first use.
+6. **One-Shot Clears:** Clear operations automatically revert to load after
+   consumption. This handles the case where rendering is suspended mid-pass
+   (e.g., for texture updates) and must resume without re-clearing.
+
+7. **Depth Attachment Selection:** The dual-depth system (main + cockpit) enables
+   proper depth handling for cockpit rendering without complex depth buffer copying.
+
+8. **Decoupled Ownership:** `VulkanRenderTargets` owns image resources while
+   `VulkanRenderingSession` manages render state. This separation allows resource
+   resizing without state machine changes.
+
+9. **Typestate Enforcement:** The deferred lighting API uses move-only context
+   types (`DeferredGeometryCtx`, `DeferredLightingCtx`) to enforce correct call
+   sequencing at compile time, with frame index validation at runtime.
