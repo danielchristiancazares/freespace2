@@ -697,7 +697,7 @@ For deeper understanding of the Vulkan renderer architecture, see:
 
 | Document | Description |
 |----------|-------------|
-| [VULKAN_ARCHITECTURE.md](VULKAN_ARCHITECTURE.md) | Overall Vulkan renderer design |
+| [VULKAN_ARCHITECTURE_OVERVIEW.md](VULKAN_ARCHITECTURE_OVERVIEW.md) | Overall Vulkan renderer design |
 | [VULKAN_RENDER_PASS_STRUCTURE.md](VULKAN_RENDER_PASS_STRUCTURE.md) | Render pass organization |
 | [VULKAN_POST_PROCESSING.md](VULKAN_POST_PROCESSING.md) | Post-processing pipeline details |
 | [VULKAN_DESCRIPTOR_SETS.md](VULKAN_DESCRIPTOR_SETS.md) | Descriptor set management |

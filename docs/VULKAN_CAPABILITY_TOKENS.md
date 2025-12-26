@@ -436,7 +436,7 @@ private:
 
 **Typestate Enforcement**: The `frameIndex` member provides runtime validation that the token was created for the current frame, catching bugs where tokens are accidentally held across frame boundaries.
 
-**See Also**: `docs/vulkan/VULKAN_DEFERRED_LIGHTING_FLOW.md` for complete deferred lighting pipeline documentation.
+**See Also**: `docs/VULKAN_DEFERRED_LIGHTING_FLOW.md` for complete deferred lighting pipeline documentation.
 
 ---
 
@@ -1104,4 +1104,4 @@ Over time, more code can be migrated to use tokens directly, improving compile-t
 - `code/graphics/vulkan/VulkanRenderer.cpp` - Token-consuming API implementations
 - `code/graphics/vulkan/VulkanGraphics.cpp` - Token creation helpers and bridge functions
 - `docs/DESIGN_PHILOSOPHY.md` - Capability token principles and type-driven design philosophy
-- `docs/vulkan/VULKAN_DEFERRED_LIGHTING_FLOW.md` - Deferred lighting pipeline documentation
+- `docs/VULKAN_DEFERRED_LIGHTING_FLOW.md` - Deferred lighting pipeline documentation

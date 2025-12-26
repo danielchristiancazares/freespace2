@@ -1,6 +1,6 @@
-# Vulkan Architecture
+# Vulkan Architecture Overview
 
-This document is the entry point for the Vulkan renderer documentation in `docs/vulkan/`. It provides a high-level map of the Vulkan backend, its core invariants, and where to look next depending on what you are changing or debugging.
+This document is the entry point for the Vulkan renderer documentation in `docs/`. It provides a high-level map of the Vulkan backend, its core invariants, and where to look next depending on what you are changing or debugging.
 
 ---
 
@@ -351,8 +351,8 @@ If you are new to this renderer:
    - 2D/UI/HUD rendering contracts
    - Clip/scissor behavior and invariants
 
-6. **`VULKAN_RECENT_FIXES.md`**
-   - Context for recent bugfixes and invariants that were tightened
+6. **`VULKAN_FRAME_LIFECYCLE.md`**
+   - Frame state machine, timeline semaphores, serial tracking
 
 ---
 
@@ -401,7 +401,7 @@ If you are new to this renderer:
 - Code: `VulkanPhaseContexts.h` (typestate tokens), `VulkanRenderer.cpp` (deferred API)
 
 **DLSS / upscaling:**
-- `VULKAN_DLSS_PLAN.md` (implementation plan and required invariants)
+- `PLAN_DLSS.md` (implementation plan and required invariants)
 
 ### Common Code Patterns
 
@@ -464,8 +464,11 @@ When changing renderer state machines (target switching, pass boundaries, post-p
 
 | Document | Topics |
 |----------|--------|
-| `VULKAN_RENDER_PASS_STRUCTURE.md` | Target typestates, dynamic rendering boundaries, clear ops, frame lifecycle |
-| `VULKAN_SYNCHRONIZATION.md` | Frames-in-flight, submissions, fences/semaphores, sync2 + layout transitions |
+| `VULKAN_DEVICE_INIT.md` | Instance/device creation, feature chains, required extensions, queue selection |
+| `VULKAN_SWAPCHAIN.md` | Image acquisition, presentation, vsync, format selection, resize handling |
+| `VULKAN_FRAME_LIFECYCLE.md` | Frame state machine, recording/in-flight containers, timeline semaphores |
+| `VULKAN_RENDER_PASS_STRUCTURE.md` | Target typestates, dynamic rendering boundaries, clear ops |
+| `VULKAN_SYNCHRONIZATION.md` | Fences/semaphores, sync2 barriers, layout transitions |
 | `VULKAN_CAPABILITY_TOKENS.md` | Token types (FrameCtx, RenderCtx, etc.), creation, consumption, lifetime |
 
 ### Descriptors and Textures
@@ -490,11 +493,12 @@ When changing renderer state machines (target switching, pass boundaries, post-p
 | `VULKAN_UNIFORM_BINDINGS.md` | Uniform buffer structs, binding points, std140 layout |
 | `VULKAN_UNIFORM_ALIGNMENT.md` | Alignment rules, adding new uniform structs, common mistakes |
 
-### Buffers
+### Buffers and Memory
 
 | Document | Topics |
 |----------|--------|
-| `VULKAN_DYNAMIC_BUFFERS.md` | Ring buffers, managed buffers, orphaning, deferred releases |
+| `VULKAN_MEMORY_ALLOCATION.md` | Buffer/texture allocation, ring buffers, staging, deferred release |
+| `VULKAN_DYNAMIC_BUFFERS.md` | Dynamic uniform buffers, orphaning semantics |
 
 ### Rendering Paths
 
@@ -510,10 +514,9 @@ When changing renderer state machines (target switching, pass boundaries, post-p
 
 | Document | Topics |
 |----------|--------|
-| `VULKAN_DLSS_PLAN.md` | Upscaling plan (render vs display extents, jitter, motion vectors, pass placement) |
-| `VULKAN_RECENT_FIXES.md` | Recent bug history and the invariants that resulted |
-| `VULKAN_DESIGN_PHILOSOPHY_COMPLIANCE_PLAN.md` | Roadmap for design philosophy adoption |
-| `TEXTURE_MANAGER_PLAN.md` | Texture manager refactoring plans |
+| `PLAN_DLSS.md` | Upscaling plan (render vs display extents, jitter, motion vectors, pass placement) |
+| `PLAN_REFACTOR_ARCHITECTURE.md` | Roadmap for design philosophy adoption |
+| `PLAN_REFACTOR_TEXTURE_MANAGER.md` | Texture manager refactoring plans |
 
 ### Testing and Debugging
 
