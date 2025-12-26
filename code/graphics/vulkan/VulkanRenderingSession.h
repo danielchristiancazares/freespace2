@@ -1,14 +1,14 @@
 #pragma once
 
 #include "VulkanDevice.h"
-#include "VulkanRenderTargets.h"
 #include "VulkanRenderTargetInfo.h"
+#include "VulkanRenderTargets.h"
 
-#include <vulkan/vulkan.hpp>
 #include <array>
 #include <memory>
 #include <optional>
 #include <vector>
+#include <vulkan/vulkan.hpp>
 
 namespace graphics {
 namespace vulkan {
@@ -17,13 +17,11 @@ class VulkanTextureManager;
 
 class VulkanRenderingSession {
 public:
-  VulkanRenderingSession(VulkanDevice& device,
-    VulkanRenderTargets& targets,
-    VulkanTextureManager& textures);
+  VulkanRenderingSession(VulkanDevice &device, VulkanRenderTargets &targets, VulkanTextureManager &textures);
 
-    // Frame boundaries - called by VulkanRenderer
-    void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
-    void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
+  // Frame boundaries - called by VulkanRenderer
+  void beginFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
+  void endFrame(vk::CommandBuffer cmd, uint32_t imageIndex);
 
   // Starts dynamic rendering for the *current target* if not already active.
   // Returns the render target contract used for pipeline selection.
@@ -35,23 +33,26 @@ public:
   void suspendRendering() { endActivePass(); }
 
   // Boundary-facing state transitions (no "pending", no dual state)
-  void requestSwapchainTarget();                  // swapchain + depth
-  void requestSwapchainNoDepthTarget();           // swapchain (no depth)
-  void requestSceneHdrTarget();                   // scene HDR + depth
-  void requestSceneHdrNoDepthTarget();            // scene HDR (no depth)
-  void requestPostLdrTarget();                    // post LDR (no depth)
-  void requestPostLuminanceTarget();              // post luminance (no depth)
-  void requestSmaaEdgesTarget();                  // SMAA edges (no depth)
-  void requestSmaaBlendTarget();                  // SMAA blend weights (no depth)
-  void requestSmaaOutputTarget();                 // SMAA output (no depth)
+  void requestSwapchainTarget();                                         // swapchain + depth
+  void requestSwapchainNoDepthTarget();                                  // swapchain (no depth)
+  void requestSceneHdrTarget();                                          // scene HDR + depth
+  void requestSceneHdrNoDepthTarget();                                   // scene HDR (no depth)
+  void requestPostLdrTarget();                                           // post LDR (no depth)
+  void requestPostLuminanceTarget();                                     // post luminance (no depth)
+  void requestSmaaEdgesTarget();                                         // SMAA edges (no depth)
+  void requestSmaaBlendTarget();                                         // SMAA blend weights (no depth)
+  void requestSmaaOutputTarget();                                        // SMAA output (no depth)
   void requestBloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel); // bloom ping-pong mip (no depth)
+  // Target introspection (used to pick the correct pre-deferred capture source).
+  bool targetIsSceneHdr() const;
+  bool targetIsSwapchain() const;
   void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
   // Select the deferred G-buffer target without modifying clear/load ops (used by decal pass restore).
   void requestDeferredGBufferTarget();
-  void endDeferredGeometry(vk::CommandBuffer cmd);// transitions gbuffer -> shader read, selects swapchain-no-depth
-  void requestGBufferEmissiveTarget();            // gbuffer emissive-only (for pre-deferred scene copy)
+  void endDeferredGeometry(vk::CommandBuffer cmd); // transitions gbuffer -> shader read, selects swapchain-no-depth
+  void requestGBufferEmissiveTarget();             // gbuffer emissive-only (for pre-deferred scene copy)
   void requestGBufferAttachmentTarget(uint32_t gbufferIndex); // single gbuffer attachment (no depth)
-  void requestBitmapTarget(int bitmapHandle, int face); // bitmap render target (RTT)
+  void requestBitmapTarget(int bitmapHandle, int face);       // bitmap render target (RTT)
 
   // Depth attachment selection (OpenGL post-processing parity):
   // - Main depth holds the scene depth
@@ -108,21 +109,16 @@ private:
   struct ActivePass {
     vk::CommandBuffer cmd{};
     explicit ActivePass(vk::CommandBuffer c) : cmd(c) {}
-    ~ActivePass()
-    {
+    ~ActivePass() {
       if (cmd) {
         cmd.endRendering();
       }
     }
 
-    ActivePass(const ActivePass&) = delete;
-    ActivePass& operator=(const ActivePass&) = delete;
-    ActivePass(ActivePass&& other) noexcept : cmd(other.cmd)
-    {
-      other.cmd = vk::CommandBuffer{};
-    }
-    ActivePass& operator=(ActivePass&& other) noexcept
-    {
+    ActivePass(const ActivePass &) = delete;
+    ActivePass &operator=(const ActivePass &) = delete;
+    ActivePass(ActivePass &&other) noexcept : cmd(other.cmd) { other.cmd = vk::CommandBuffer{}; }
+    ActivePass &operator=(ActivePass &&other) noexcept {
       if (this != &other) {
         if (cmd) {
           cmd.endRendering();
@@ -138,80 +134,80 @@ private:
   class RenderTargetState {
   public:
     virtual ~RenderTargetState() = default;
-    virtual RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const = 0;
-    virtual void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) = 0;
+    virtual RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const = 0;
+    virtual void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) = 0;
   };
 
   class SwapchainWithDepthTarget final : public RenderTargetState {
   public:
-    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class SceneHdrWithDepthTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class SceneHdrNoDepthTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class PostLdrTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class PostLuminanceTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class SmaaEdgesTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class SmaaBlendTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class SmaaOutputTarget final : public RenderTargetState {
   public:
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class BloomMipTarget final : public RenderTargetState {
   public:
-	BloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel);
-	RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-	void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    BloomMipTarget(uint32_t pingPongIndex, uint32_t mipLevel);
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
 
   private:
-	uint32_t m_index = 0;
-	uint32_t m_mip = 0;
+    uint32_t m_index = 0;
+    uint32_t m_mip = 0;
   };
 
   class DeferredGBufferTarget final : public RenderTargetState {
   public:
-    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class GBufferAttachmentTarget final : public RenderTargetState {
   public:
     explicit GBufferAttachmentTarget(uint32_t gbufferIndex);
-    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
 
   private:
     uint32_t m_index = 0;
@@ -219,21 +215,21 @@ private:
 
   class SwapchainNoDepthTarget final : public RenderTargetState {
   public:
-    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t imageIndex) override;
   };
 
   class GBufferEmissiveTarget final : public RenderTargetState {
   public:
-    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
   };
 
   class BitmapTarget final : public RenderTargetState {
   public:
     BitmapTarget(int handle, int face, vk::Format format);
-    RenderTargetInfo info(const VulkanDevice& device, const VulkanRenderTargets& targets) const override;
-    void begin(VulkanRenderingSession& session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
+    RenderTargetInfo info(const VulkanDevice &device, const VulkanRenderTargets &targets) const override;
+    void begin(VulkanRenderingSession &session, vk::CommandBuffer cmd, uint32_t /*imageIndex*/) override;
 
   private:
     int m_handle = -1;
@@ -246,19 +242,16 @@ private:
     vk::AttachmentLoadOp depth = vk::AttachmentLoadOp::eLoad;
     vk::AttachmentLoadOp stencil = vk::AttachmentLoadOp::eLoad;
 
-    static ClearOps clearAll()
-    {
-      return { vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear };
+    static ClearOps clearAll() {
+      return {vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear};
     }
 
-    static ClearOps loadAll()
-    {
-      return { vk::AttachmentLoadOp::eLoad, vk::AttachmentLoadOp::eLoad, vk::AttachmentLoadOp::eLoad };
+    static ClearOps loadAll() {
+      return {vk::AttachmentLoadOp::eLoad, vk::AttachmentLoadOp::eLoad, vk::AttachmentLoadOp::eLoad};
     }
 
-    ClearOps withDepthStencilClear() const
-    {
-      return { color, vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear };
+    ClearOps withDepthStencilClear() const {
+      return {color, vk::AttachmentLoadOp::eClear, vk::AttachmentLoadOp::eClear};
     }
   };
 
@@ -295,9 +288,9 @@ private:
   enum class DepthAttachmentKind { Main, Cockpit };
   DepthAttachmentKind m_depthAttachment = DepthAttachmentKind::Main;
 
-  VulkanDevice& m_device;
-  VulkanRenderTargets& m_targets;
-  VulkanTextureManager& m_textures;
+  VulkanDevice &m_device;
+  VulkanRenderTargets &m_targets;
+  VulkanTextureManager &m_textures;
 
   // Target state - single truth, no pending/active duality
   std::unique_ptr<RenderTargetState> m_target;
@@ -315,10 +308,9 @@ private:
   bool m_depthTest = true;
   bool m_depthWrite = true;
 
-    // Swapchain image layout tracking (per swapchain image index)
-    std::vector<vk::ImageLayout> m_swapchainLayouts;
-
-  };
+  // Swapchain image layout tracking (per swapchain image index)
+  std::vector<vk::ImageLayout> m_swapchainLayouts;
+};
 
 } // namespace vulkan
 } // namespace graphics

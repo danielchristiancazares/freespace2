@@ -5,18 +5,18 @@
 #include "cmdline/cmdline.h"
 #include "globalincs/systemvars.h"
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <string>
-#include <algorithm>
-#include <fstream>
-#include <chrono>
-#include <atomic>
-#include <sstream>
 
 namespace graphics {
 namespace vulkan {
@@ -30,38 +30,38 @@ struct VertexFormatMapping {
 // Location mapping follows OpenGL convention:
 // 0 = POSITION, 1 = COLOR, 2 = TEXCOORD, 3 = NORMAL, 4 = TANGENT, etc.
 static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatMapping> VERTEX_FORMAT_MAP = {
-  // Position formats -> location 0
-  {vertex_format_data::POSITION4, {vk::Format::eR32G32B32A32Sfloat, 0, 4}},
-  {vertex_format_data::POSITION3, {vk::Format::eR32G32B32Sfloat, 0, 3}},
-  {vertex_format_data::POSITION2, {vk::Format::eR32G32Sfloat, 0, 2}},
-  {vertex_format_data::SCREEN_POS, {vk::Format::eR32G32Sfloat, 0, 2}},
+    // Position formats -> location 0
+    {vertex_format_data::POSITION4, {vk::Format::eR32G32B32A32Sfloat, 0, 4}},
+    {vertex_format_data::POSITION3, {vk::Format::eR32G32B32Sfloat, 0, 3}},
+    {vertex_format_data::POSITION2, {vk::Format::eR32G32Sfloat, 0, 2}},
+    {vertex_format_data::SCREEN_POS, {vk::Format::eR32G32Sfloat, 0, 2}},
 
-  // Color formats -> location 1
-  {vertex_format_data::COLOR3, {vk::Format::eR8G8B8Unorm, 1, 3}},
-  {vertex_format_data::COLOR4, {vk::Format::eR8G8B8A8Unorm, 1, 4}},
-  {vertex_format_data::COLOR4F, {vk::Format::eR32G32B32A32Sfloat, 1, 4}},
+    // Color formats -> location 1
+    {vertex_format_data::COLOR3, {vk::Format::eR8G8B8Unorm, 1, 3}},
+    {vertex_format_data::COLOR4, {vk::Format::eR8G8B8A8Unorm, 1, 4}},
+    {vertex_format_data::COLOR4F, {vk::Format::eR32G32B32A32Sfloat, 1, 4}},
 
-  // Texture coordinate formats -> location 2
-  {vertex_format_data::TEX_COORD2, {vk::Format::eR32G32Sfloat, 2, 2}},
-  {vertex_format_data::TEX_COORD4, {vk::Format::eR32G32B32A32Sfloat, 2, 4}},
+    // Texture coordinate formats -> location 2
+    {vertex_format_data::TEX_COORD2, {vk::Format::eR32G32Sfloat, 2, 2}},
+    {vertex_format_data::TEX_COORD4, {vk::Format::eR32G32B32A32Sfloat, 2, 4}},
 
-  // Normal -> location 3
-  {vertex_format_data::NORMAL, {vk::Format::eR32G32B32Sfloat, 3, 3}},
+    // Normal -> location 3
+    {vertex_format_data::NORMAL, {vk::Format::eR32G32B32Sfloat, 3, 3}},
 
-  // Tangent -> location 4
-  {vertex_format_data::TANGENT, {vk::Format::eR32G32B32A32Sfloat, 4, 4}},
+    // Tangent -> location 4
+    {vertex_format_data::TANGENT, {vk::Format::eR32G32B32A32Sfloat, 4, 4}},
 
-  // Model ID -> location 5
-  {vertex_format_data::MODEL_ID, {vk::Format::eR32Sfloat, 5, 1}},
+    // Model ID -> location 5
+    {vertex_format_data::MODEL_ID, {vk::Format::eR32Sfloat, 5, 1}},
 
-  // Radius -> location 6
-  {vertex_format_data::RADIUS, {vk::Format::eR32Sfloat, 6, 1}},
+    // Radius -> location 6
+    {vertex_format_data::RADIUS, {vk::Format::eR32Sfloat, 6, 1}},
 
-  // UVec -> location 7
-  {vertex_format_data::UVEC, {vk::Format::eR32G32B32Sfloat, 7, 3}},
+    // UVec -> location 7
+    {vertex_format_data::UVEC, {vk::Format::eR32G32B32Sfloat, 7, 3}},
 
-  // Matrix4 -> locations 8-11 (4 vec4s)
-  {vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}}, // handled specially
+    // Matrix4 -> locations 8-11 (4 vec4s)
+    {vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}}, // handled specially
 };
 
 // Vulkan allows gaps in vertex attribute locations - a layout with position (0) and
@@ -69,10 +69,10 @@ static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatM
 // unused locations. Validation layer warnings about mismatched locations indicate
 // shader/layout incompatibility, not an invalid layout.
 
-  static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend mode, vk::ColorComponentFlags colorWriteMask)
-  {
-    vk::PipelineColorBlendAttachmentState state{};
-    state.colorWriteMask = colorWriteMask;
+static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend mode,
+                                                                  vk::ColorComponentFlags colorWriteMask) {
+  vk::PipelineColorBlendAttachmentState state{};
+  state.colorWriteMask = colorWriteMask;
 
   switch (mode) {
   case ALPHA_BLEND_NONE:
@@ -128,36 +128,34 @@ static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatM
     break;
   }
 
-    return state;
-  }
+  return state;
+}
 
-  static bool formatHasStencil(vk::Format format)
-  {
-    switch (format) {
-    case vk::Format::eD32SfloatS8Uint:
-    case vk::Format::eD24UnormS8Uint:
-      return true;
-    default:
-      return false;
-    }
+static bool formatHasStencil(vk::Format format) {
+  switch (format) {
+  case vk::Format::eD32SfloatS8Uint:
+  case vk::Format::eD24UnormS8Uint:
+    return true;
+  default:
+    return false;
   }
+}
 
-VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
-{
+VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
   VertexInputState result;
 
   // Group components by buffer_number to create bindings
-  std::unordered_map<size_t, std::vector<const vertex_format_data*>> componentsByBuffer;
+  std::unordered_map<size_t, std::vector<const vertex_format_data *>> componentsByBuffer;
 
   for (size_t i = 0; i < layout.get_num_vertex_components(); ++i) {
-    const vertex_format_data* component = layout.get_vertex_component(i);
+    const vertex_format_data *component = layout.get_vertex_component(i);
     componentsByBuffer[component->buffer_number].push_back(component);
   }
 
   std::unordered_map<uint32_t, uint32_t> divisorsByBinding;
 
   // Create bindings for each buffer
-  for (const auto& [bufferNum, components] : componentsByBuffer) {
+  for (const auto &[bufferNum, components] : componentsByBuffer) {
     if (components.empty()) {
       continue;
     }
@@ -171,7 +169,7 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
     binding.inputRate = vk::VertexInputRate::eVertex;
 
     // Check if any component has divisor (instanced)
-    for (const auto* comp : components) {
+    for (const auto *comp : components) {
       if (comp->divisor != 0) {
         binding.inputRate = vk::VertexInputRate::eInstance;
         // Only divisors >1 need VK_EXT_vertex_attribute_divisor; divisor==1 is core.
@@ -185,13 +183,12 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
     result.bindings.push_back(binding);
 
     // Create attributes for each component
-    for (const auto* component : components) {
+    for (const auto *component : components) {
       auto it = VERTEX_FORMAT_MAP.find(component->format_type);
-      Assertion(it != VERTEX_FORMAT_MAP.end(),
-                "Unknown vertex format type %d - add to VERTEX_FORMAT_MAP",
+      Assertion(it != VERTEX_FORMAT_MAP.end(), "Unknown vertex format type %d - add to VERTEX_FORMAT_MAP",
                 static_cast<int>(component->format_type));
 
-      const auto& mapping = it->second;
+      const auto &mapping = it->second;
 
       // Handle MATRIX4 specially (spans 4 locations)
       if (component->format_type == vertex_format_data::MATRIX4) {
@@ -215,7 +212,7 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
     }
   }
 
-  for (const auto& kv : divisorsByBinding) {
+  for (const auto &kv : divisorsByBinding) {
     vk::VertexInputBindingDivisorDescription desc{};
     desc.binding = kv.first;
     desc.divisor = kv.second;
@@ -225,29 +222,20 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout)
   return result;
 }
 
-VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
-  vk::PipelineLayout pipelineLayout,
-  vk::PipelineLayout modelPipelineLayout,
-  vk::PipelineLayout deferredPipelineLayout,
-  vk::PipelineCache pipelineCache,
-  bool supportsExtendedDynamicState,
-  bool supportsExtendedDynamicState2,
-  bool supportsExtendedDynamicState3,
-  const ExtendedDynamicState3Caps& extDyn3Caps,
-  bool supportsVertexAttributeDivisor,
-  bool dynamicRenderingEnabled)
-  : m_device(device),
-    m_pipelineLayout(pipelineLayout),
-    m_modelPipelineLayout(modelPipelineLayout),
-    m_deferredPipelineLayout(deferredPipelineLayout),
-    m_pipelineCache(pipelineCache),
-    m_supportsExtendedDynamicState(supportsExtendedDynamicState),
-    m_supportsExtendedDynamicState2(supportsExtendedDynamicState2),
-    m_supportsExtendedDynamicState3(supportsExtendedDynamicState3),
-    m_extDyn3Caps(extDyn3Caps),
-    m_supportsVertexAttributeDivisor(supportsVertexAttributeDivisor),
-    m_dynamicRenderingEnabled(dynamicRenderingEnabled)
-{
+VulkanPipelineManager::VulkanPipelineManager(vk::Device device, vk::PipelineLayout pipelineLayout,
+                                             vk::PipelineLayout modelPipelineLayout,
+                                             vk::PipelineLayout deferredPipelineLayout, vk::PipelineCache pipelineCache,
+                                             bool supportsExtendedDynamicState, bool supportsExtendedDynamicState2,
+                                             bool supportsExtendedDynamicState3,
+                                             const ExtendedDynamicState3Caps &extDyn3Caps,
+                                             bool supportsVertexAttributeDivisor, bool dynamicRenderingEnabled)
+    : m_device(device), m_pipelineLayout(pipelineLayout), m_modelPipelineLayout(modelPipelineLayout),
+      m_deferredPipelineLayout(deferredPipelineLayout), m_pipelineCache(pipelineCache),
+      m_supportsExtendedDynamicState(supportsExtendedDynamicState),
+      m_supportsExtendedDynamicState2(supportsExtendedDynamicState2),
+      m_supportsExtendedDynamicState3(supportsExtendedDynamicState3), m_extDyn3Caps(extDyn3Caps),
+      m_supportsVertexAttributeDivisor(supportsVertexAttributeDivisor),
+      m_dynamicRenderingEnabled(dynamicRenderingEnabled) {
   if (!m_dynamicRenderingEnabled) {
     throw std::runtime_error("Vulkan dynamicRendering feature must be enabled when using renderPass=VK_NULL_HANDLE.");
   }
@@ -256,19 +244,12 @@ VulkanPipelineManager::VulkanPipelineManager(vk::Device device,
 // Targeting Vulkan 1.4: Extended Dynamic State 1 was promoted in 1.3, so the base dynamic states below are
 // guaranteed; Extended Dynamic State 2 is only partly core, so we only conditionally add EXT3 bits when supported.
 std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool supportsExtendedDynamicState3,
-  const ExtendedDynamicState3Caps& caps)
-{
+                                                                           const ExtendedDynamicState3Caps &caps) {
   std::vector<vk::DynamicState> dynamicStates = {
-    vk::DynamicState::eViewport,
-    vk::DynamicState::eScissor,
-    vk::DynamicState::eLineWidth,
-    vk::DynamicState::eCullMode,
-    vk::DynamicState::eFrontFace,
-    vk::DynamicState::ePrimitiveTopology,
-    vk::DynamicState::eDepthTestEnable,
-    vk::DynamicState::eDepthWriteEnable,
-    vk::DynamicState::eDepthCompareOp,
-    vk::DynamicState::eStencilTestEnable,
+      vk::DynamicState::eViewport,          vk::DynamicState::eScissor,          vk::DynamicState::eLineWidth,
+      vk::DynamicState::eCullMode,          vk::DynamicState::eFrontFace,        vk::DynamicState::ePrimitiveTopology,
+      vk::DynamicState::eDepthTestEnable,   vk::DynamicState::eDepthWriteEnable, vk::DynamicState::eDepthCompareOp,
+      vk::DynamicState::eStencilTestEnable,
   };
 
   if (supportsExtendedDynamicState3) {
@@ -289,13 +270,13 @@ std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool 
   return dynamicStates;
 }
 
-vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout)
-{
+vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey &key, const ShaderModules &modules,
+                                                const vertex_layout &layout) {
   // Enforce layout contract in all builds: if the shader uses vertex attributes, the key's
   // layout_hash must match the supplied layout. Correctness by construction: we fix the key
   // rather than silently reusing a mismatched pipeline.
   PipelineKey adjustedKey = key;
-  const auto& layoutSpec = getShaderLayoutSpec(key.type);
+  const auto &layoutSpec = getShaderLayoutSpec(key.type);
   if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
     const size_t expectedHash = layout.hash();
     if (adjustedKey.layout_hash != expectedHash) {
@@ -316,8 +297,7 @@ vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key, const Sh
   return handle;
 }
 
-const VertexInputState& VulkanPipelineManager::getVertexInputState(const vertex_layout& layout)
-{
+const VertexInputState &VulkanPipelineManager::getVertexInputState(const vertex_layout &layout) {
   size_t layoutHash = layout.hash();
   auto it = m_vertexInputCache.find(layoutHash);
   if (it != m_vertexInputCache.end()) {
@@ -329,8 +309,8 @@ const VertexInputState& VulkanPipelineManager::getVertexInputState(const vertex_
   return result.first->second;
 }
 
-vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key, const ShaderModules& modules, const vertex_layout& layout)
-{
+vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key, const ShaderModules &modules,
+                                                         const vertex_layout &layout) {
   std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages{};
   shaderStages[0].stage = vk::ShaderStageFlagBits::eVertex;
   shaderStages[0].module = modules.vert;
@@ -344,7 +324,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
   // all other shader types use traditional vertex attributes from the layout.
   vk::PipelineVertexInputStateCreateInfo vertexInput{};
   vk::PipelineVertexInputDivisorStateCreateInfo divisorInfo{};
-  const auto& layoutSpec = getShaderLayoutSpec(key.type);
+  const auto &layoutSpec = getShaderLayoutSpec(key.type);
   const bool useVertexPulling = layoutSpec.vertexInput == VertexInputMode::VertexPulling;
 
   if (useVertexPulling) {
@@ -355,7 +335,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
     vertexInput.vertexAttributeDescriptionCount = 0;
     vertexInput.pVertexAttributeDescriptions = nullptr;
   } else {
-    const VertexInputState& vertexInputState = getVertexInputState(layout);
+    const VertexInputState &vertexInputState = getVertexInputState(layout);
 
     vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputState.bindings.size());
     vertexInput.pVertexBindingDescriptions = vertexInputState.bindings.data();
@@ -367,7 +347,8 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
       divisorInfo.pVertexBindingDivisors = vertexInputState.divisors.data();
       vertexInput.pNext = &divisorInfo;
     } else if (!vertexInputState.divisors.empty() && !m_supportsVertexAttributeDivisor) {
-      throw std::runtime_error("vertexAttributeInstanceRateDivisor not enabled but divisor > 1 requested in vertex layout.");
+      throw std::runtime_error(
+          "vertexAttributeInstanceRateDivisor not enabled but divisor > 1 requested in vertex layout.");
     }
   }
 
@@ -398,9 +379,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
 
   auto colorWriteMask = static_cast<vk::ColorComponentFlags>(key.color_write_mask);
   auto colorBlendAttachment = buildBlendAttachment(key.blend_mode, colorWriteMask);
-  
 
-  
   std::vector<vk::PipelineColorBlendAttachmentState> attachments(key.color_attachment_count, colorBlendAttachment);
 
   vk::PipelineColorBlendStateCreateInfo colorBlending{};
@@ -423,10 +402,11 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
   if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
     // When using vertex attributes, require Location 0 (position). Other locations are shader-dependent
     // and may legitimately be absent (e.g., Interface/NanoVG use locations 0 and 2 with no color).
-    const VertexInputState& vertexInputState = getVertexInputState(layout);
+    const VertexInputState &vertexInputState = getVertexInputState(layout);
     bool hasLoc0 = false;
-    for (const auto& a : vertexInputState.attributes) {
-      if (a.location == 0) hasLoc0 = true;
+    for (const auto &a : vertexInputState.attributes) {
+      if (a.location == 0)
+        hasLoc0 = true;
     }
     Assertion(hasLoc0, "Vertex input pipeline created without Location 0 attribute");
   }
@@ -441,7 +421,6 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey& key,
     depthStencil.depthWriteEnable = VK_FALSE;
   }
   depthStencil.depthBoundsTestEnable = VK_FALSE;
-  
 
   depthStencil.stencilTestEnable = key.stencil_test_enable ? VK_TRUE : VK_FALSE;
   depthStencil.front.compareOp = static_cast<vk::CompareOp>(key.stencil_compare_op);

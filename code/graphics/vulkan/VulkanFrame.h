@@ -3,8 +3,8 @@
 #include "VulkanRingBuffer.h"
 #include "graphics/grinternal.h"
 
-#include <vulkan/vulkan.hpp>
 #include <cstdint>
+#include <vulkan/vulkan.hpp>
 
 namespace graphics {
 namespace vulkan {
@@ -24,27 +24,20 @@ struct DynamicUniformBinding {
 };
 
 class VulkanFrame {
-  public:
-  VulkanFrame(vk::Device device,
-    uint32_t frameIndex,
-    uint32_t queueFamilyIndex,
-    const vk::PhysicalDeviceMemoryProperties& memoryProps,
-    vk::DeviceSize uniformBufferSize,
-    vk::DeviceSize uniformAlignment,
-    vk::DeviceSize vertexBufferSize,
-    vk::DeviceSize vertexAlignment,
-    vk::DeviceSize stagingBufferSize,
-    vk::DeviceSize stagingAlignment,
-    vk::DescriptorSet modelSet);
+public:
+  VulkanFrame(vk::Device device, uint32_t frameIndex, uint32_t queueFamilyIndex,
+              const vk::PhysicalDeviceMemoryProperties &memoryProps, vk::DeviceSize uniformBufferSize,
+              vk::DeviceSize uniformAlignment, vk::DeviceSize vertexBufferSize, vk::DeviceSize vertexAlignment,
+              vk::DeviceSize stagingBufferSize, vk::DeviceSize stagingAlignment, vk::DescriptorSet modelSet);
 
   void wait_for_gpu();
   void reset();
 
   uint32_t frameIndex() const { return m_frameIndex; }
 
-  VulkanRingBuffer& uniformBuffer() { return m_uniformRing; }
-  VulkanRingBuffer& vertexBuffer() { return m_vertexRing; }
-  VulkanRingBuffer& stagingBuffer() { return m_stagingRing; }
+  VulkanRingBuffer &uniformBuffer() { return m_uniformRing; }
+  VulkanRingBuffer &vertexBuffer() { return m_vertexRing; }
+  VulkanRingBuffer &stagingBuffer() { return m_stagingRing; }
   vk::Fence inflightFence() const { return m_inflightFence.get(); }
 
   vk::Semaphore imageAvailable() const { return m_imageAvailable.get(); }
@@ -56,18 +49,17 @@ class VulkanFrame {
   void advanceTimeline() { ++m_timelineValue; }
 
   vk::DescriptorSet modelDescriptorSet() const { return m_modelDescriptorSet; }
-  DynamicUniformBinding modelUniformBinding{ gr_buffer_handle::invalid(), 0 };
-  DynamicUniformBinding sceneUniformBinding{ gr_buffer_handle::invalid(), 0 };
+  DynamicUniformBinding modelUniformBinding{gr_buffer_handle::invalid(), 0};
+  DynamicUniformBinding sceneUniformBinding{gr_buffer_handle::invalid(), 0};
   uint32_t modelTransformDynamicOffset = 0;
   size_t modelTransformSize = 0;
   BoundUniformBuffer nanovgData;
   BoundUniformBuffer decalGlobalsData;
   BoundUniformBuffer decalInfoData;
 
-  void resetPerFrameBindings()
-  {
-    modelUniformBinding = { gr_buffer_handle::invalid(), 0 };
-    sceneUniformBinding = { gr_buffer_handle::invalid(), 0 };
+  void resetPerFrameBindings() {
+    modelUniformBinding = {gr_buffer_handle::invalid(), 0};
+    sceneUniformBinding = {gr_buffer_handle::invalid(), 0};
     modelTransformDynamicOffset = 0;
     modelTransformSize = 0;
     nanovgData = {};
@@ -75,7 +67,7 @@ class VulkanFrame {
     decalInfoData = {};
   }
 
-  private:
+private:
   // Only the renderer/frame-flow tokens should be able to record commands.
   friend class VulkanRenderer;
   friend struct RecordingFrame;

@@ -17,7 +17,7 @@ constexpr uint32_t kBindlessTextureSlotDefaultNormal = 2;
 constexpr uint32_t kBindlessTextureSlotDefaultSpec = 3;
 constexpr uint32_t kBindlessFirstDynamicTextureSlot = 4;
 static_assert(kBindlessFirstDynamicTextureSlot < kMaxBindlessTextures,
-	"Bindless default slots must fit within the bindless array");
+              "Bindless default slots must fit within the bindless array");
 
 } // namespace vulkan
 } // namespace graphics

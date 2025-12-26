@@ -8,9 +8,9 @@ namespace vulkan {
 class VulkanRenderer;
 
 void initialize_function_pointers();
-bool initialize(std::unique_ptr<os::GraphicsOperations>&& graphicsOps);
+bool initialize(std::unique_ptr<os::GraphicsOperations> &&graphicsOps);
 
-VulkanRenderer* getRendererInstance();
+VulkanRenderer *getRendererInstance();
 
 void cleanup();
 
