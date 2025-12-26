@@ -2,9 +2,9 @@
 
 This document presents a focused implementation plan for refactoring `VulkanTextureManager` to better adhere to the type-driven design principles in `docs/DESIGN_PHILOSOPHY.md`. The refactor preserves existing engine semantics (bmpman integration, bindless binding, render targets, deferred release safety) while eliminating representable invalid states.
 
-**Status**: Planning complete. Implementation not started.
+**Status**: Planning complete. Core refactor not started (prereqs exist: `TextureId` boundary usage, `UploadCtx` gating, texture tests).
 
-**Last Updated**: 2025-01
+**Last Updated**: 2025-12-26
 
 ---
 
@@ -86,6 +86,22 @@ Conditionals at system entry points that reject invalid input before it enters t
 
 A function that consumes one type and produces another, encoding a valid state change. Move semantics prevent reusing the consumed state.
 
+### Special Case Pattern
+
+An intentional "always-valid" default object that eliminates null/absent branching. Example: the fallback texture slot (slot 0) is a real texture, not a sentinel. The binding layer may *choose* to use slot 0 when a texture has no assigned dynamic slot; that fallback choice is policy at the boundary, not a hidden decision inside the texture manager. This differs from sentinels because the fallback is valid, usable data - not an in-band encoding of absence.
+
+### Handle Reuse Protection
+
+When an external system (like bmpman) reuses handles after release, internal references can become stale. Solutions:
+
+1. **Generational handles**: Include a generation counter that increments on each reuse (slotmap pattern)
+2. **Lifetime coupling**: Ensure internal cleanup is called exactly when the external handle is released
+3. **Transient-only references**: Never store references longer than a single operation
+
+This plan uses approach (2) via `releaseBitmap()` - the texture manager MUST be notified of every bmpman release to prevent stale mappings.
+
+**Required invariant**: `releaseBitmap()` must erase the corresponding `TextureId` from every CPU-side container keyed by `TextureId` (resident maps, slot maps, pending upload membership, bindless request sets, render-target records, rejection caches, etc.) *before* deferring GPU destruction. This prevents handle-reuse cache poisoning (a released bmpman handle being immediately reused while stale manager state still exists).
+
 ---
 
 ## 3. Related Documentation
@@ -97,6 +113,20 @@ A function that consumes one type and produces another, encoding a valid state c
 | `docs/VULKAN_TEXTURE_BINDING.md` | Bindless binding model, reserved slots, sampler caching |
 | `docs/VULKAN_TEXTURE_RESIDENCY.md` | Current residency state machine |
 | `docs/VULKAN_SYNCHRONIZATION.md` | Serial/timeline model, safe points, deferred release |
+
+### 3.1 External Pattern References (Rationale Only)
+
+These are **non-normative** references used to sharpen the plan's reasoning. The authoritative sources for Vulkan behavior
+remain the Vulkan specification and the Vulkan documentation in this repo.
+
+| Reference | Why it matters for this refactor |
+|----------|-----------------------------------|
+| [Parse, don’t validate (Alexis King)](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) | Reinforces the plan’s boundary rule: do checks once at entry, then operate on validated types internally (eliminates deep “maybe” branching). |
+| [Designing with types: Making illegal states unrepresentable](https://fsharpforfunandprofit.com/posts/designing-with-types-making-illegal-states-unrepresentable/) | Mirrors `docs/DESIGN_PHILOSOPHY.md`: replace sentinels/enums/flags with types + container membership. |
+| [Typestate analysis](https://en.wikipedia.org/wiki/Typestate_analysis) | Supports capability tokens (`UploadCtx`, `RenderCtx`) as a concrete typestate/protocol-enforcement technique. |
+| [Special Case (Martin Fowler)](https://martinfowler.com/eaaCatalog/specialCase.html) | Frames builtin fallback/default textures as an intentional “always-valid” object to eliminate null/empty descriptor inhabitants. |
+| [`slotmap` README (persistent unique keys)](https://raw.githubusercontent.com/orlp/slotmap/master/README.md) | Demonstrates a “keys stay invalid after deletion even if storage is reused” model; useful when reasoning about bmpman handle reuse and cache poisoning. |
+| Vulkan wait primitives: [`vkQueueWaitIdle`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkQueueWaitIdle.html), [`vkWaitForFences`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkWaitForFences.html), [`vkWaitSemaphores`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkWaitSemaphores.html) | Anchors the plan’s “remove queue-wide stalls” work: `waitIdle()` is a queue-wide hammer; prefer waiting on the specific submitted work (fence/timeline). |
 
 ---
 
@@ -110,7 +140,7 @@ A function that consumes one type and produces another, encoding a valid state c
   - Upload-path: `VulkanTextureUploader` (`code/graphics/vulkan/VulkanTextureBindings.h`)
   - Renderer orchestration: `VulkanRenderer` (`code/graphics/vulkan/VulkanRenderer.{h,cpp}`)
 - Render-target ownership unification (eliminate split RTT state)
-- Bindless slot allocation phase enforcement (draw path becomes lookup-only)
+- Bindless slot allocation phase enforcement (draw path is lookup-only for slot ownership; allocation/eviction requires `UploadCtx`)
 - Sentinel value removal or quarantine
 - Queue stall removal (`queue.waitIdle()` replaced with fence/timeline waits)
 - Test and documentation updates to match new contracts
@@ -135,15 +165,15 @@ The texture manager already uses container membership as the primary state machi
 
 | Container | State Represented | Location |
 |-----------|-------------------|----------|
-| `m_residentTextures` | Texture is resident on GPU | `VulkanTextureManager.h:258` |
-| `m_pendingUploads` | Upload is queued | `VulkanTextureManager.h:265` |
-| `m_unavailableTextures` | Texture failed to load | `VulkanTextureManager.h:259` |
-| `m_bindlessSlots` | Bindless slot assigned | `VulkanTextureManager.h:261` |
-| `m_freeBindlessSlots` | Slot available for reuse | `VulkanTextureManager.h:280` |
+| `m_residentTextures` | Texture is resident on GPU | `code/graphics/vulkan/VulkanTextureManager.h` (search: `m_residentTextures`) |
+| `m_pendingUploads` | Upload is queued | `code/graphics/vulkan/VulkanTextureManager.h` (search: `m_pendingUploads`) |
+| `m_unavailableTextures` | Texture is permanently unavailable under current algorithm | `code/graphics/vulkan/VulkanTextureManager.h` (search: `m_unavailableTextures`) |
+| `m_bindlessSlots` | Bindless slot assigned | `code/graphics/vulkan/VulkanTextureManager.h` (search: `m_bindlessSlots`) |
+| `m_freeBindlessSlots` | Slot available for reuse | `code/graphics/vulkan/VulkanTextureManager.h` (search: `m_freeBindlessSlots`) |
 
 **Capability Token for Upload Phase**
 
-The upload-phase token `UploadCtx` already exists and gates `flushPendingUploads()` / `updateTexture()`. See `code/graphics/vulkan/VulkanPhaseContexts.h:14-32`.
+The upload-phase token `UploadCtx` already exists and gates `flushPendingUploads()` / `updateTexture()`. See `code/graphics/vulkan/VulkanPhaseContexts.h` (search: `struct UploadCtx`).
 
 ### 5.2 Design Philosophy Violations
 
@@ -154,7 +184,7 @@ The following issues represent places where invalid states remain representable:
 LRU eviction uses `UINT32_MAX` and `-1` as sentinels to represent "no candidate found":
 
 ```cpp
-// VulkanTextureManager.cpp:1309-1310
+// VulkanTextureManager.cpp (search: `oldestFrame = UINT32_MAX`)
 uint32_t oldestFrame = UINT32_MAX;
 int oldestHandle = -1;
 ```
@@ -166,7 +196,7 @@ int oldestHandle = -1;
 `retryPendingBindlessSlots()` exists because bindless slots can be allocated from rendering paths:
 
 ```cpp
-// VulkanTextureManager.cpp:1256-1272
+// VulkanTextureManager.cpp (search: `retryPendingBindlessSlots` / `getBindlessSlotIndex`)
 void VulkanTextureManager::retryPendingBindlessSlots() { ... }
 ```
 
@@ -177,7 +207,7 @@ void VulkanTextureManager::retryPendingBindlessSlots() { ... }
 Render target metadata lives in `m_renderTargets`, while the GPU image lives in `m_residentTextures`. This creates a "split brain" state where either can exist without the other:
 
 ```cpp
-// VulkanTextureManager.cpp:1442-1446
+// VulkanTextureManager.cpp (search: `render-target record without a resident texture`)
 // Fallback path: "record without resident" can occur
 ```
 
@@ -189,9 +219,9 @@ Render target metadata lives in `m_renderTargets`, while the GPU image lives in 
 
 | Location | Operation |
 |----------|-----------|
-| `VulkanTextureManager.cpp:288-289` | Builtin solid texture creation |
-| `VulkanTextureManager.cpp:548-549` | `uploadImmediate` preload path |
-| `VulkanTextureManager.cpp:1784-1785` | Render target initialization |
+| `VulkanTextureManager.cpp` (search: `createSolidTexture`) | Builtin solid texture creation |
+| `VulkanTextureManager.cpp` (search: `uploadImmediate`) | `uploadImmediate` preload path |
+| `VulkanTextureManager.cpp` (search: `createRenderTarget` + `waitIdle`) | Render target initialization |
 
 **Problem**: `waitIdle()` stalls the entire queue. Use fence or timeline waits on the specific submitted work instead.
 
@@ -227,10 +257,13 @@ Many internal maps and methods use `int` base-frame handles. The strong typedef 
 
 **Mechanism**:
 
-- Move slot allocation to upload phase (frame-start safe point) only
-- Make bindless index lookup a pure query:
-  - `bindlessSlot(TextureId) const -> BindlessSlot` returns assigned slot if present, else fallback
-  - Requesting a bindless index can *queue an upload* (boundary action) but cannot mutate slot ownership
+- Move slot allocation to upload-phase safe points only (i.e., operations that allocate/evict require proof of upload phase via `UploadCtx`)
+- Make bindless slot ownership a pure lookup:
+  - The texture manager exposes dynamic-slot ownership as availability data (`slottedTextures() const -> SlotMap`, dynamic slots only)
+  - The draw path decides what to do when a texture is unslotted (e.g., use the fallback reserved slot)
+- Keep draw-path side effects explicit and CPU-only:
+  - Requests like `requestBindlessSlot(TextureId)` record interest only (no allocation/eviction)
+  - Upload/residency work like `queueTextureUpload(...)` is explicit; slot ownership is only mutated in upload phase (e.g., `assignBindlessSlots(const UploadCtx&)`)
 
 **Behavior Change**:
 
@@ -245,8 +278,8 @@ If a texture becomes resident mid-frame, its bindless slot may not activate unti
 Separate containers by semantic kind:
 
 ```cpp
-std::unordered_map<TextureId, BitmapTexture> m_bitmaps;        // sample-only
-std::unordered_map<TextureId, RenderTargetTexture> m_targets;  // RTT images + views + metadata
+std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps;        // sample-only
+std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets;  // RTT images + views + metadata
 ```
 
 This makes "is render target" a data-structure fact, not a runtime check.
@@ -254,7 +287,7 @@ This makes "is render target" a data-structure fact, not a runtime check.
 **Alternative** (variant):
 
 ```cpp
-std::unordered_map<TextureId, std::variant<BitmapTexture, RenderTargetTexture>> m_resident;
+std::unordered_map<TextureId, std::variant<BitmapTexture, RenderTargetTexture>, TextureIdHasher> m_resident;
 ```
 
 This uses variant membership as state, but encourages visitor branching.
@@ -265,8 +298,10 @@ This uses variant membership as state, but encourages visitor branching.
 
 **Mechanism**:
 
-- For one-off submissions, use a fence or timeline wait on the submitted work
-- Longer-term: consolidate one-off submissions under renderer-owned capability tokens
+- Prefer renderer-owned submission helpers gated by capability tokens (avoids “hidden submits” inside the texture manager).
+  - The renderer already has an init-only token and submit+wait helper (`InitCtx`, `submitInitCommandsAndWait`); treat that as
+    the reference pattern for “one-off, block until complete” without a queue-wide stall.
+- If a one-off submit must remain in a manager, wait only on the submitted work (fence/timeline), never `queue.waitIdle()`.
 
 ---
 
@@ -282,9 +317,9 @@ The plan is incremental. Each phase is a coherent "correctness win" with a clear
 
 - Verify existing Vulkan texture tests run and are understood:
   - `test/src/graphics/test_vulkan_texture_contract.cpp`
-  - `test/src/graphics/test_vulkan_fallback_texture.cpp`
   - `test/src/graphics/test_vulkan_texture_render_target.cpp`
   - `test/src/graphics/test_vulkan_texture_upload_alignment.cpp`
+  - `test/src/graphics/test_vulkan_texture_helpers.cpp` (shared helpers used by the above)
 - Optionally add an "invariants checklist" section to `docs/VULKAN_TEXTURE_RESIDENCY.md`
 
 **Exit Criteria**:
@@ -304,18 +339,20 @@ The plan is incremental. Each phase is a coherent "correctness win" with a clear
   - `m_residentTextures`, `m_unavailableTextures`, `m_bindlessSlots`
   - `m_pendingRetirements`, `m_pendingBindlessSlots`, `m_renderTargets`
   - Pending upload structures
-- Add `std::hash<TextureId>` specialization in `VulkanTextureId.h`:
+- Add an explicit hasher (prefer explicit hasher structs over `namespace std` specializations in this repo):
 
 ```cpp
-namespace std {
-template <>
-struct hash<graphics::vulkan::TextureId> {
-  size_t operator()(const graphics::vulkan::TextureId& id) const noexcept {
+// In VulkanTextureId.h
+struct TextureIdHasher {
+  size_t operator()(const TextureId& id) const noexcept {
     return std::hash<int>{}(id.baseFrame());
   }
 };
-} // namespace std
 ```
+
+- Use it for all internal containers:
+  - `std::unordered_map<TextureId, T, TextureIdHasher>`
+  - `std::unordered_set<TextureId, TextureIdHasher>`
 
 - Update internal helper signatures:
   - `markTextureUsedBaseFrame` becomes `markTextureUsed(TextureId, ...)`
@@ -326,8 +363,8 @@ struct hash<graphics::vulkan::TextureId> {
 
 At public entry points that accept `int`, convert once:
 
-- `queueTextureUpload(int bitmapHandle, ...)` -> resolve base frame -> `TextureId`
-- `releaseBitmap(int bitmapHandle)` -> resolve base frame -> `TextureId`
+- `queueTextureUpload(int bitmapHandle, ...)` -> canonicalize via `bm_get_base_frame(...)` -> `TextureId`
+- `releaseBitmap(int bitmapHandle)` -> canonicalize via `bm_get_base_frame(...)` -> `TextureId`
 - `createRenderTarget(int baseFrameHandle, ...)` -> `TextureId::tryFromBaseFrame(...)`
 
 **Exit Criteria**:
@@ -344,7 +381,7 @@ At public entry points that accept `int`, convert once:
 **Current Issue**:
 
 ```cpp
-// VulkanTextureManager.cpp:1221-1224
+// VulkanTextureManager.cpp (search: `std::vector<int> m_pendingUploads` / `isUploadQueued`)
 // m_pendingUploads is std::vector<int>; isUploadQueued does linear search
 ```
 
@@ -360,7 +397,7 @@ public:
   std::deque<TextureId> takeAll(); // Preserves order
 private:
   std::deque<TextureId> m_fifo;
-  std::unordered_set<TextureId> m_membership;
+  std::unordered_set<TextureId, TextureIdHasher> m_membership;
 };
 ```
 
@@ -382,7 +419,7 @@ private:
 
 **Current Issue**:
 
-`m_unavailableTextures` stores `UnavailableReason` (`VulkanTextureManager.h:105-121`), which is "state as data" and encourages inhabitant branching.
+`m_unavailableTextures` stores `UnavailableReason` (`code/graphics/vulkan/VulkanTextureManager.h`, search: `enum class UnavailableReason`), which is "state as data" and encourages inhabitant branching.
 
 **Proposed Model**:
 
@@ -390,7 +427,7 @@ private:
 - Optional: keep a boundary validation cache:
 
 ```cpp
-std::unordered_set<TextureId> m_permanentlyRejected;
+std::unordered_set<TextureId, TextureIdHasher> m_permanentlyRejected;
 ```
 
 This represents "input is outside supported domain" (too large, unsupported format), not "texture exists but failed".
@@ -421,6 +458,12 @@ This represents "input is outside supported domain" (too large, unsupported form
 
 **Goal**: Remove phase violations; make bindless slot allocation a known safe-point operation.
 
+**Definition: Safe Point**
+
+Any operation that allocates/evicts bindless slots must require the `UploadCtx` capability token (upload-phase typestate).
+In practice, “upload phase” may occur at frame start *and* at explicit mid-frame upload boundaries where the renderer
+suspends dynamic rendering and mints an `UploadCtx` to record transfer work.
+
 **Current Issue**:
 
 Draw path can attempt slot assignment, relying on `retryPendingBindlessSlots()` at frame start.
@@ -429,15 +472,16 @@ Draw path can attempt slot assignment, relying on `retryPendingBindlessSlots()` 
 
 | Path | Behavior |
 |------|----------|
-| Draw path | Returns fallback slot if none exists; queues upload if not resident; records interest (optional); **does not allocate** |
+| Draw path | Reads slot availability from exposed data; decides locally what to do for missing textures; queues upload if not resident; may record a *request* (CPU-side only); **does not allocate/evict** |
 | Upload phase | After uploads and retirements, assigns slots for resident textures that need them |
 
 **Implementation**:
 
 - Replace `tryAssignBindlessSlot(...)`, `retryPendingBindlessSlots()`, `m_pendingBindlessSlots`
 - Introduce:
-  - `void assignBindlessSlots();` called from `flushPendingUploads(const UploadCtx&)`
-  - `std::optional<BindlessSlot> acquireFreeSlotOrEvict();` (upload-phase only)
+  - `void requestBindlessSlot(TextureId id);` (draw-path safe: records interest only; no allocation)
+  - `void assignBindlessSlots(const UploadCtx&);` called from `flushPendingUploads(const UploadCtx&)`
+  - `std::optional<BindlessSlot> acquireFreeSlotOrEvict(const UploadCtx&);` (upload-phase only)
   - `std::optional<TextureId> findEvictionCandidate() const;` (returns optional, no sentinels)
 
 **Slot Assignment Policy Options**:
@@ -445,7 +489,7 @@ Draw path can attempt slot assignment, relying on `retryPendingBindlessSlots()` 
 | Option | Description |
 |--------|-------------|
 | A (simple) | Assign slots to all resident textures until exhausted |
-| B (preferred) | Only assign to textures requested via `bindlessSlot()` call; maintain `m_bindlessRequested: unordered_set<TextureId>` |
+| B (preferred) | Only assign to textures requested via `requestBindlessSlot()`; maintain `m_bindlessRequested: unordered_set<TextureId, TextureIdHasher>` |
 
 **LRU Eviction**:
 
@@ -467,7 +511,11 @@ Selection filters:
 
 **API Cleanup**:
 
-- `getBindlessSlotIndex(...)` becomes `const` and cannot mutate slot ownership
+- Slot availability becomes exposed data (no decision-making by texture manager):
+  - `const SlotMap& slottedTextures() const;` - read-only view of assigned slots
+  - Draw path reads this directly and decides what to do for missing textures
+- Upload and request side effects remain explicit boundary calls:
+  - `queueTextureUpload*` remains CPU-side only; `requestBindlessSlot(TextureId)` records interest only
 
 **Exit Criteria**:
 
@@ -490,15 +538,15 @@ struct RenderTargetTexture {
   UsageTracking usage;
 };
 
-std::unordered_map<TextureId, BitmapTexture> m_bitmaps;
-std::unordered_map<TextureId, RenderTargetTexture> m_targets;
+std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps;
+std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets;
 ```
 
 **Consequences**:
 
 - RTT-specific APIs become trivial lookups in `m_targets`
 - `retireTexture()` no longer needs separate RTT record cleanup
-- `releaseBitmap()` loses the "if we somehow have a render-target record without a resident texture" branch (`VulkanTextureManager.cpp:1442-1446`)
+- `releaseBitmap()` loses the "if we somehow have a render-target record without a resident texture" branch (`code/graphics/vulkan/VulkanTextureManager.cpp`, search: `render-target record without a resident texture`)
 
 **Migration**:
 
@@ -517,32 +565,33 @@ std::unordered_map<TextureId, RenderTargetTexture> m_targets;
 
 **Goal**: Eliminate queue-wide stalls and reduce hidden GPU submissions.
 
-#### Step 6A: Replace `waitIdle()` with Fence Waits (Low Risk)
+#### Step 6A: Replace `waitIdle()` with Targeted Waits (Low Risk)
 
 For each one-off submit in `VulkanTextureManager.cpp`:
 
-1. Create a `vk::Fence`
-2. Submit using that fence
-3. Wait for the fence
-4. Reset/recycle command pool if applicable
+1. Prefer a renderer-owned submit helper gated by a capability token (best ownership boundary).
+2. If a local submit is unavoidable, wait only on the submitted work:
+   - fence wait (CPU-GPU), or
+   - timeline wait on the specific serial value
+3. Avoid `queue.waitIdle()` (queue-wide stall) except at shutdown.
 
 **Targets**:
 
 | Location | Operation |
 |----------|-----------|
-| `VulkanTextureManager.cpp:174-313` | `createSolidTexture` |
-| `VulkanTextureManager.cpp:346-578` | `uploadImmediate` |
-| `VulkanTextureManager.cpp:1721-1799` | `createRenderTarget` init clear/transition |
+| `VulkanTextureManager.cpp` (search: `createSolidTexture`) | `createSolidTexture` |
+| `VulkanTextureManager.cpp` (search: `uploadImmediate`) | `uploadImmediate` |
+| `VulkanTextureManager.cpp` (search: `createRenderTarget`) | `createRenderTarget` init clear/transition |
 
 #### Step 6B: Token-Gated Submissions (Larger Refactor, Optional)
 
-**Problem**: `gr_vulkan_bm_make_render_target()` can be called while not recording (`code/graphics/vulkan/VulkanGraphics.cpp:749-755`), so RTT initialization currently "self-submits".
+**Problem**: `gr_vulkan_bm_make_render_target()` can be called while not recording (`code/graphics/vulkan/VulkanGraphics.cpp`, search: `gr_vulkan_bm_make_render_target`), so RTT initialization currently "self-submits".
 
 **Options**:
 
 | Option | Description |
 |--------|-------------|
-| 1 | Keep synchronous RTT init; expose narrow submit helper from `VulkanRenderer`; texture manager records callback, renderer performs submit+wait |
+| 1 | Keep synchronous RTT init; use a narrow submit helper from `VulkanRenderer` (token-gated); texture manager records callback, renderer performs submit+wait |
 | 2 | Make RTT GPU init lazy and token-gated; `createRenderTarget()` becomes metadata-only; VkImage creation occurs at first safe token point |
 
 **Exit Criteria**:
@@ -559,7 +608,7 @@ For each one-off submit in `VulkanTextureManager.cpp`:
 **Current Issue**:
 
 ```cpp
-// VulkanTextureManager.cpp:1563-1581
+// VulkanTextureManager.cpp (search: `getTextureDescriptorInfo` + `vk::DescriptorImageInfo info{}`)
 // getTextureDescriptorInfo returns default vk::DescriptorImageInfo with imageView == nullptr when not resident
 ```
 
@@ -606,7 +655,7 @@ return *info;
 **Test Updates**:
 
 - Update signature contract test if descriptor API changes
-- Add invariant test: draw path cannot allocate/evict slots (method becomes `const`)
+- Add contract coverage: draw-path-facing code cannot allocate/evict slots (allocation/eviction requires `UploadCtx` or an upload-only interface/view)
 - Add behavioral test for pending upload queue uniqueness
 - Update RTT tests to reflect single-source-of-truth ownership model
 
@@ -680,7 +729,7 @@ Changing slot assignment phase may cause one-frame "fallback sampling" for newly
 
 **Mitigation**:
 
-- Keep existing "slow path flush now" in `VulkanRenderer` for critical cases (animated textures) where the renderer already forces an upload flush mid-frame (`VulkanRenderer.cpp:2744-2748`)
+- Keep existing "slow path flush now" in `VulkanRenderer` for critical cases (animated textures) where the renderer already forces an upload flush mid-frame (`code/graphics/vulkan/VulkanRenderer.cpp`, search: `animated textures`)
 - Ensure descriptor sync ordering: slot assignment occurs before descriptor writes
 
 ### Risk: Widespread Signature Churn
@@ -694,7 +743,7 @@ Moving from `int` to `TextureId` touches many call sites.
 
 ### Risk: Stale File/Line References
 
-Code anchors in this document (e.g., `VulkanTextureManager.cpp:1309`) may become stale during implementation.
+Code anchors in this document may become stale during implementation.
 
 **Mitigation**:
 
@@ -709,7 +758,7 @@ This refactor is complete when:
 
 - [ ] Internal texture identity is `TextureId` everywhere; raw `int` exists only at boundaries
 - [ ] No sentinel values remain in resource selection paths (LRU/eviction)
-- [ ] Draw path is lookup-only for bindless slot ownership; no retries, no slot mutation mid-frame
+- [ ] Draw path is lookup-only for bindless slot ownership; allocation/eviction entry points require `UploadCtx` (no retries, no slot mutation mid-frame)
 - [ ] Render target ownership is unified (no split RTT state possible)
 - [ ] No `queue.waitIdle()` remains in `VulkanTextureManager`
 - [ ] Tests and docs reflect the new invariants and prevent regressions
@@ -724,14 +773,11 @@ These are shape-of-the-solution sketches, not final APIs.
 
 ```cpp
 // In VulkanTextureId.h
-namespace std {
-template <>
-struct hash<graphics::vulkan::TextureId> {
-  size_t operator()(const graphics::vulkan::TextureId& id) const noexcept {
+struct TextureIdHasher {
+  size_t operator()(const TextureId& id) const noexcept {
     return std::hash<int>{}(id.baseFrame());
   }
 };
-} // namespace std
 ```
 
 **Invariant**: All `TextureId` values are base frames (>= 0) by construction.
@@ -760,7 +806,7 @@ public:
 
 private:
   std::deque<TextureId> m_fifo;
-  std::unordered_set<TextureId> m_membership;
+  std::unordered_set<TextureId, TextureIdHasher> m_membership;
 };
 ```
 
@@ -769,19 +815,44 @@ private:
 - A texture is either queued or not queued; duplicates cannot exist
 - Upload order is stable and observable (aids debugging)
 
-### 11.3 Bindless Slot Strong Type
+### 11.3 Bindless Slot Availability: Ownership Model
+
+**The Wrong Question**: "How do we represent absence of a slot?"
+
+Wrapping in `std::optional` vs using sentinel values is a syntax distinction. Both require branching on presence. The real issue is **who owns the decision** about what to do when a texture isn't slotted.
+
+**Current Design (texture manager decides for caller):**
 
 ```cpp
-struct BindlessSlot {
-  uint32_t value = kBindlessTextureSlotFallback;
-};
-
-inline bool isDynamic(BindlessSlot s) {
-  return s.value >= kBindlessFirstDynamicTextureSlot && s.value < kMaxBindlessTextures;
-}
+BindlessSlot bindlessSlot(TextureId) const;  // returns fallback if not found
 ```
 
-**Invariant**: Prevents treating arbitrary integers as slot indices (boundary-only conversions).
+The texture manager is making a decision it doesn't own - it's telling the caller "use fallback" when the caller should decide that based on its own context.
+
+**Better Design (texture manager exposes, draw path decides):**
+
+```cpp
+// Texture manager just exposes what's available (read-only view)
+const std::unordered_map<TextureId, uint32_t, TextureIdHasher>& slottedTextures() const;
+
+// Draw path owns the decision:
+auto it = textures.slottedTextures().find(id);
+uint32_t slot = (it != textures.slottedTextures().end()) ? it->second : kBindlessTextureSlotFallback;
+```
+
+**Why This is Better:**
+
+- **Separation of concerns**: Texture manager manages availability ("herd cats to food"). Draw path manages rendering decisions ("cats decide if they're hungry").
+- **Decision ownership**: The code that knows its context (draw path) makes the decision about fallback behavior.
+- **Reduced texture manager responsibilities**: It doesn't pretend to know what callers should do when textures aren't available.
+
+**The Branching Still Exists** - and that's fine. C++ can't eliminate all branching. The goal is:
+
+1. Put decisions with their owners
+2. Reduce possible invalid states
+3. Make the texture manager a data provider, not an oracle
+
+**Invariant**: The slot map only contains valid dynamic slots (4+). Reserved slots (0-3) are never in the map - they're constants the draw path uses directly.
 
 ### 11.4 Resident Texture Containers
 
@@ -802,8 +873,8 @@ struct RenderTargetTexture {
   UsageTracking usage;
 };
 
-std::unordered_map<TextureId, BitmapTexture> m_bitmaps;
-std::unordered_map<TextureId, RenderTargetTexture> m_targets;
+std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps;
+std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets;
 ```
 
 **Invariants**:
@@ -816,8 +887,8 @@ std::unordered_map<TextureId, RenderTargetTexture> m_targets;
 If "has slot" should also be state-as-location:
 
 ```cpp
-std::unordered_map<TextureId, SlottedBitmapTexture> m_slottedBitmaps;
-std::unordered_map<TextureId, BitmapTexture>        m_unslottedBitmaps;
+std::unordered_map<TextureId, SlottedBitmapTexture, TextureIdHasher> m_slottedBitmaps;
+std::unordered_map<TextureId, BitmapTexture, TextureIdHasher>        m_unslottedBitmaps;
 ```
 
 Higher churn but eliminates "slot map contains id that is not resident".
@@ -837,22 +908,37 @@ uint32_t getBindlessSlotIndex(int baseFrame);
 
 **Proposed**:
 
+The texture manager exposes availability data. The draw path owns decisions about what to do when textures aren't available.
+
 ```cpp
-std::optional<vk::DescriptorImageInfo> tryGetResidentDescriptor(TextureId, SamplerKey) const;
-BindlessSlot bindlessSlot(TextureId) const;
+// Texture manager exposes what's available (read-only)
+// Sketch container aliases (exact types may change during implementation)
+using SlotMap = std::unordered_map<TextureId, uint32_t, TextureIdHasher>; // dynamic slots only
+using ResidentSet = std::unordered_set<TextureId, TextureIdHasher>;       // presence = resident
+
+const SlotMap& slottedTextures() const;
+const ResidentSet& residentTextures() const;
+
+// Draw path decides - not the texture manager
+// (Side effects like queueUpload are separate, explicit calls)
 ```
 
 **Boundary Pattern** (`VulkanTextureBindings`):
 
 ```cpp
-auto info = textures.tryGetResidentDescriptor(id, samplerKey);
-if (!info) {
-  textures.queueUpload(id, samplerKey);
-  return textures.fallbackDescriptor(samplerKey);
+// Draw path reads availability and makes its own decisions
+auto slotIt = textures.slottedTextures().find(id);
+uint32_t slot = (slotIt != textures.slottedTextures().end()) ? slotIt->second : kBindlessTextureSlotFallback;
+
+auto residentIt = textures.residentTextures().find(id);
+if (residentIt == textures.residentTextures().end()) {
+  textures.queueUpload(id, samplerKey);  // explicit side effect
 }
-textures.markUsed(id, frameIndex);
-return *info;
+
+// Draw path uses slot (which might be fallback - that's its decision)
 ```
+
+**Key Difference**: The texture manager doesn't return "fallback or real" - it exposes data. The draw path, knowing its own context, decides what to do with missing textures.
 
 ### 12.2 Upload-Path APIs
 
@@ -884,7 +970,7 @@ These smaller issues can reintroduce invalid states if ignored during refactorin
 
 ### 13.1 Sampler Cache Key Safety
 
-`m_samplerCache` uses a pre-hashed `size_t` key (`VulkanTextureManager.cpp:317-343`). While safe today, it is not type-enforced.
+`m_samplerCache` uses a pre-hashed `size_t` key (`code/graphics/vulkan/VulkanTextureManager.cpp`, search: `m_samplerCache`). While safe today, it is not type-enforced.
 
 **Refactor To**:
 

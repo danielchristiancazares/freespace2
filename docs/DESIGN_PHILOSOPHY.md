@@ -1,242 +1,277 @@
-# Type-Driven Design: A Philosophy
+# Type-Driven Design: The Philosophy
 
 ## How to Read This Document
 
-Absorb the principle, not the syntax. The examples exist to illustrate; not copy outright. If you find yourself arguing that an example has a technical flaw while ignoring what it demonstrates, you have missed the point.
-The principle behind every pattern: make invalid states unrepresentable. If you understand this, you can derive the correct implementation for any situation. If you're looking for escape hatches in example code, you don't understand it yet.
+**Absorb the principle, not the syntax.**
+
+The examples exist to illustrate structural concepts, not to be copied outright. The principle behind every pattern is **Correctness by Construction**. If you understand this, you can derive the correct implementation for any situation. If you are looking for escape hatches in the examples, you are missing the point.
 
 ## The Core Idea
 
-**Use the type system to make wrong code unwritable.** Don't rely on programmer discipline, runtime checks, or documentation. If invalid code compiles, the types are wrong.
+**Make invalid states unrepresentable.**
 
-This isn't about elegance. It's about making entire categories of bugs structurally impossible.
+We do not write code to "handle" invalid states; we design types so that invalid states cannot mathematically exist. Do not rely on programmer discipline, runtime checks, or documentation.
+
+If invalid code compiles, the type definitions do not accurately reflect the domain. Successful compilation must be sufficient proof of structural validity.
 
 ---
 
 ## Typestate: The ShuffledDeck Pattern
 
-You're coding a card game. Games should only start with a shuffled deck.
+**The Problem:** Temporal coupling hidden in side effects.
 
-**Common approach:**
+Games require a shuffled deck. A `Deck` object that *might* be shuffled is a lie. Nothing prevents `startGame(unshuffledDeck)`.
 
-```cpp
-struct Deck { ... };
-Deck shuffle(Deck d);
-void startGame(Deck d);  // hopes caller shuffled
-```
+**The Semantic Fix:**
 
-Programmer must remember to shuffle. Nothing prevents `startGame(unshuffledDeck)`. You'll add a comment. Someone will ignore it. You'll add a runtime check. It'll fire in production.
-
-**Type-driven approach:**
+The `shuffle` function is not an action; it is a **transition**. It consumes the precursor state and emits the valid state.
 
 ```cpp
-class Deck { ... };
+class Deck { ... }; // Represents a raw deck
 
 class ShuffledDeck {
-    friend ShuffledDeck shuffle(Deck&&);
-    ShuffledDeck() = default;  // private
+    friend ShuffledDeck shuffle(Deck&&); // Consumption
+    ShuffledDeck() = default; 
 };
 
-[[nodiscard]] ShuffledDeck shuffle(Deck&& d);  // consumes Deck, returns ShuffledDeck
-void startGame(ShuffledDeck d);                // won't compile with Deck
+// The Transition: Consumes 'Deck', proves 'ShuffledDeck' exists
+[[nodiscard]] ShuffledDeck shuffle(Deck&& d);
+
+// The Consumer: Physically impossible to call without the proof
+void startGame(ShuffledDeck d);
 ```
 
-The `shuffle` function is a **typestate transition** — it consumes the precursor state and produces the valid state. Move semantics (approximating affine types) prevent reusing the unshuffled deck.
+**The Reality:** The types now mirror the physics of the domain. `Deck` and `ShuffledDeck` are not just different classes; they are different universes of validity. Move semantics prevent "use-after-transition," ensuring the timeline allows no forks.
 
-Successful compilation is proof that no one can sneak in a bad deck.
+The Return Type is the Proof of History.
 
 ---
 
-## Parametricity
+## Parametricity (Enforced Agnosticism)
 
-Consider a function that returns an element from a list:
+**The Problem:** Inspection breeds coupling.
 
-**Non-polymorphic:**
+A function taking `const vector<Card>&` has too much power. It can inspect cards, log values, or branch logic based on specific suits.
 
-```cpp
-Card get_first(const std::vector<Card>& list);
-```
+**The Semantic Fix:**
 
-Inside this function, I can inspect the cards, change behavior based on suit, log values. Caller has no guarantees without reading the implementation.
-
-**Polymorphic:**
+Polymorphism is not just code reuse; it is Structural Blindness.
 
 ```cpp
 template <typename T>
 T get_first(const std::vector<T>& list);
 ```
 
-Because the function is generic over `T`, it *approximates* parametricity — it cannot observe or modify `T` in type-specific ways. The signature `forall A. [A] -> A` constrains the implementation to pure data movement.
+**The Semantic Guarantee:**
 
-C++ leaks here (templates can specialize, `if constexpr` exists, `type_traits` allow inspection). But the constraint makes the correct implementation obvious and type-specific tricks awkward.
+By quantifying over `T`, we strip the implementation of the ability to inspect the data. The signature `forall A. [A] -> A` constrains the implementation to pure data movement. It operates on the structure of the container, never the nature of the content.
+
+The constraint forces the correct implementation to be the path of least resistance.
+
+---
+
+## Constrained Generics (Call-Site Rejection)
+
+Parametricity blinds the implementation (what it can do). Constraints filter the call site (what it accepts).
+
+```cpp
+// Unconstrained: Accepts garbage, fails deep inside logic
+template <typename T>
+void serialize(const T& obj);
+
+// Constrained: Rejects garbage at the boundary
+template <typename T>
+    requires Serializable<T>
+void serialize(const T& obj);
+```
+
+SFINAE (and Concepts) moves the rejection from inside the template instantiation to the signature. The function literally does not exist for types that cannot satisfy it.
+
+**The Boundary Principle:** Invalid instantiations must not propagate past the signature.
 
 ---
 
 ## The Shared Foundation
 
-| Pattern                                 | What It Eliminates    |
-| --------------------------------------- | --------------------- |
-| Typestate (`Deck` → `ShuffledDeck`)     | Invalid sequencing    |
-| Parametricity (`template <typename T>`) | Invalid operations    |
-| Move semantics                          | Use-after-transition  |
-| State as location                       | State enum mismatches |
-| Capability tokens                       | Phase violations      |
-
-All are variations of one idea: encode invariants in types so the compiler enforces them.
+| Pattern | The Semantic Guarantee |
+|---|---|
+| Typestate | Proof of History. (`B` cannot exist unless `A` happened first). |
+| Parametricity | Implementation Agnosticism. (Logic cannot depend on data values). |
+| Constraints | Call-Site Rejection. (Invalid inputs are structurally incompatible). |
+| Move Semantics | Linearity. (Resource is at exactly one place at one time). |
+| State as Location | Synchronization. (Flag and map cannot disagree). |
+| Capability Tokens | Phase Validity. (Code cannot run outside its time slot). |
 
 ---
 
-## Ownership
+## Ownership is Coordination
 
-**Make coordination unnecessary by making ownership complete.** Objects own everything they need to act. If two pieces of code must agree about state, one is wrong about what it owns.
+**Make coordination unnecessary by making ownership complete.**
 
-```cpp
-// WRONG: Fragmented ownership
-class Uploader {
-    bool upload(TextureId id, GpuTexture* out);  // caller owns output, checks success
-};
+If two pieces of code must "agree" on the state of a resource, the architecture is flawed. One object should own the resource.
 
-// RIGHT: Complete ownership
-class Uploader {
-    GpuTexture upload(TextureId id);  // returns owned object or doesn't return
-};
-```
+* **Fragmented Ownership:** Function takes an ID and a pointer, tries to fill the pointer. Caller owns memory, Callee owns logic. Result: Boolean return codes and undefined states.
+* **Complete Ownership:** Function takes an ID, returns a fully constructed object or a boundary error. The core never receives a "maybe."
 
-**Corollary:** Retry loops prove the architecture is broken. If you retry, two components disagreed about reality. Don't retry — fix the ownership so they can't disagree.
+**Corollary: The Retry Fallacy.**
+
+Retry loops inside the core are consensus failures—logic attempting to synchronize with itself. If you have to ask "did that work?" and try again, two components have different views of reality. Fix the ownership scope so disagreement is impossible.
+
+(Retries at the boundary are adaptation to an unreliable world. Retries inside are architecture rot.)
+
+---
+
+## Data Providers Don't Decide (Mechanism vs. Policy)
+
+**Providers expose Mechanism (facts); Callers decide Policy (actions).**
+
+When a data provider returns a fallback value (e.g., a default texture) because an ID was missing, it is usurping the caller's agency.
+
+* **Wrong:** `TextureManager::get(id)` returns a default texture. The Manager decides "The game must go on."
+* **Right:** `TextureManager::available()` returns a read-only view of what exists. The Caller decides "I need this texture; if missing, I will trigger a loading screen."
+
+The texture manager herds cats to food—it makes textures available. It doesn't need to know if each cat is hungry. Cats (callers) can see what's available and decide for themselves.
+
+**Semantic Rule:** If a function returns "Fallback OR Real Data" without the type system distinguishing them, you have hidden a decision inside a data access.
 
 ---
 
 ## State as Location
 
-**Container membership is state.** Objects don't carry state enums or status flags. An object's state is determined by which container holds it.
+**Existence is state.**
 
-```cpp
-// WRONG: State as data
-struct TextureRecord {
-    enum State { Missing, Queued, Resident, Failed } state;
-    std::optional<GpuTexture> gpu;  // valid only if state == Resident (trust me)
-};
-std::map<TextureId, TextureRecord> m_textures;
+Do not use `enum State` or `bool is_active` to track lifecycle. An object's state is defined by where it is, not what it contains.
 
-// RIGHT: State as location
-struct UploadRequest { std::string path; };
-struct GpuTexture { Handle handle; };
+* **Wrong:** A list of objects with status flags (`Pending`, `Resident`). You must filter the list to find valid ones.
+* **Right:** Two containers: `pending_uploads` and `resident_textures`.
 
-std::map<TextureId, UploadRequest> m_pending;   // presence = queued
-std::map<TextureId, GpuTexture> m_resident;     // presence = resident
-// absent from both = missing
-```
+To change state, you move the object from one container to another.
 
-No state enum to get out of sync. No `std::optional` that might lie. Iterating `m_resident` guarantees valid handles. The data structure *is* the state machine.
+**Proof:** If an object is in `m_resident`, it is resident. There is no flag to de-sync. The data structure *is* the state machine.
+
+Topology is Truth.
 
 ---
 
 ## Capability Tokens
 
-**Capability tokens prove phase validity.** If an operation is only valid during a specific phase, require a capability token that can only exist during that phase.
+**Capability tokens are "Tickets to Ride."**
+
+If an operation is only valid during a specific phase (e.g., Rendering), require a token that only exists during that phase.
 
 ```cpp
-// Only constructible by Renderer
-class UploadPhase {
-    friend class Renderer;
-    UploadPhase() = default;
-public:
-    UploadPhase(const UploadPhase&) = delete;
-};
-
-void submitToGpu(const UploadPhase& proof, GpuHandle h);
+void submitDrawCall(const RenderPass& proof, Mesh m);
 ```
 
-No `assert(isUploadPhaseActive)` required. The code cannot execute without the token. The compiler verifies this.
-
-This is the ShuffledDeck pattern applied to temporal phases. If you have an `UploadPhase` token, you're in the upload phase. No token, no call.
+You do not need `assert(is_rendering)`. The code physically cannot be called unless you possess a `RenderPass` object. If the token exists on the stack, the phase is active.
 
 ---
 
-## Boundaries vs Internals
+## Boundaries vs. Internals
 
-**Conditionals at system boundaries are acceptable.** That's where you reject invalid input before it enters the system.
+**Parse, don't validate.**
 
-```cpp
-class ConnectedSocket {
-    ConnectedSocket(int fd);  // private
-public:
-    static std::optional<ConnectedSocket> connect(IpAddr addr);  // boundary
-    void send(Data d);  // internal: cannot fail due to connection state
-};
-```
+A system has a Crust (Boundary) and a Core (Internal).
 
-Caller checks the optional *once*, at the boundary. Inside the system, `ConnectedSocket` exists means connected. No further checks.
+* **The Crust:** Accepts messy, optional input. It parses (converts) this into strict Types.
+* **The Core:** Operates on strict Types. No `optional`, no `nullptr` checking.
 
-**Domain-optional is real absence; state-optional is fake absence caused by a leaky internal state model.**
+**The Disease:** Passing `std::optional` or `ptr*` deep into the core logic. This forces every internal function to handle the "missing" case, spreading the complexity of the boundary throughout the entire application.
 
-**Conditionals inside the system to route around state that shouldn't exist — that's the disease.** Guards don't protect the system from invalid state. Guards protect invalid state from being noticed.
+* **Domain-Optional:** A legitimate absence (e.g., User has no middle name).
+* **State-Optional:** A leaky abstraction (e.g., Object exists but `init()` hasn't been called). Eliminate state-optionality.
+
+---
+
+## On Assertions
+
+> "An assertion is a confession: you let the wrong world exist, and now you're policing its borders."
+
+Guards don't prevent invalid states. They catch invalid states that your types already permitted. The types are the border. If you're writing `assert`, you've already let the enemy inside the walls.
+
+**Don't build a border patrol. Build a world with no illegal crossings.**
 
 ---
 
 ## The Death List
 
-**Inhabitant branching:** branching on whether a value exists (`nullptr`, empty `optional`) inside internal logic instead of making existence the proof by construction.
+When reviewing code, interpret these patterns as structural failures:
 
-When reviewing code, delete:
+| Pattern | The Semantic Flaw |
+|---|---|
+| State-Dependent Validity | Fake Sum Type. An enum tag that implies which fields are inhabited is a sum type implemented unsafely. Use distinct types or `variant`. |
+| Inhabitant Branching | Lying Signature. Checks like `if (ptr)` deep in logic mean the function requested a `T` but accepted a `Maybe T`. |
+| Sentinel Values | In-Band Signaling. `-1` or `""` masquerading as valid types. |
+| Init/Update Methods | Step-Coupling. Constructors must complete initialization. |
+| Retry Loops (in core) | Consensus Failure. Logic attempting to synchronize with itself. |
+| Protective Guards | Normalization of Deviance. `assert(impossible)` protects invalid state from being noticed. |
+| GetOrDefault | Policy Leak. Data provider making decisions for the consumer. |
 
-| Pattern                                                                                          | Problem                                                   |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| `enum State { Init, Ready, Error }`                                                              | State as data, not location                               |
-| `if (ptr != nullptr)` deep in logic                                                              | Inhabitant branching (move to boundary)                   |
-| `if (opt.has_value())` deep in logic                                                             | Inhabitant branching (move to boundary)                   |
-| `switch (state)` / `std::visit` used to route around representational state that shouldn't exist | Control flow over invalid state instead of eliminating it |
-| `bool isInitialized`, `bool hasData`                                                             | Object existence *is* the proof                           |
-| Sentinel values (`-1`, `UINT32_MAX`)                                                             | Fake inhabitants in the domain                            |
-| `void init(); void update();`                                                                    | Step-coupling (constructor must complete init)            |
-| Retry loops                                                                                      | Two components disagreed — fix ownership                  |
-| Guards / asserts for "impossible" states                                                         | Protecting invalid state from being noticed               |
-| `Failed` enum variants                                                                           | Failure is absence, not presence                          |
+---
+
+## The Litmus Test: Memory Layout
+
+Not all enums are bad. Apply the **Memory Layout Test** to distinguish "Behavior" from "State."
+
+* **Behavioral Configuration (Valid):** `enum AI { Aggressive, Defensive }`
+    * Does changing this enum invalidate any member variables? **No.**
+    * The object structure remains identical; only the algorithm changes.
+
+* **Structural State (Invalid):** `enum Connection { Disconnected, Connected }`
+    * Does changing this enum invalidate `m_socketHandle`? **Yes.**
+    * This is a Sum Type masquerading as a Product Type. You are manually managing a relationship the compiler doesn't see.
+
+**Rule:** If the validity of data depends on the value of a flag, that flag must not exist. The data structure itself must change (via `variant` or move to a new type).
 
 ---
 
 ## Approximations in C++
 
-C++ lacks dependent types, has weak parametricity, and permits escape hatches (`const_cast`, `reinterpret_cast`, global state). These patterns approximate the ideal:
+C++ lacks dependent types, has weak parametricity, and permits escape hatches. We approximate the ideal:
 
-| Ideal                               | C++ Approximation                                       |
-| ----------------------------------- | ------------------------------------------------------- |
-| Typestate (`Deck` → `ShuffledDeck`) | Move-only types, private constructors, friend factories |
-| Linear types                        | `= delete` copy, move-only, `[[nodiscard]]`             |
-| Parametricity                       | Templates with minimal constraints                      |
-| Capability tokens                   | Structs with private constructors, `friend` access      |
-| State as location                   | Separate containers per state                           |
+| Ideal | C++ Approximation |
+|---|---|
+| Typestate | Move-only types, private constructors, friend factories. |
+| Linear Types | `= delete` copy, move-only, `[[nodiscard]]`. |
+| Parametricity | Templates with minimal constraints. |
+| Bounded Polymorphism | SFINAE, `requires` clauses, Concepts. |
+| Capability Tokens | Structs with private constructors, `friend` access. |
+| State as Location | Separate containers per state. |
 
-The approximations leak. Someone can `std::move` from the same object twice. But the types make the correct path obvious and the incorrect path awkward. That's usually enough.
+**Lock the door anyway.**
+
+"C++ can't prevent X" is not an excuse to leave X easy. If you can't eliminate an invalid state, make it awkward to reach:
+
+* **The Zombie State:** C++ moves are non-destructive (source remains). Use `unique_ptr` to force emptiness, or destructive `consume() &&` methods.
+* **Explicit Intent:** Use rvalue-qualified methods to force "use-once" semantics where possible.
+
+Saying "the language can't enforce it perfectly" is like saying "my car door doesn't prevent all theft." True—but you still lock it.
 
 ---
 
 ## The Test
 
-When reviewing a design, don't ask:
+When reviewing a design, do not ask:
 
-> "What happens if someone passes an unshuffled deck?"
+> "What happens if someone passes the wrong data?"
 
 Ask:
 
-> "How do I make passing an unshuffled deck a compile error?"
+> "How do I make passing the wrong data a compile error?"
 
-If the answer involves runtime checks, guards, asserts, or documentation — the types are wrong. Redesign until the compiler is the enforcer.
+We do not want to detect invalid state at runtime. We want to define invalid state out of existence.
 
 ---
 
 ## Not Acceptable
 
-The following are not valid objections:
+Objections based on "simplicity" usually conflate ease of writing with simplicity of reasoning.
 
-* "Polymorphism is overkill for this"
-* "It's just a boolean"
-* "Simpler fix" that moves the branch instead of eliminating the invalid state
-* "Performance concerns" (vtables, allocations, container overhead)
-* "The language doesn't support it perfectly"
+* Writing a global boolean is "easy."
+* Debugging a race condition caused by that boolean is "complex."
 
-"Simpler" is not the goal. Correct-by-construction is the goal. The runtime cost of a container lookup is infinitely cheaper than debugging a state mismatch that only manifests in production.
+We optimize for the latter. The runtime cost of a container move is negligible compared to the cost of debugging a state mismatch that only manifests in production.
 
 ---
 
-The goal is a codebase where "it compiles" means "it's not wrong in any of the ways the type system can catch." Push that boundary as far as the language allows.
+The goal is a codebase where "It compiles" is a high-confidence statement of structural integrity.
