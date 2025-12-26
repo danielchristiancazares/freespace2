@@ -37,6 +37,10 @@ Defined in `VulkanConstants.h`:
 ```cpp
 constexpr uint32_t kFramesInFlight = 2;
 constexpr uint32_t kMaxBindlessTextures = 1024;
+
+// Bindless model texture slots:
+// - Slot 0 is always valid fallback (black) so bindless sampling never touches destroyed images.
+// - Slots 1..3 are well-known defaults so shaders never need "absent texture" sentinel routing.
 constexpr uint32_t kBindlessTextureSlotFallback = 0;
 constexpr uint32_t kBindlessTextureSlotDefaultBase = 1;
 constexpr uint32_t kBindlessTextureSlotDefaultNormal = 2;
@@ -70,7 +74,7 @@ Callers must check `isAvailable()` before using the movie path.
 
 The renderer requires specific Vulkan features for bindless model rendering and push descriptors. All validations are **hard requirements** that throw or assert on failure.
 
-### 4.1 Descriptor Indexing Features
+### 2.1 Descriptor Indexing Features
 
 Required features checked in `VulkanModelValidation.cpp`:
 
@@ -96,7 +100,7 @@ bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceDescriptorIn
 }
 ```
 
-### 4.2 Push Descriptor Support
+### 2.2 Push Descriptor Support
 
 Push descriptors are a **hard requirement** (core in Vulkan 1.4):
 
@@ -111,7 +115,7 @@ void EnsurePushDescriptorSupport(const vk::PhysicalDeviceVulkan14Features& featu
 
 Called at renderer initialization in `VulkanRenderer::createDescriptorResources()`.
 
-### 4.3 Device Limit Validation
+### 2.3 Device Limit Validation
 
 Validated in `VulkanDescriptorLayouts.cpp`:
 
@@ -121,7 +125,24 @@ Validated in `VulkanDescriptorLayouts.cpp`:
 | `maxDescriptorSetStorageBuffers` | >= 1 | Vertex heap SSBO |
 | `maxDescriptorSetStorageBuffersDynamic` | >= 1 | Batched transform buffer |
 
-### 4.4 YCbCr Conversion Support (Movie Path)
+```cpp
+void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimits& limits)
+{
+    // Hard assert - no silent clamping
+    Assertion(limits.maxDescriptorSetSampledImages >= kMaxBindlessTextures,
+              "Device maxDescriptorSetSampledImages (%u) < required %u",
+              limits.maxDescriptorSetSampledImages, kMaxBindlessTextures);
+
+    Assertion(limits.maxDescriptorSetStorageBuffers >= 1,
+              "Device maxDescriptorSetStorageBuffers (%u) < required 1",
+              limits.maxDescriptorSetStorageBuffers);
+    Assertion(limits.maxDescriptorSetStorageBuffersDynamic >= 1,
+              "Device maxDescriptorSetStorageBuffersDynamic (%u) < required 1",
+              limits.maxDescriptorSetStorageBuffersDynamic);
+}
+```
+
+### 2.4 YCbCr Conversion Support (Movie Path)
 
 For video playback, additional features are validated in `VulkanMovieManager.cpp`:
 
@@ -135,9 +156,9 @@ For video playback, additional features are validated in `VulkanMovieManager.cpp
 
 ## 3. Descriptor Set Architecture
 
-The system defines three distinct pipeline layout kinds, each with its own descriptor set organization:
+The system defines three distinct pipeline layout kinds, each with its own descriptor set organization.
 
-### 4.1 Pipeline Layout Kinds
+### 3.1 Pipeline Layout Kinds
 
 Defined in `VulkanLayoutContracts.h`:
 ```cpp
@@ -148,15 +169,15 @@ enum class PipelineLayoutKind {
 };
 ```
 
-### 4.2 Standard Pipeline Layout
+### 3.2 Standard Pipeline Layout
 
 Used for 2D rendering, UI, particles, post-processing, and most non-model shaders.
 
-**Set Organization** (`VulkanDescriptorLayouts.cpp:77-85`):
+**Set Organization**:
 - **Set 0**: Push descriptor set (per-draw, updated via `vkCmdPushDescriptorSetKHR`)
 - **Set 1**: Global descriptor set (G-buffer textures for deferred lighting)
 
-**Set 0 Bindings** (`VulkanDescriptorLayouts.cpp:55-75`):
+**Set 0 Bindings**:
 | Binding | Type | Stage | Purpose |
 |---------|------|-------|---------|
 | 0 | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` | Vertex + Fragment | Matrix UBO |
@@ -166,15 +187,15 @@ Used for 2D rendering, UI, particles, post-processing, and most non-model shader
 | 4 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Texture sampler 2 (post-processing) |
 | 5 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | Texture sampler 3 (post-processing) |
 
-### 4.3 Model Pipeline Layout
+### 3.3 Model Pipeline Layout
 
 Used exclusively for `SDR_TYPE_MODEL` shaders with bindless textures and vertex pulling.
 
-**Set Organization** (`VulkanDescriptorLayouts.cpp:160-166`):
+**Set Organization**:
 - **Set 0**: Model descriptor set (per-frame, pre-allocated)
 - **Push Constants**: 64-byte `ModelPushConstants` block
 
-**Set 0 Bindings** (`VulkanDescriptorLayouts.cpp:105-129`):
+**Set 0 Bindings**:
 | Binding | Type | Count | Stage | Purpose |
 |---------|------|-------|-------|---------|
 | 0 | `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` | 1 | Vertex | Vertex heap SSBO |
@@ -182,25 +203,25 @@ Used exclusively for `SDR_TYPE_MODEL` shaders with bindless textures and vertex 
 | 2 | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC` | 1 | Vertex + Fragment | Model uniform data |
 | 3 | `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC` | 1 | Vertex | Batched transform buffer |
 
-### 4.4 Deferred Pipeline Layout
+### 3.4 Deferred Pipeline Layout
 
 Used for `SDR_TYPE_DEFERRED_LIGHTING` shader.
 
-**Set Organization** (`VulkanDescriptorLayouts.cpp:233-242`):
+**Set Organization**:
 - **Set 0**: Push descriptor set (per-light uniforms)
 - **Set 1**: Global descriptor set (G-buffer textures)
 
-**Set 0 Bindings** (`VulkanDescriptorLayouts.cpp:216-230`):
+**Set 0 Bindings**:
 | Binding | Type | Stage | Purpose |
 |---------|------|-------|---------|
 | 0 | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` | Vertex + Fragment | Matrix UBO |
 | 1 | `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` | Vertex + Fragment | Light params UBO |
 
-### 4.5 Global Descriptor Set Layout
+### 3.5 Global Descriptor Set Layout
 
 Shared by Standard and Deferred layouts for G-buffer access.
 
-**Bindings** (`VulkanDescriptorLayouts.cpp:34-47`):
+**Bindings**:
 | Binding | Type | Stage | Purpose |
 |---------|------|-------|---------|
 | 0 | `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` | Fragment | G-buffer 0 (Color) |
@@ -212,20 +233,20 @@ Shared by Standard and Deferred layouts for G-buffer access.
 
 ---
 
-## 3. Descriptor Pool Management
+## 4. Descriptor Pool Management
 
 ### 4.1 Pool Architecture
 
-Two distinct descriptor pools are maintained:
+Three distinct descriptor pools are maintained:
 
-**Global Pool** (`VulkanDescriptorLayouts.cpp:87-97`):
+**Global Pool** (for G-buffer descriptors):
 ```cpp
 poolSizes[0].type = vk::DescriptorType::eCombinedImageSampler;
 poolSizes[0].descriptorCount = 6; // G-buffer (5) + depth (1)
 poolInfo.maxSets = 1;
 ```
 
-**Model Pool** (`VulkanDescriptorLayouts.cpp:168-186`):
+**Model Pool** (for bindless model rendering):
 ```cpp
 poolSizes[0].type = vk::DescriptorType::eStorageBuffer;
 poolSizes[0].descriptorCount = kFramesInFlight;           // vertex heap
@@ -242,11 +263,18 @@ poolSizes[3].descriptorCount = kFramesInFlight;           // model data
 poolInfo.maxSets = kFramesInFlight; // 2
 ```
 
+**Movie Pool** (for YCbCr video textures):
+```cpp
+poolSize.type = vk::DescriptorType::eCombinedImageSampler;
+poolSize.descriptorCount = maxMovieTextures * m_movieCombinedImageSamplerDescriptorCount;
+poolInfo.maxSets = maxMovieTextures;
+```
+
 ### 4.2 Allocation Strategy
 
 The system uses a **fixed allocation model** with no per-frame descriptor allocation:
 
-**Initialization** (`VulkanRenderer.cpp:100-107`):
+**Initialization**:
 ```cpp
 void VulkanRenderer::createDescriptorResources() {
     VulkanDescriptorLayouts::validateDeviceLimits(m_vulkanDevice->properties().limits);
@@ -256,7 +284,7 @@ void VulkanRenderer::createDescriptorResources() {
 }
 ```
 
-**Frame Creation** (`VulkanRenderer.cpp:109-131`):
+**Frame Creation**:
 ```cpp
 void VulkanRenderer::createFrames() {
     for (size_t i = 0; i < kFramesInFlight; ++i) {
@@ -266,27 +294,116 @@ void VulkanRenderer::createFrames() {
 }
 ```
 
-### 4.3 Device Limit Validation
+### 4.3 Pool Flags
 
-Before creating layouts, device limits are validated (`VulkanDescriptorLayouts.cpp:12-30`):
+All pools use `VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT`:
+- Not strictly needed for fixed ring allocation
+- Enables explicit set freeing for movie textures (which have dynamic lifetimes)
+
+---
+
+## 5. Sampler Ecosystem
+
+The renderer uses a cached sampler approach to reduce object creation overhead and ensure consistent sampler configurations.
+
+### 5.1 Sampler Key Structure
+
+Samplers are keyed by filter mode and address mode (`VulkanTextureManager.h`):
 ```cpp
-void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimits& limits) {
-    Assertion(limits.maxDescriptorSetSampledImages >= kMaxBindlessTextures, ...);
-    Assertion(limits.maxDescriptorSetStorageBuffers >= 1, ...);
-    Assertion(limits.maxDescriptorSetStorageBuffersDynamic >= 1, ...);
+struct SamplerKey {
+    vk::Filter filter = vk::Filter::eLinear;
+    vk::SamplerAddressMode address = vk::SamplerAddressMode::eRepeat;
+
+    bool operator==(const SamplerKey& other) const {
+        return filter == other.filter && address == other.address;
+    }
+};
+```
+
+### 5.2 Default Sampler Configuration
+
+Created at texture manager initialization (`VulkanTextureManager.cpp`):
+```cpp
+void VulkanTextureManager::createDefaultSampler()
+{
+    vk::SamplerCreateInfo samplerInfo;
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eRepeat;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.borderColor = vk::BorderColor::eIntOpaqueBlack;
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = vk::CompareOp::eAlways;
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    // Allow sampling all mip levels present in the bound image view.
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+
+    m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
 }
+```
+
+### 5.3 Sampler Cache
+
+Samplers are cached by a hash of their key properties:
+```cpp
+vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key) const
+{
+    const size_t hash = (static_cast<size_t>(key.filter) << 4) ^ static_cast<size_t>(key.address);
+    auto it = m_samplerCache.find(hash);
+    if (it != m_samplerCache.end()) {
+        return it->second.get();
+    }
+
+    vk::SamplerCreateInfo samplerInfo;
+    // ... configure sampler from key ...
+    auto sampler = m_device.createSamplerUnique(samplerInfo);
+    vk::Sampler handle = sampler.get();
+    m_samplerCache.emplace(hash, std::move(sampler));
+    return handle;
+}
+```
+
+### 5.4 YCbCr Samplers (Movie Path)
+
+Movie textures use immutable samplers with YCbCr conversion. Four configurations are created for all combinations of:
+- **Color space**: BT.601 or BT.709
+- **Color range**: Full or Narrow (ITU)
+
+```cpp
+convInfo.ycbcrModel = (colorspace == MovieColorSpace::BT709)
+    ? vk::SamplerYcbcrModelConversion::eYcbcr709
+    : vk::SamplerYcbcrModelConversion::eYcbcr601;
+convInfo.ycbcrRange = (range == MovieColorRange::Full)
+    ? vk::SamplerYcbcrRange::eItuFull
+    : vk::SamplerYcbcrRange::eItuNarrow;
+```
+
+The sampler is embedded as an immutable sampler in the descriptor set layout:
+```cpp
+binding.pImmutableSamplers = &immutableSampler;
 ```
 
 ---
 
-## 4. Descriptor Layout Definitions
+## 6. Descriptor Layout Definitions
 
-### 4.1 VulkanDescriptorLayouts Class
+### 6.1 VulkanDescriptorLayouts Class
 
-**Header** (`VulkanDescriptorLayouts.h:8-44`):
+**Header** (`VulkanDescriptorLayouts.h`):
 ```cpp
 class VulkanDescriptorLayouts {
 public:
+    explicit VulkanDescriptorLayouts(vk::Device device);
+
+    // Validate device limits before creating layouts - hard assert on failure
+    static void validateDeviceLimits(const vk::PhysicalDeviceLimits& limits);
+
     vk::DescriptorSetLayout globalSetLayout() const;
     vk::DescriptorSetLayout perDrawPushLayout() const;
     vk::PipelineLayout pipelineLayout() const;
@@ -302,9 +419,9 @@ public:
 };
 ```
 
-### 4.2 Model Push Constants
+### 6.2 Model Push Constants
 
-Defined in `VulkanModelTypes.h:21-50`:
+Defined in `VulkanModelTypes.h`:
 ```cpp
 struct ModelPushConstants {
     // Vertex heap addressing
@@ -333,13 +450,111 @@ struct ModelPushConstants {
 static_assert(sizeof(ModelPushConstants) == 64);
 ```
 
+Push constant size is validated against the Vulkan 1.4 guaranteed minimum:
+```cpp
+static_assert(sizeof(ModelPushConstants) <= 256,
+              "ModelPushConstants exceeds guaranteed minimum push constant size");
+static_assert(sizeof(ModelPushConstants) % 4 == 0,
+              "ModelPushConstants size must be multiple of 4");
+```
+
 ---
 
-## 5. Binding Patterns
+## 7. Movie Descriptor System
 
-### 5.1 Push Descriptor Updates (Standard Pipeline)
+The movie descriptor system provides a separate pipeline for YCbCr video playback, isolated from the main rendering paths.
 
-Used for per-draw 2D/UI rendering (`VulkanRenderer.cpp:884-901`):
+### 7.1 Architecture Overview
+
+Each movie texture has:
+- A dedicated descriptor set (allocated from the movie pool)
+- An immutable YCbCr sampler embedded in the descriptor set layout
+- A dedicated pipeline and pipeline layout per YCbCr configuration
+
+### 7.2 YCbCr Configuration Matrix
+
+Four configurations are created for all color space/range combinations:
+```cpp
+static constexpr uint32_t MOVIE_YCBCR_CONFIG_COUNT = 4;
+
+uint32_t ycbcrIndex(MovieColorSpace colorspace, MovieColorRange range) const {
+    return static_cast<uint32_t>(colorspace) * 2u + static_cast<uint32_t>(range);
+}
+```
+
+| Index | Color Space | Range |
+|-------|-------------|-------|
+| 0 | BT.601 | Narrow |
+| 1 | BT.601 | Full |
+| 2 | BT.709 | Narrow |
+| 3 | BT.709 | Full |
+
+### 7.3 Per-Configuration Resources
+
+Each configuration contains:
+```cpp
+struct YcbcrConfig {
+    vk::UniqueSamplerYcbcrConversion conversion;
+    vk::UniqueSampler sampler;
+    vk::UniqueDescriptorSetLayout setLayout;
+    vk::UniquePipelineLayout pipelineLayout;
+    vk::UniquePipeline pipeline;
+};
+```
+
+### 7.4 Movie Push Constants
+
+```cpp
+struct MoviePushConstants {
+    float screenSize[2];
+    float rectMin[2];
+    float rectMax[2];
+    float alpha;
+    float pad;
+};
+static_assert(sizeof(MoviePushConstants) == 32);
+```
+
+### 7.5 Descriptor Pool Sizing
+
+The movie pool accounts for implementations that require multiple descriptors per YCbCr combined image sampler:
+```cpp
+void VulkanMovieManager::createMovieDescriptorPool(uint32_t maxMovieTextures)
+{
+    vk::DescriptorPoolSize poolSize{};
+    poolSize.type = vk::DescriptorType::eCombinedImageSampler;
+    poolSize.descriptorCount = maxMovieTextures * m_movieCombinedImageSamplerDescriptorCount;
+
+    vk::DescriptorPoolCreateInfo poolInfo{};
+    poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+    poolInfo.maxSets = maxMovieTextures;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+
+    m_movieDescriptorPool = m_device.createDescriptorPoolUnique(poolInfo);
+}
+```
+
+### 7.6 Deferred Release
+
+Movie textures use deferred release to ensure GPU is done with the descriptor before freeing:
+```cpp
+const uint64_t retireSerial = std::max(m_safeRetireSerial, tex.lastUsedSerial);
+m_deferredReleases.enqueue(retireSerial, [t = std::move(tex), pool, dev]() mutable {
+    if (t.descriptorSet) {
+        dev.freeDescriptorSets(pool, t.descriptorSet);
+        t.descriptorSet = VK_NULL_HANDLE;
+    }
+});
+```
+
+---
+
+## 8. Binding Patterns
+
+### 8.1 Push Descriptor Updates (Standard Pipeline)
+
+Used for per-draw 2D/UI rendering:
 ```cpp
 vk::WriteDescriptorSet write{};
 write.dstBinding = 2;
@@ -355,11 +570,11 @@ cmd.pushDescriptorSetKHR(
     writes);
 ```
 
-### 5.2 Model Descriptor Binding
+### 8.2 Model Descriptor Binding
 
 Model shaders bind the pre-allocated model descriptor set with dynamic offsets.
 
-**Model Uniform Binding** (`VulkanRenderer.cpp:1309-1352`):
+**Model Uniform Binding**:
 ```cpp
 void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
     gr_buffer_handle handle, size_t offset, size_t size)
@@ -381,23 +596,23 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
 }
 ```
 
-### 5.3 Bindless Texture Binding
+### 8.3 Bindless Texture Binding
 
-**Slot Assignment** (`VulkanTextureManager.h:157`):
+**Slot Assignment**:
 ```cpp
 uint32_t getBindlessSlotIndex(int textureHandle);
 ```
 
-**Reserved Slots** (`VulkanConstants.h:14-18`):
+**Reserved Slots** (`VulkanConstants.h`):
 - Slot 0: Fallback (black texture, always valid)
 - Slot 1: Default base texture
 - Slot 2: Default normal texture
 - Slot 3: Default specular texture
 - Slots 4+: Dynamic texture assignments
 
-### 5.4 Global Descriptor Binding
+### 8.4 Global Descriptor Binding
 
-For deferred lighting G-buffer access (`VulkanRenderer.cpp:1929-1935`):
+For deferred lighting G-buffer access:
 ```cpp
 cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
     ctx.layout,         // deferred pipeline layout
@@ -408,11 +623,11 @@ cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
 
 ---
 
-## 6. Update Mechanisms and Batching
+## 9. Update Mechanisms and Batching
 
-### 6.1 Model Descriptor Sync Flow
+### 9.1 Model Descriptor Sync Flow
 
-Called at frame start after texture uploads (`VulkanRenderer.cpp:1497-1523`):
+Called at frame start after texture uploads:
 ```cpp
 void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frameIndex,
     vk::Buffer vertexHeapBuffer)
@@ -429,9 +644,9 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame, uint32_t frame
 }
 ```
 
-### 6.2 Batched Descriptor Updates
+### 9.2 Batched Descriptor Updates
 
-The `updateModelDescriptors` function batches all writes into a single `vkUpdateDescriptorSets` call (`VulkanRenderer.cpp:1375-1494`):
+The `updateModelDescriptors` function batches all writes into a single `vkUpdateDescriptorSets` call:
 
 **Vertex Heap (Binding 0)** - Always updated:
 ```cpp
@@ -478,9 +693,9 @@ else {
 }
 ```
 
-### 6.3 Bindless Cache Structure
+### 9.3 Bindless Cache Structure
 
-Per-frame cache to track descriptor contents (`VulkanRenderer.h:300-304`):
+Per-frame cache to track descriptor contents (`VulkanRenderer.h`):
 ```cpp
 struct ModelBindlessDescriptorCache {
     bool initialized = false;
@@ -489,9 +704,9 @@ struct ModelBindlessDescriptorCache {
 std::array<ModelBindlessDescriptorCache, kFramesInFlight> m_modelBindlessCache;
 ```
 
-### 6.4 Global Descriptor Updates
+### 9.4 Global Descriptor Updates
 
-Updated before deferred lighting passes (`VulkanRenderer.cpp:743-829`):
+Updated before deferred lighting passes:
 ```cpp
 void VulkanRenderer::bindDeferredGlobalDescriptors() {
     std::vector<vk::WriteDescriptorSet> writes;
@@ -514,11 +729,11 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
 
 ---
 
-## 7. Shader Integration
+## 10. Shader Integration
 
-### 7.1 Shader Module Management
+### 10.1 Shader Module Management
 
-**VulkanShaderManager** (`VulkanShaderManager.h:16-50`) loads SPIR-V modules and caches them by shader type and variant flags:
+**VulkanShaderManager** (`VulkanShaderManager.h`) loads SPIR-V modules and caches them by shader type and variant flags:
 
 ```cpp
 class VulkanShaderManager {
@@ -532,9 +747,7 @@ private:
 };
 ```
 
-### 7.2 Shader Type to Module Mapping
-
-Defined in `VulkanShaderManager.cpp:43-111`:
+### 10.2 Shader Type to Module Mapping
 
 | Shader Type | Vertex Module | Fragment Module |
 |-------------|---------------|-----------------|
@@ -548,10 +761,11 @@ Defined in `VulkanShaderManager.cpp:43-111`:
 | `SDR_TYPE_COPY` | `copy.vert.spv` | `copy.frag.spv` |
 | `SDR_TYPE_POST_PROCESS_TONEMAPPING` | `tonemapping.vert.spv` | `tonemapping.frag.spv` |
 | `SDR_TYPE_FLAT_COLOR` | `flat-color.vert.spv` | `flat-color.frag.spv` |
+| (Movie path) | `movie.vert.spv` | `movie.frag.spv` |
 
-### 7.3 Shader Module Loading
+### 10.3 Shader Module Loading
 
-Modules are loaded from either embedded data or filesystem (`VulkanShaderManager.cpp:133-177`):
+Modules are loaded from either embedded data or filesystem:
 ```cpp
 vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path) {
     // Try embedded file first
@@ -569,33 +783,81 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path) {
 
 ---
 
-## 8. Pipeline Layout Contracts
+## 11. Pipeline Layout Contracts
 
-### 8.1 Layout Specification
+### 11.1 Layout Specification
 
-Each shader type has a fixed contract (`VulkanLayoutContracts.cpp:28-62`):
+Each shader type has a fixed contract (`VulkanLayoutContracts.cpp`):
 
 ```cpp
 constexpr std::array<ShaderLayoutSpec, NUM_SHADER_TYPES> buildSpecs() {
+    using PL = PipelineLayoutKind;
+    using VI = VertexInputMode;
+
     return {
         makeSpec(SDR_TYPE_MODEL, "SDR_TYPE_MODEL", PL::Model, VI::VertexPulling),
         makeSpec(SDR_TYPE_EFFECT_PARTICLE, "SDR_TYPE_EFFECT_PARTICLE", PL::Standard, VI::VertexAttributes),
         makeSpec(SDR_TYPE_DEFERRED_LIGHTING, "SDR_TYPE_DEFERRED_LIGHTING", PL::Deferred, VI::VertexAttributes),
-        // ... 30+ shader types
+        // ... 33 shader types total
     };
 }
 ```
 
-### 8.2 Vertex Input Mode
+### 11.2 Vertex Input Mode
 
-Two modes are supported (`VulkanLayoutContracts.h:18-21`):
+Two modes are supported (`VulkanLayoutContracts.h`):
 
 - **VertexAttributes**: Traditional vertex input via `VkPipelineVertexInputStateCreateInfo`
 - **VertexPulling**: No vertex attributes; data fetched from SSBO in vertex shader
 
-### 8.3 Pipeline Creation
+```cpp
+enum class VertexInputMode {
+    VertexAttributes, // traditional vertex attributes from vertex_layout
+    VertexPulling     // no vertex attributes; fetch from buffers in shader
+};
+```
 
-The pipeline manager selects the correct layout based on shader type (`VulkanPipelineManager.cpp:480-490`):
+### 11.3 Complete Shader Layout Table
+
+| Shader Type | Pipeline Layout | Vertex Input |
+|-------------|-----------------|--------------|
+| `SDR_TYPE_MODEL` | Model | VertexPulling |
+| `SDR_TYPE_EFFECT_PARTICLE` | Standard | VertexAttributes |
+| `SDR_TYPE_EFFECT_DISTORTION` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_MAIN` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_BLUR` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_BLOOM_COMP` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_BRIGHTPASS` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_FXAA` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_FXAA_PREPASS` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_LIGHTSHAFTS` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_TONEMAPPING` | Standard | VertexAttributes |
+| `SDR_TYPE_DEFERRED_LIGHTING` | Deferred | VertexAttributes |
+| `SDR_TYPE_DEFERRED_CLEAR` | Standard | VertexAttributes |
+| `SDR_TYPE_VIDEO_PROCESS` | Standard | VertexAttributes |
+| `SDR_TYPE_PASSTHROUGH_RENDER` | Standard | VertexAttributes |
+| `SDR_TYPE_SHIELD_DECAL` | Standard | VertexAttributes |
+| `SDR_TYPE_BATCHED_BITMAP` | Standard | VertexAttributes |
+| `SDR_TYPE_DEFAULT_MATERIAL` | Standard | VertexAttributes |
+| `SDR_TYPE_INTERFACE` | Standard | VertexAttributes |
+| `SDR_TYPE_NANOVG` | Standard | VertexAttributes |
+| `SDR_TYPE_DECAL` | Standard | VertexAttributes |
+| `SDR_TYPE_SCENE_FOG` | Standard | VertexAttributes |
+| `SDR_TYPE_VOLUMETRIC_FOG` | Standard | VertexAttributes |
+| `SDR_TYPE_ROCKET_UI` | Standard | VertexAttributes |
+| `SDR_TYPE_COPY` | Standard | VertexAttributes |
+| `SDR_TYPE_COPY_WORLD` | Standard | VertexAttributes |
+| `SDR_TYPE_MSAA_RESOLVE` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_SMAA_EDGE` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_SMAA_BLENDING_WEIGHT` | Standard | VertexAttributes |
+| `SDR_TYPE_POST_PROCESS_SMAA_NEIGHBORHOOD_BLENDING` | Standard | VertexAttributes |
+| `SDR_TYPE_ENVMAP_SPHERE_WARP` | Standard | VertexAttributes |
+| `SDR_TYPE_IRRADIANCE_MAP_GEN` | Standard | VertexAttributes |
+| `SDR_TYPE_FLAT_COLOR` | Standard | VertexAttributes |
+
+### 11.4 Pipeline Creation
+
+The pipeline manager selects the correct layout based on shader type:
 ```cpp
 switch (layoutSpec.pipelineLayout) {
 case PipelineLayoutKind::Model:
@@ -612,18 +874,18 @@ case PipelineLayoutKind::Deferred:
 
 ---
 
-## 9. Synchronization and Frame Safety
+## 12. Descriptor Update Safety Rules
 
-### 9.1 Frame Ring Buffer
+### 12.1 Frame Ring Buffer
 
 Descriptor sets are rotated with the frame ring buffer:
 
-**Frame Storage** (`VulkanFrame.h:93`):
+**Frame Storage** (`VulkanFrame.h`):
 ```cpp
 vk::DescriptorSet m_modelDescriptorSet{};
 ```
 
-**Per-Frame Bindings** (`VulkanFrame.h:59-72`):
+**Per-Frame Bindings** (`VulkanFrame.h`):
 ```cpp
 DynamicUniformBinding modelUniformBinding{ gr_buffer_handle::invalid(), 0 };
 DynamicUniformBinding sceneUniformBinding{ gr_buffer_handle::invalid(), 0 };
@@ -636,11 +898,11 @@ void resetPerFrameBindings() {
 }
 ```
 
-### 9.2 Descriptor Update Timing
+### 12.2 Descriptor Update Timing
 
 Updates occur at specific points in the frame:
 
-1. **Frame Start** (`VulkanRenderer.cpp:318-325`):
+1. **Frame Start**:
    - Flush pending texture uploads
    - Sync model descriptors after uploads complete
    ```cpp
@@ -648,29 +910,61 @@ Updates occur at specific points in the frame:
    beginModelDescriptorSync(frame, frame.frameIndex(), vertexHeapBuffer);
    ```
 
-2. **Per-Draw** (`VulkanRenderer.cpp:1334-1349`):
+2. **Per-Draw**:
    - Model uniform binding updated only if buffer handle changes
    - Dynamic offset updated for each draw
 
-3. **Deferred Pass** (`VulkanRenderer.cpp:743-827`):
+3. **Deferred Pass**:
    - Global G-buffer descriptors updated before lighting
 
-### 9.3 Safe Serial Tracking
+### 12.3 Safe Serial Tracking
 
-Resources track their last-used serial for safe retirement (`VulkanTextureManager.h:116-117`):
+Resources track their last-used serial for safe retirement:
 ```cpp
 struct ResidentTexture {
     VulkanTexture gpu;
     uint32_t lastUsedFrame = 0;
-    uint64_t lastUsedSerial = 0;
+    uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
 };
+```
+
+### 12.4 Global Descriptor Set Safety
+
+**Observation**: The global descriptor set is shared across both in-flight frames and updated in-place before deferred lighting.
+
+**Constraint**: Updates must occur only when the GPU is not reading from the descriptors.
+
+**Mitigation**: Pipeline barriers ensure G-buffer textures are transitioned to `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` before the global descriptors are bound. The update happens at a safe point in the frame where no concurrent access is possible.
+
+### 12.5 Bindless Array Safety
+
+The bindless texture array avoids partially-bound descriptors by:
+1. Always writing all 1024 slots
+2. Filling unused slots with the fallback texture descriptor
+3. Ensuring fallback texture is always valid
+
+```cpp
+// Binding flags: none. The model bindless descriptor array is fully written each frame
+// (fallback-filled), so we do not rely on partially-bound descriptors.
+std::array<vk::DescriptorBindingFlags, 4> bindingFlags{};
+bindingFlags.fill({});
+```
+
+### 12.6 Movie Descriptor Safety
+
+Movie textures use explicit deferred release to prevent use-after-free:
+```cpp
+const uint64_t retireSerial = std::max(m_safeRetireSerial, tex.lastUsedSerial);
+m_deferredReleases.enqueue(retireSerial, [...] {
+    dev.freeDescriptorSets(pool, t.descriptorSet);
+});
 ```
 
 ---
 
-## 10. Issues and Improvement Areas
+## 13. Issues and Improvement Areas
 
-### 10.1 Fixed Allocation Model
+### 13.1 Fixed Allocation Model
 
 **Observation**: All descriptor sets are pre-allocated at renderer initialization.
 
@@ -683,17 +977,17 @@ struct ResidentTexture {
 - 1024 bindless texture slots x 2 frames = 2048 descriptors allocated regardless of actual texture count
 - No dynamic growth if texture count exceeds limit
 
-### 10.2 Global Descriptor Set Sharing
+### 13.2 Global Descriptor Set Sharing
 
-**Observation** (`VulkanRenderer.cpp:743-827`): The global descriptor set is shared across both in-flight frames and updated in-place before deferred lighting.
+**Observation**: The global descriptor set is shared across both in-flight frames and updated in-place before deferred lighting.
 
 **Risk**: Concurrent frame access if descriptor updates race with GPU reads.
 
 **Mitigation**: Pipeline barriers ensure G-buffer textures are transitioned to `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` before the global descriptors are bound.
 
-### 10.3 Conditional Descriptor Updates
+### 13.3 Conditional Descriptor Updates
 
-**Observation** (`VulkanRenderer.cpp:1334`): Model uniform descriptor is only updated when the buffer handle changes.
+**Observation**: Model uniform descriptor is only updated when the buffer handle changes.
 ```cpp
 if (frame.modelUniformBinding.bufferHandle != handle) {
     // Update descriptor
@@ -706,9 +1000,9 @@ if (frame.modelUniformBinding.bufferHandle != handle) {
 
 **Current Safety**: Buffer resizing in `VulkanBufferManager` creates a new VkBuffer, and the handle remains valid but the ensureBuffer call would update the descriptor.
 
-### 10.4 Alignment Validation
+### 13.4 Alignment Validation
 
-Dynamic offset alignment is checked at binding time (`VulkanRenderer.cpp:1318-1320`):
+Dynamic offset alignment is checked at binding time:
 ```cpp
 Assertion(alignment > 0, "minUniformBufferOffsetAlignment must be non-zero");
 Assertion((dynOffset % alignment) == 0, ...);
@@ -716,9 +1010,9 @@ Assertion((dynOffset % alignment) == 0, ...);
 
 **Gap**: Alignment is validated at bind time, not at allocation time. This could lead to runtime failures if allocations are misaligned.
 
-### 10.5 Partially Bound Descriptors
+### 13.5 Partially Bound Descriptors
 
-**Observation** (`VulkanDescriptorLayouts.cpp:131-134`):
+**Observation**:
 ```cpp
 // Binding flags: none. The model bindless descriptor array is fully written each frame
 // (fallback-filled), so we do not rely on partially-bound descriptors.
@@ -728,18 +1022,18 @@ bindingFlags.fill({});
 
 The system avoids `VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT` by always filling the entire bindless array with valid descriptors (fallback for unused slots).
 
-### 10.6 Push Descriptor Support
+### 13.6 Push Descriptor Support
 
-**Requirement** (`VulkanRenderer.cpp:103`):
+**Requirement**:
 ```cpp
 EnsurePushDescriptorSupport(m_vulkanDevice->features14());
 ```
 
 Push descriptors are a hard requirement. Devices without `VK_KHR_push_descriptor` cannot use this renderer.
 
-### 10.7 Missing Per-Scene Descriptor Set
+### 13.7 Missing Per-Scene Descriptor Set
 
-**Observation** (`VulkanRenderer.cpp:1359-1373`):
+**Observation**:
 ```cpp
 void VulkanRenderer::setSceneUniformBinding(...) {
     // For now, we just track the state in the frame.
@@ -754,25 +1048,28 @@ Scene uniforms are tracked but not yet wired to a descriptor set.
 
 ## File Summary
 
-| File | Purpose | Key Lines |
-|------|---------|-----------|
-| `VulkanDescriptorLayouts.h` | Layout and pool declarations | 8-44 |
-| `VulkanDescriptorLayouts.cpp` | Pool creation, layout definitions, allocation | 12-243 |
-| `VulkanConstants.h` | Bindless limits and reserved slots | 8-20 |
-| `VulkanFrame.h` | Per-frame descriptor set storage and bindings | 26-98 |
-| `VulkanRenderer.h` | Frame array, bindless cache structure | 256-304 |
-| `VulkanRenderer.cpp` | Allocation, sync, update logic | 100-131, 743-827, 1309-1523 |
-| `VulkanLayoutContracts.h` | Pipeline layout kind enum | 12-16 |
-| `VulkanLayoutContracts.cpp` | Shader-to-layout mapping | 28-62, 69-89 |
-| `VulkanPipelineManager.h` | Pipeline key and hasher | 17-85 |
-| `VulkanPipelineManager.cpp` | Pipeline creation with layout selection | 228-501 |
-| `VulkanShaderManager.h` | Shader module caching | 16-50 |
-| `VulkanShaderManager.cpp` | Module loading and type mapping | 21-177 |
-| `VulkanTextureBindings.h` | Draw-path texture descriptor API | 15-47 |
-| `VulkanTextureManager.h` | Bindless slot management | 98-290 |
-| `VulkanModelTypes.h` | Push constant structure | 21-50 |
-| `VulkanPhaseContexts.h` | Upload/Render context tokens | 15-78 |
-| `VulkanDebug.h` | Extended dynamic state caps | 14-19 |
+| File | Purpose |
+|------|---------|
+| `VulkanDescriptorLayouts.h` | Layout and pool declarations |
+| `VulkanDescriptorLayouts.cpp` | Pool creation, layout definitions, allocation |
+| `VulkanConstants.h` | Bindless limits and reserved slots |
+| `VulkanFrame.h` | Per-frame descriptor set storage and bindings |
+| `VulkanRenderer.h` | Frame array, bindless cache structure |
+| `VulkanRenderer.cpp` | Allocation, sync, update logic |
+| `VulkanLayoutContracts.h` | Pipeline layout kind enum, vertex input mode |
+| `VulkanLayoutContracts.cpp` | Shader-to-layout mapping (33 shader types) |
+| `VulkanPipelineManager.h` | Pipeline key and hasher |
+| `VulkanPipelineManager.cpp` | Pipeline creation with layout selection |
+| `VulkanShaderManager.h` | Shader module caching |
+| `VulkanShaderManager.cpp` | Module loading and type mapping |
+| `VulkanTextureBindings.h` | Draw-path texture descriptor API |
+| `VulkanTextureManager.h` | Bindless slot management, sampler cache |
+| `VulkanTextureManager.cpp` | Sampler creation, texture upload |
+| `VulkanModelTypes.h` | Push constant structure |
+| `VulkanMovieManager.h` | YCbCr configuration, movie texture types |
+| `VulkanMovieManager.cpp` | Movie descriptor pool, pipeline creation |
+| `VulkanPhaseContexts.h` | Upload/Render context tokens |
+| `VulkanDebug.h` | Extended dynamic state caps |
 
 ---
 
@@ -782,9 +1079,10 @@ Scene uniforms are tracked but not yet wired to a descriptor set.
 |-----------------|-----------|------|-------|----------|
 | `COMBINED_IMAGE_SAMPLER` (global) | 6 | 1 | 6 | Global G-buffer |
 | `COMBINED_IMAGE_SAMPLER` (bindless) | 1024 | 2 | 2048 | Model textures |
+| `COMBINED_IMAGE_SAMPLER` (movie) | Variable | N | Variable | Movie textures |
 | `UNIFORM_BUFFER` | 2 | Push | N/A | Standard per-draw |
 | `UNIFORM_BUFFER_DYNAMIC` | 1 | 2 | 2 | Model uniform |
 | `STORAGE_BUFFER` | 1 | 2 | 2 | Vertex heap |
 | `STORAGE_BUFFER_DYNAMIC` | 1 | 2 | 2 | Transform buffer |
 
-Total pre-allocated descriptors: 6 + 2048 + 2 + 2 + 2 = **2060 descriptors** across **3 descriptor sets**.
+Total pre-allocated descriptors (excluding movie): 6 + 2048 + 2 + 2 + 2 = **2060 descriptors** across **3 descriptor sets**.
