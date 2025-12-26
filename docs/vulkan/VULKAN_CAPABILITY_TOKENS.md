@@ -7,38 +7,121 @@ This document provides a practical guide to using capability tokens (`FrameCtx`,
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Token Types](#2-token-types)
-3. [Token Creation](#3-token-creation)
-4. [Token Consumption](#4-token-consumption)
-5. [Token Lifetime](#5-token-lifetime)
-6. [Common Patterns](#6-common-patterns)
-7. [Common Mistakes](#7-common-mistakes)
-8. [Integration with Legacy Code](#8-integration-with-legacy-code)
+2. [Quick Reference](#2-quick-reference)
+3. [Token Types](#3-token-types)
+4. [Token Creation](#4-token-creation)
+5. [Token Consumption](#5-token-consumption)
+6. [Token Lifetime](#6-token-lifetime)
+7. [Common Patterns](#7-common-patterns)
+8. [Common Mistakes](#8-common-mistakes)
+9. [Thread Safety](#9-thread-safety)
+10. [Error Handling and Debugging](#10-error-handling-and-debugging)
+11. [Integration with Legacy Code](#11-integration-with-legacy-code)
 
 ---
 
 ## 1. Overview
 
+### 1.1 What Are Capability Tokens?
+
 Capability tokens are move-only types that prove a specific phase or state is active. They encode invariants in the type system, making invalid operations compile-time errors rather than runtime bugs.
 
-**Design Philosophy**: See `docs/DESIGN_PHILOSOPHY.md` for the underlying principles.
+### 1.2 Why Use Capability Tokens?
+
+Traditional rendering code often relies on implicit global state and runtime assertions:
+
+```cpp
+// Traditional approach: relies on programmer discipline
+void drawSomething() {
+    assert(g_renderPassActive);  // Runtime check - fails in production
+    assert(g_commandBuffer != VK_NULL_HANDLE);  // Hope caller did setup
+    vkCmdDraw(g_commandBuffer, ...);
+}
+```
+
+Capability tokens make these invariants explicit and compiler-enforced:
+
+```cpp
+// Type-driven approach: invalid calls don't compile
+void drawSomething(const RenderCtx& ctx) {
+    // RenderCtx can only exist when render pass is active
+    // No assertion needed - the type IS the proof
+    ctx.cmd.draw(...);
+}
+```
+
+**Benefits:**
+- **Compile-time safety**: Invalid sequencing becomes a compile error, not a runtime crash
+- **Self-documenting**: Function signatures declare their requirements explicitly
+- **Refactoring confidence**: The compiler catches broken call sites when APIs change
+- **Zero runtime cost**: Tokens are typically zero-size or reference wrappers
+
+### 1.3 Design Philosophy
+
+See `docs/DESIGN_PHILOSOPHY.md` for the underlying principles, particularly the sections on:
+- **Typestate**: Tokens encode phase transitions (`Deck` -> `ShuffledDeck` pattern)
+- **Capability tokens**: Proof of phase validity without runtime checks
+- **Move semantics**: Approximating linear types to prevent use-after-transition
 
 **Key Principle**: If you hold a token, you have proof that the corresponding phase is active. No token, no operation.
 
-**Files**:
-- `code/graphics/vulkan/VulkanFrameCaps.h` - Frame and render tokens
-- `code/graphics/vulkan/VulkanPhaseContexts.h` - Upload and deferred lighting tokens
-- `code/graphics/vulkan/VulkanFrameFlow.h` - Recording frame token
+### 1.4 Source Files
+
+- `code/graphics/vulkan/VulkanFrameCaps.h` - Frame capability tokens and bound-frame wrappers
+- `code/graphics/vulkan/VulkanPhaseContexts.h` - Phase-specific tokens (upload, render, deferred)
+- `code/graphics/vulkan/VulkanFrameFlow.h` - Frame lifecycle tokens
 
 ---
 
-## 2. Token Types
+## 2. Quick Reference
 
-### 2.1 RecordingFrame
+### 2.1 Token Summary Table
 
-**Purpose**: Proof that a frame is currently recording commands
+| Token | Purpose | Move-Only | Created By | Typical Usage |
+|-------|---------|-----------|------------|---------------|
+| `RecordingFrame` | Frame is recording commands | Yes | `beginRecording()` | Internal frame management |
+| `InFlightFrame` | Frame submitted, awaiting GPU | Yes | `submitRecordedFrame()` | GPU synchronization |
+| `FrameCtx` | Active recording + renderer ref | No (copyable) | `currentFrameCtx()` | Most rendering operations |
+| `ModelBoundFrame` | Model UBO is bound | No | `requireModelBound()` | Model rendering |
+| `NanoVGBoundFrame` | NanoVG UBO is bound | No | `requireNanoVGBound()` | NanoVG rendering |
+| `DecalBoundFrame` | Decal UBOs are bound | No | `requireDecalBound()` | Decal rendering |
+| `RenderCtx` | Dynamic rendering is active | Yes | `ensureRenderingStarted()` | Draw commands |
+| `UploadCtx` | Upload phase is active | Yes | Internal (beginFrame) | Texture uploads |
+| `DeferredGeometryCtx` | Deferred geometry pass active | Yes | `deferredLightingBegin()` | Deferred rendering |
+| `DeferredLightingCtx` | Deferred lighting pass active | Yes | `deferredLightingEnd()` | Deferred rendering |
 
-**Structure** (`VulkanFrameFlow.h:18-37`):
+### 2.2 Token Hierarchy Diagram
+
+```
+Frame Lifecycle Tokens:
+    RecordingFrame (internal, move-only)
+        |-- FrameCtx (copyable reference wrapper)
+        |       |-- ModelBoundFrame (proof of model UBO binding)
+        |       |-- NanoVGBoundFrame (proof of NanoVG UBO binding)
+        |       |-- DecalBoundFrame (proof of decal UBO bindings)
+        |       +-- RenderCtx (move-only, created on demand)
+        |               +-- Used for draw operations
+        +-- InFlightFrame (internal, move-only)
+                +-- Created after submit, tracks GPU completion
+
+Phase-Specific Tokens:
+    UploadCtx (internal, frame start)
+        +-- Used for texture uploads
+
+    DeferredGeometryCtx (move-only, typestate)
+        +-- DeferredLightingCtx (move-only, typestate)
+                +-- Consumed by deferredLightingFinish()
+```
+
+---
+
+## 3. Token Types
+
+### 3.1 RecordingFrame
+
+**Purpose**: Proof that a frame is currently recording commands.
+
+**Definition** (`VulkanFrameFlow.h:18-37`):
 ```cpp
 struct RecordingFrame {
     RecordingFrame(const RecordingFrame&) = delete;  // Move-only
@@ -49,7 +132,8 @@ struct RecordingFrame {
     VulkanFrame& ref() const { return frame.get(); }
 
 private:
-    // Only VulkanRenderer may mint the recording token.
+    // Only VulkanRenderer may mint the recording token. This makes "recording is active"
+    // unforgeable by construction (DESIGN_PHILOSOPHY: capability tokens).
     RecordingFrame(VulkanFrame& f, uint32_t img) : frame(f), imageIndex(img) {}
 
     std::reference_wrapper<VulkanFrame> frame;
@@ -70,7 +154,32 @@ private:
 
 **Usage**: Internal to renderer; not exposed directly to engine code. Bridge functions in `VulkanGraphics.cpp` access it via `currentRecording()`.
 
-**Related Type: InFlightFrame** (`VulkanFrameFlow.h:39-51`):
+### 3.2 SubmitInfo
+
+**Purpose**: Encapsulates frame submission metadata for tracking in-flight work.
+
+**Definition** (`VulkanFrameFlow.h:11-16`):
+```cpp
+struct SubmitInfo {
+    uint32_t imageIndex;   // Swapchain image index
+    uint32_t frameIndex;   // Internal frame slot index (0 to MAX_FRAMES_IN_FLIGHT-1)
+    uint64_t serial;       // Monotonic frame counter for this session
+    uint64_t timeline;     // Timeline semaphore value for GPU synchronization
+};
+```
+
+**Properties**:
+- Plain data struct (copyable)
+- Created by `submitRecordedFrame()`
+- Stored in `InFlightFrame` for tracking GPU completion
+
+**Usage**: Internal bookkeeping for frame synchronization. The `timeline` value is used with Vulkan timeline semaphores to determine when the GPU has finished processing a frame.
+
+### 3.3 InFlightFrame
+
+**Purpose**: Represents a frame that has been submitted to the GPU and is awaiting completion.
+
+**Definition** (`VulkanFrameFlow.h:39-51`):
 ```cpp
 struct InFlightFrame {
     std::reference_wrapper<VulkanFrame> frame;
@@ -86,13 +195,19 @@ struct InFlightFrame {
     VulkanFrame& ref() const { return frame.get(); }
 };
 ```
-Represents a frame that has been submitted to the GPU and is awaiting completion. Created after `submitRecordedFrame()`.
 
-### 2.2 FrameCtx
+**Properties**:
+- Move-only
+- Created after `submitRecordedFrame()` returns `SubmitInfo`
+- Used to track when a frame's GPU work completes before reusing resources
 
-**Purpose**: Proof of active recording frame + renderer instance
+**Usage**: Internal to the frame management system. Tracks submitted frames until the GPU signals completion.
 
-**Structure** (`VulkanFrameCaps.h:13-27`):
+### 3.4 FrameCtx
+
+**Purpose**: Proof of active recording frame plus renderer instance reference.
+
+**Definition** (`VulkanFrameCaps.h:13-27`):
 ```cpp
 struct FrameCtx {
     VulkanRenderer& renderer;
@@ -113,24 +228,103 @@ private:
 
 **Properties**:
 - Copyable (holds references, not ownership)
-- Provides access to `VulkanFrame` and `VulkanRenderer`
+- Provides access to `VulkanFrame` via `frame()` and `VulkanRenderer` via `renderer`
 - Required for most rendering operations
+- Multiple instances can exist simultaneously (all reference the same frame)
 
 **Creation**: `currentFrameCtx()` helper in `VulkanGraphics.cpp`
 
 **Usage**: Passed to rendering functions that need frame access.
 
-**Related Types** (`VulkanFrameCaps.h:29-62`):
-- `ModelBoundFrame` - Wrapper proving model UBO is bound; created by `requireModelBound(FrameCtx)`
-- `NanoVGBoundFrame` - Wrapper proving NanoVG UBO is bound; created by `requireNanoVGBound(FrameCtx)`
+### 3.5 Bound Frame Wrappers
 
-These types extend `FrameCtx` with additional proof that specific uniform buffers are bound.
+These types extend `FrameCtx` with additional proof that specific uniform buffers are bound. They ensure that rendering operations requiring particular UBO bindings cannot be called without those bindings being active.
 
-### 2.3 RenderCtx
+#### ModelBoundFrame
 
-**Purpose**: Proof that dynamic rendering is active
+**Purpose**: Proof that the model uniform buffer (ModelData UBO) is bound.
 
-**Structure** (`VulkanPhaseContexts.h:36-48`):
+**Definition** (`VulkanFrameCaps.h:29-48`):
+```cpp
+struct ModelBoundFrame {
+    FrameCtx ctx;
+    vk::DescriptorSet modelSet;
+    DynamicUniformBinding modelUbo;
+    uint32_t transformDynamicOffset = 0;
+    size_t transformSize = 0;
+};
+
+inline ModelBoundFrame requireModelBound(FrameCtx ctx)
+{
+    Assertion(ctx.frame().modelUniformBinding.bufferHandle.isValid(),
+        "ModelData UBO binding not set; call gr_bind_uniform_buffer(ModelData) before rendering models");
+    Assertion(ctx.frame().modelDescriptorSet(), "Model descriptor set must be allocated");
+
+    return ModelBoundFrame{ ctx,
+        ctx.frame().modelDescriptorSet(),
+        ctx.frame().modelUniformBinding,
+        ctx.frame().modelTransformDynamicOffset,
+        ctx.frame().modelTransformSize };
+}
+```
+
+**Usage**: Required for model rendering. The `requireModelBound()` function validates bindings and returns the proof token.
+
+#### NanoVGBoundFrame
+
+**Purpose**: Proof that the NanoVG uniform buffer is bound.
+
+**Definition** (`VulkanFrameCaps.h:50-62`):
+```cpp
+struct NanoVGBoundFrame {
+    FrameCtx ctx;
+    BoundUniformBuffer nanovgUbo;
+};
+
+inline NanoVGBoundFrame requireNanoVGBound(FrameCtx ctx)
+{
+    Assertion(ctx.frame().nanovgData.handle.isValid(),
+        "NanoVGData UBO binding not set; call gr_bind_uniform_buffer(NanoVGData) before rendering NanoVG");
+    Assertion(ctx.frame().nanovgData.size > 0, "NanoVGData UBO binding must have non-zero size");
+
+    return NanoVGBoundFrame{ ctx, ctx.frame().nanovgData };
+}
+```
+
+**Usage**: Required for NanoVG-based UI rendering.
+
+#### DecalBoundFrame
+
+**Purpose**: Proof that both decal uniform buffers (DecalGlobals and DecalInfo) are bound.
+
+**Definition** (`VulkanFrameCaps.h:64-80`):
+```cpp
+struct DecalBoundFrame {
+    FrameCtx ctx;
+    BoundUniformBuffer globalsUbo;
+    BoundUniformBuffer infoUbo;
+};
+
+inline DecalBoundFrame requireDecalBound(FrameCtx ctx)
+{
+    Assertion(ctx.frame().decalGlobalsData.handle.isValid(),
+        "DecalGlobals UBO binding not set; call gr_bind_uniform_buffer(DecalGlobals) before rendering decals");
+    Assertion(ctx.frame().decalGlobalsData.size > 0, "DecalGlobals UBO binding must have non-zero size");
+    Assertion(ctx.frame().decalInfoData.handle.isValid(),
+        "DecalInfo UBO binding not set; call gr_bind_uniform_buffer(DecalInfo) before rendering decals");
+    Assertion(ctx.frame().decalInfoData.size > 0, "DecalInfo UBO binding must have non-zero size");
+
+    return DecalBoundFrame{ ctx, ctx.frame().decalGlobalsData, ctx.frame().decalInfoData };
+}
+```
+
+**Usage**: Required for rendering decals (shield impacts, weapon marks, etc.). Decals require two UBOs: global parameters and per-decal info.
+
+### 3.6 RenderCtx
+
+**Purpose**: Proof that dynamic rendering is active.
+
+**Definition** (`VulkanPhaseContexts.h:36-48`):
 ```cpp
 struct RenderCtx {
     vk::CommandBuffer cmd;
@@ -150,17 +344,18 @@ private:
 
 **Properties**:
 - Move-only (cannot be copied)
-- Contains active command buffer and render target info
+- Contains active command buffer (`cmd`) and render target info (`targetInfo`)
 - Created by `ensureRenderingStarted(const FrameCtx&)`
 - Valid only while render pass is active
+- `targetInfo` provides format information needed for pipeline selection
 
-**Usage**: Required for draw operations.
+**Usage**: Required for draw operations. The `cmd` member is used directly for Vulkan commands.
 
-### 2.4 UploadCtx
+### 3.7 UploadCtx
 
-**Purpose**: Proof that upload phase is active
+**Purpose**: Proof that upload phase is active.
 
-**Structure** (`VulkanPhaseContexts.h:15-32`):
+**Definition** (`VulkanPhaseContexts.h:15-32`):
 ```cpp
 struct UploadCtx {
     VulkanFrame& frame;
@@ -183,12 +378,19 @@ private:
 - Move-only
 - Created internally during frame start (in `beginFrame()`)
 - Used for texture upload operations via `flushPendingUploads(UploadCtx)`
+- `currentFrameIndex` identifies the frame slot for per-frame resource management
 
 **Usage**: Internal to texture upload system. Passed to `VulkanTextureManager::flushPendingUploads()`.
 
-### 2.5 Deferred Lighting Tokens
+### 3.8 Deferred Lighting Tokens
 
-**DeferredGeometryCtx** (`VulkanPhaseContexts.h:51-62`):
+These tokens implement a typestate pattern that enforces the correct call sequence for deferred lighting: `begin()` -> `end()` -> `finish()`.
+
+#### DeferredGeometryCtx
+
+**Purpose**: Proof that deferred geometry pass is active.
+
+**Definition** (`VulkanPhaseContexts.h:51-62`):
 ```cpp
 struct DeferredGeometryCtx {
     uint32_t frameIndex = 0;  // Used to validate token matches current frame
@@ -203,11 +405,16 @@ private:
     friend class VulkanRenderer;
 };
 ```
-- Proof that deferred geometry pass is active
+
+**Lifecycle**:
 - Created by `deferredLightingBegin(RecordingFrame&, bool)`
 - Consumed by `deferredLightingEnd(RecordingFrame&, DeferredGeometryCtx&&)`
 
-**DeferredLightingCtx** (`VulkanPhaseContexts.h:64-75`):
+#### DeferredLightingCtx
+
+**Purpose**: Proof that deferred lighting pass is active.
+
+**Definition** (`VulkanPhaseContexts.h:64-75`):
 ```cpp
 struct DeferredLightingCtx {
     uint32_t frameIndex = 0;  // Used to validate token matches current frame
@@ -222,25 +429,26 @@ private:
     friend class VulkanRenderer;
 };
 ```
-- Proof that deferred lighting pass is active
+
+**Lifecycle**:
 - Created by `deferredLightingEnd(RecordingFrame&, DeferredGeometryCtx&&)`
 - Consumed by `deferredLightingFinish(RecordingFrame&, DeferredLightingCtx&&, const vk::Rect2D&)`
 
-**Typestate Pattern**: Enforces call order: `begin()` -> `end()` -> `finish()`. The `frameIndex` member provides runtime validation that the token was created for the current frame.
+**Typestate Enforcement**: The `frameIndex` member provides runtime validation that the token was created for the current frame, catching bugs where tokens are accidentally held across frame boundaries.
 
 **See Also**: `docs/vulkan/VULKAN_DEFERRED_LIGHTING_FLOW.md` for complete deferred lighting pipeline documentation.
 
 ---
 
-## 3. Token Creation
+## 4. Token Creation
 
-### 3.1 RecordingFrame Creation
+### 4.1 RecordingFrame Creation
 
 **Function**: `VulkanRenderer::beginRecording()`
 
 **Called At**: Frame start, after acquiring swapchain image
 
-**Process** (`VulkanRenderer.cpp:471-479`):
+**Implementation** (`VulkanRenderer.cpp:472-479`):
 ```cpp
 graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 {
@@ -255,13 +463,13 @@ graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 
 **Key Point**: Only one `RecordingFrame` exists at a time (stored in `g_backend->recording` as `std::optional<RecordingFrame>`).
 
-### 3.2 FrameCtx Creation
+### 4.2 FrameCtx Creation
 
 **Function**: `currentFrameCtx()` helper
 
 **Location**: `VulkanGraphics.cpp:96-101`
 
-**Code**:
+**Implementation**:
 ```cpp
 FrameCtx currentFrameCtx()
 {
@@ -279,19 +487,13 @@ void someRenderingFunction() {
 }
 ```
 
-**Key Point**: Can be called multiple times; returns new `FrameCtx` each time (holds references). Asserts that `flip()` has been called to start the first recording.
+**Key Point**: Can be called multiple times; returns new `FrameCtx` each time (holds references). Asserts that `flip()` has been called to start recording.
 
-### 3.3 RenderCtx Creation
+### 4.3 RenderCtx Creation
 
 **Function**: `VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)`
 
-**Process** (`VulkanRenderer.cpp:495-500`):
-1. Validate that the `FrameCtx` belongs to this renderer
-2. Delegate to internal `ensureRenderingStartedRecording()` which:
-   - Begins dynamic rendering if not already active
-   - Returns `RenderCtx` with command buffer and render target info
-
-**Code**:
+**Implementation** (`VulkanRenderer.cpp:496-506`):
 ```cpp
 RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
 {
@@ -316,29 +518,50 @@ void drawSomething(const FrameCtx& frameCtx) {
 }
 ```
 
-**Lazy Initialization**: Render pass begins on first `ensureRenderingStarted()` call, not on target request.
+**Lazy Initialization**: Render pass begins on first `ensureRenderingStarted()` call, not on target request. This allows setup operations between target selection and actual drawing.
 
-### 3.4 UploadCtx Creation
+### 4.4 Bound Frame Creation
+
+**Functions**: `requireModelBound()`, `requireNanoVGBound()`, `requireDecalBound()`
+
+**Usage Pattern**:
+```cpp
+void renderModel(const FrameCtx& frameCtx) {
+    // Validate that ModelData UBO is bound and get proof token
+    auto bound = requireModelBound(frameCtx);
+
+    // Now we have compile-time proof that the UBO is bound
+    // bound.modelSet, bound.modelUbo, etc. are guaranteed valid
+}
+```
+
+**Key Point**: These functions perform runtime assertions at the boundary (validating UBO bindings) but return a token that serves as compile-time proof for downstream code.
+
+### 4.5 UploadCtx Creation
 
 **Function**: Internal, created during `beginFrame()`
 
 **Usage**: Passed to `flushPendingUploads(UploadCtx)` at frame start
 
-**Not Exposed**: Upload context is internal to texture upload system.
+**Not Exposed**: Upload context is internal to texture upload system; engine code does not interact with it directly.
 
 ---
 
-## 4. Token Consumption
+## 5. Token Consumption
 
-### 4.1 Token Requirements
+### 5.1 Token Requirements by Function
 
 **Functions Requiring FrameCtx**:
 - `ensureRenderingStarted(FrameCtx)` - Begin render pass
 - `setViewport(FrameCtx, ...)` - Set viewport
 - `setScissor(FrameCtx, ...)` - Set scissor
 - `pushDebugGroup(FrameCtx, ...)` - Debug labels
-- `beginSceneTexture(FrameCtx, ...)` - Scene rendering
+- `popDebugGroup(FrameCtx)` - End debug label
+- `beginSceneTexture(FrameCtx, ...)` - Begin HDR scene rendering
+- `endSceneTexture(FrameCtx, ...)` - End HDR scene rendering
+- `copySceneEffectTexture(FrameCtx)` - Copy scene for effects
 - `getBindlessTextureIndex(FrameCtx, ...)` - Texture lookup
+- `setBitmapRenderTarget(FrameCtx, ...)` - Set render-to-texture target
 
 **Functions Requiring RenderCtx**:
 - Draw operations (implicit - `RenderCtx` contains `cmd`)
@@ -346,13 +569,18 @@ void drawSomething(const FrameCtx& frameCtx) {
 - Descriptor binding (implicit - uses `RenderCtx.cmd`)
 
 **Functions Requiring RecordingFrame**:
-- `advanceFrame(RecordingFrame prev)` - Ends current frame, submits, begins next frame (takes by value, consumes)
+- `advanceFrame(RecordingFrame prev)` - Ends current frame, submits, begins next (takes by value, consumes)
 - `endFrame(RecordingFrame& rec)` - End command buffer recording (takes by reference)
 - `submitRecordedFrame(RecordingFrame& rec)` - Submit to GPU (takes by reference)
+- `deferredLightingBegin(RecordingFrame&, bool)` - Begin deferred geometry pass
+- `deferredLightingEnd(RecordingFrame&, DeferredGeometryCtx&&)` - Transition to lighting pass
+- `deferredLightingFinish(RecordingFrame&, DeferredLightingCtx&&, vk::Rect2D)` - Complete deferred lighting
 
-### 4.2 Token Validation
+### 5.2 Token Validation
 
-**FrameCtx Validation** (`VulkanRenderer.cpp:660-663`):
+Tokens are validated to ensure they belong to the correct renderer instance:
+
+**FrameCtx Validation Example**:
 ```cpp
 void VulkanRenderer::beginSceneTexture(const FrameCtx& ctx, bool enableHdrPipeline)
 {
@@ -362,9 +590,9 @@ void VulkanRenderer::beginSceneTexture(const FrameCtx& ctx, bool enableHdrPipeli
 }
 ```
 
-**Key Point**: Tokens are validated to ensure they come from the correct renderer instance. This pattern is used consistently across all `FrameCtx`-accepting methods.
+**Key Point**: This validation pattern is used consistently across all `FrameCtx`-accepting methods, preventing accidental cross-renderer token usage.
 
-### 4.3 Token Movement
+### 5.3 Token Movement
 
 **Move Semantics**: Most tokens are move-only to prevent duplication:
 
@@ -383,51 +611,73 @@ renderCtx.cmd.draw(...);  // Use directly
 renderCtx.cmd.draw(...);  // Same token, same pass
 ```
 
-**FrameCtx Exception**: `FrameCtx` is copyable because it holds references, not ownership.
+**FrameCtx Exception**: `FrameCtx` is copyable because it holds references, not ownership. This allows it to be passed to multiple functions within the same frame.
 
 ---
 
-## 5. Token Lifetime
+## 6. Token Lifetime
 
-### 5.1 RecordingFrame Lifetime
+### 6.1 RecordingFrame Lifetime
 
-**Created**: `beginRecording()` at frame start
-**Destroyed**: `advanceFrame()` consumes it, creates new one
+| Event | Description |
+|-------|-------------|
+| Created | `beginRecording()` at frame start |
+| Valid | Throughout command recording |
+| Destroyed | `advanceFrame()` consumes it, creates new one |
 
 **Scope**: Single frame recording session
 
 **Storage**: `std::optional<RecordingFrame> g_backend->recording`
 
-### 5.2 FrameCtx Lifetime
+### 6.2 FrameCtx Lifetime
 
-**Created**: `currentFrameCtx()` - can be called anytime during recording
-**Destroyed**: When `RecordingFrame` is consumed
+| Event | Description |
+|-------|-------------|
+| Created | `currentFrameCtx()` - can be called anytime during recording |
+| Valid | While `RecordingFrame` exists |
+| Destroyed | When scope ends (but underlying frame remains valid) |
 
-**Scope**: Valid only while `RecordingFrame` exists
+**Key Point**: Multiple `FrameCtx` instances can exist simultaneously (they're all just references to the same frame).
 
-**Key Point**: Multiple `FrameCtx` instances can exist simultaneously (they're just references).
+### 6.3 RenderCtx Lifetime
 
-### 5.3 RenderCtx Lifetime
+| Event | Description |
+|-------|-------------|
+| Created | `ensureRenderingStarted()` - begins render pass if needed |
+| Valid | While render pass is active |
+| Invalid | When render pass ends |
 
-**Created**: `ensureRenderingStarted()` - begins render pass if needed
-**Destroyed**: When render pass ends (target switch or frame end)
-
-**Scope**: Single render pass
-
-**Key Point**: Render pass ends automatically when:
-- Target switches (`requestSwapchainTarget()`, etc.)
+**Render pass ends automatically when**:
+- Target switches (`requestSwapchainTarget()`, `requestPostLdrTarget()`, etc.)
 - Frame ends (`endFrame()`)
 - Rendering suspended (`suspendRendering()`)
+- Different render target requested (`beginSceneTexture()`, `endSceneTexture()`)
 
-### 5.4 Common Lifetime Mistakes
+### 6.4 Deferred Lighting Token Lifetime
 
-**Mistake 1: Holding RenderCtx Across Target Switch**
+```
+deferredLightingBegin() --> DeferredGeometryCtx created
+        |
+        | (geometry rendering)
+        v
+deferredLightingEnd()   --> DeferredGeometryCtx consumed
+                        --> DeferredLightingCtx created
+        |
+        | (lighting calculations)
+        v
+deferredLightingFinish()--> DeferredLightingCtx consumed
+                        --> Back to normal rendering
+```
+
+### 6.5 Lifetime Pitfalls
+
+**Pitfall 1: Holding RenderCtx Across Target Switch**
 ```cpp
 // WRONG
 auto renderCtx = ensureRenderingStarted(frameCtx);
 // ... draw to swapchain ...
 requestPostLdrTarget();  // Ends render pass!
-renderCtx.cmd.draw(...);  // ERROR: Render pass ended, cmd invalid
+renderCtx.cmd.draw(...);  // ERROR: Render pass ended, cmd invalid for drawing
 ```
 
 **Fix**: Get new `RenderCtx` after target switch:
@@ -440,12 +690,12 @@ auto ldrCtx = ensureRenderingStarted(frameCtx);  // New token
 ldrCtx.cmd.draw(...);  // OK
 ```
 
-**Mistake 2: Holding FrameCtx After Frame End**
+**Pitfall 2: Holding FrameCtx After Frame End**
 ```cpp
 // WRONG
 auto ctx = currentFrameCtx();
 flip();  // Advances frame, destroys RecordingFrame
-ctx.frame();  // ERROR: RecordingFrame destroyed
+ctx.frame();  // ERROR: RecordingFrame destroyed, reference invalid
 ```
 
 **Fix**: Get new `FrameCtx` after frame advance:
@@ -458,66 +708,86 @@ ctx.frame();  // OK
 
 ---
 
-## 6. Common Patterns
+## 7. Common Patterns
 
-### 6.1 Pattern: Draw Operation
+### 7.1 Pattern: Basic Draw Operation
 
 ```cpp
 void drawModel(const FrameCtx& frameCtx, ModelData& model) {
     // Get render context (begins pass if needed)
     auto renderCtx = frameCtx.renderer.ensureRenderingStarted(frameCtx);
-    
-    // Get pipeline
+
+    // Get pipeline using target format info
     PipelineKey key = buildPipelineKey(renderCtx.targetInfo);
     vk::Pipeline pipeline = getPipeline(key);
-    
-    // Bind pipeline
+
+    // Bind pipeline and draw
     renderCtx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-    
-    // Draw
     renderCtx.cmd.drawIndexed(model.indexCount, 1, 0, 0, 0);
 }
 ```
 
-### 6.2 Pattern: Multiple Draws Same Pass
+### 7.2 Pattern: Multiple Draws in Same Pass
 
 ```cpp
 void drawMultipleModels(const FrameCtx& frameCtx, const std::vector<ModelData>& models) {
     // Get render context once
     auto renderCtx = frameCtx.renderer.ensureRenderingStarted(frameCtx);
-    
+
     // Bind pipeline once (if all models use same pipeline)
     vk::Pipeline pipeline = getPipeline(...);
     renderCtx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-    
-    // Draw all models (same pass)
+
+    // Draw all models in the same pass
     for (const auto& model : models) {
-        // ... set uniforms, bind descriptors ...
+        // ... set per-model uniforms, bind per-model descriptors ...
         renderCtx.cmd.drawIndexed(model.indexCount, 1, 0, 0, 0);
     }
 }
 ```
 
-### 6.3 Pattern: Target Switch
+### 7.3 Pattern: Target Switch
 
 ```cpp
 void renderSceneThenPostProcess(const FrameCtx& frameCtx) {
-    // Scene rendering
+    // Scene rendering to HDR target
     frameCtx.renderer.beginSceneTexture(frameCtx, true);
     auto sceneCtx = frameCtx.renderer.ensureRenderingStarted(frameCtx);
     // ... draw scene ...
-    
-    // Post-processing (target switch)
+
+    // Post-processing (target switch ends scene pass automatically)
     frameCtx.renderer.endSceneTexture(frameCtx, true);
-    // Scene pass ended automatically
-    
-    // Post-processing uses new target
+
+    // Post-processing uses new target - get new RenderCtx
     auto postCtx = frameCtx.renderer.ensureRenderingStarted(frameCtx);
-    // ... draw post-processing ...
+    // ... draw post-processing effects ...
 }
 ```
 
-### 6.4 Pattern: Deferred Lighting
+### 7.4 Pattern: Bound Frame Validation
+
+```cpp
+void renderModelWithValidation(const FrameCtx& frameCtx, ModelData& model) {
+    // Validate UBO bindings at the boundary
+    auto bound = requireModelBound(frameCtx);
+
+    // Now we have proof that ModelData UBO is bound
+    auto renderCtx = bound.ctx.renderer.ensureRenderingStarted(bound.ctx);
+
+    // Use the validated binding info
+    renderCtx.cmd.bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics,
+        layout,
+        0,
+        { bound.modelSet },
+        { bound.transformDynamicOffset }
+    );
+
+    renderCtx.cmd.drawIndexed(model.indexCount, 1, 0, 0, 0);
+}
+```
+
+### 7.5 Pattern: Deferred Lighting
 
 The deferred lighting API operates on `RecordingFrame&` directly, not `FrameCtx`. This is typically called from bridge functions in `VulkanGraphics.cpp`:
 
@@ -561,7 +831,7 @@ void gr_vulkan_deferred_lighting_finish()
 
 ---
 
-## 7. Common Mistakes
+## 8. Common Mistakes
 
 ### Mistake 1: Using Token After Move
 
@@ -598,7 +868,7 @@ renderCtx.cmd.draw(...);  // ERROR: Pass ended
 // ... setup ...
 auto renderCtx = ensureRenderingStarted(frameCtx);
 renderCtx.cmd.draw(...);  // Use immediately
-// Token destroyed, pass can end
+// Token goes out of scope naturally
 ```
 
 ### Mistake 3: Copying Move-Only Token
@@ -609,11 +879,12 @@ auto renderCtx = ensureRenderingStarted(frameCtx);
 auto ctx2 = renderCtx;  // ERROR: RenderCtx is move-only
 ```
 
-**Fix**: Move instead:
+**Fix**: Move instead (if transfer of ownership is intended):
 ```cpp
 // CORRECT
 auto renderCtx = ensureRenderingStarted(frameCtx);
 auto ctx2 = std::move(renderCtx);  // OK: Move semantics
+// renderCtx is now in moved-from state, do not use
 ```
 
 ### Mistake 4: Using Wrong Token Type
@@ -632,33 +903,147 @@ void drawSomething(const FrameCtx& frameCtx) {
 }
 ```
 
+### Mistake 5: Forgetting to Validate Bound Frames
+
+```cpp
+// WRONG: Assumes UBO is bound without proof
+void renderModel(const FrameCtx& frameCtx) {
+    auto& frame = frameCtx.frame();
+    // Using modelDescriptorSet() without validation
+    auto set = frame.modelDescriptorSet();  // May be invalid!
+}
+
+// CORRECT: Validate and get proof token
+void renderModel(const FrameCtx& frameCtx) {
+    auto bound = requireModelBound(frameCtx);  // Validates bindings
+    // bound.modelSet is guaranteed valid
+}
+```
+
+### Mistake 6: Deferred Lighting Call Order Violation
+
+```cpp
+// WRONG: Skipping phases
+gr_vulkan_deferred_lighting_begin(true);
+gr_vulkan_deferred_lighting_finish();  // ERROR: Missing end()
+
+// WRONG: Wrong order
+gr_vulkan_deferred_lighting_end();  // ERROR: No begin() called
+
+// CORRECT: Proper sequence
+gr_vulkan_deferred_lighting_begin(true);
+// ... geometry rendering ...
+gr_vulkan_deferred_lighting_end();
+// ... lighting calculations ...
+gr_vulkan_deferred_lighting_finish();
+```
+
 ---
 
-## 8. Integration with Legacy Code
+## 9. Thread Safety
 
-### 8.1 Bridge Pattern
+### 9.1 Single-Threaded Design
+
+The capability token system is designed for single-threaded rendering. All tokens are created, used, and destroyed on the main render thread.
+
+**Thread-Safety Guarantees**:
+- Tokens themselves are not thread-safe
+- Token creation, validation, and consumption must occur on the render thread
+- Global backend state (`g_backend`) is accessed only from the render thread
+
+### 9.2 Why Tokens Are Not Thread-Safe
+
+Move-only semantics prevent duplication within a single thread but do not prevent data races across threads. If multi-threaded command recording is needed in the future, the token system would need to be extended with:
+- Per-thread command buffer tokens
+- Thread-safe token minting
+- Synchronization primitives for phase transitions
+
+### 9.3 GPU Synchronization
+
+While the token system is single-threaded on the CPU, it coordinates with GPU work:
+
+- `InFlightFrame` tracks GPU completion via timeline semaphores
+- `SubmitInfo.timeline` is used to wait for previous frames before reusing resources
+- Frame resources are not reused until the GPU signals completion
+
+---
+
+## 10. Error Handling and Debugging
+
+### 10.1 Assertion-Based Validation
+
+Tokens use assertions to catch programming errors:
+
+```cpp
+Assertion(g_backend->recording.has_value(),
+    "Recording not started - flip() must be called first");
+```
+
+**Assertion Types**:
+- **Precondition checks**: Validate that required state exists before creating a token
+- **Cross-validation**: Ensure tokens belong to the correct renderer instance
+- **Binding validation**: Verify UBO bindings before creating bound-frame tokens
+
+### 10.2 Debugging Token Issues
+
+**Symptom: "Recording not started" assertion**
+- **Cause**: Attempting to use `currentFrameCtx()` or similar before `flip()` has been called
+- **Fix**: Ensure frame initialization is complete before rendering
+
+**Symptom: "FrameCtx from a different VulkanRenderer instance" assertion**
+- **Cause**: Token created from one renderer instance passed to another
+- **Fix**: Ensure consistent renderer usage (typically there's only one)
+
+**Symptom: "UBO binding not set" assertion**
+- **Cause**: Calling a `require*Bound()` function before binding the required uniform buffer
+- **Fix**: Call `gr_bind_uniform_buffer()` with the appropriate type before rendering
+
+**Symptom: "Deferred lighting end called without a matching begin" assertion**
+- **Cause**: Deferred lighting phases called out of order
+- **Fix**: Follow the correct sequence: `begin()` -> `end()` -> `finish()`
+
+### 10.3 Debug Labels
+
+Use debug groups to label rendering sections in GPU profilers (RenderDoc, etc.):
+
+```cpp
+auto ctx = currentFrameCtx();
+ctx.renderer.pushDebugGroup(ctx, "Model Rendering");
+// ... render models ...
+ctx.renderer.popDebugGroup(ctx);
+```
+
+### 10.4 Validation Layers
+
+When Vulkan validation layers are enabled, additional checks occur at the Vulkan API level. Token misuse that leads to invalid Vulkan calls (e.g., drawing outside a render pass) will trigger validation errors.
+
+---
+
+## 11. Integration with Legacy Code
+
+### 11.1 Bridge Pattern
 
 **File**: `code/graphics/vulkan/VulkanGraphics.cpp`
 
-**Pattern**: Legacy engine code doesn't use tokens directly. Bridge functions create tokens:
+**Pattern**: Legacy engine code doesn't use tokens directly. Bridge functions create tokens from global state:
 
 ```cpp
 void gr_vulkan_draw_something() {
     // Bridge: Create token from global state
     auto ctx = currentFrameCtx();
-    
+
     // Call token-based API
     drawSomething(ctx);
 }
 ```
 
-### 8.2 Global State Access
+### 11.2 Global State Access Functions
 
 **Functions**: `currentFrameCtx()`, `currentFrame()`, `currentRecording()`, `currentRenderer()`
 
 **Location**: `VulkanGraphics.cpp:76-101`
 
-**Code**:
+**Implementation**:
 ```cpp
 VulkanRenderer& currentRenderer()
 {
@@ -681,58 +1066,42 @@ RecordingFrame& currentRecording()
 }
 ```
 
-**Usage**: Called by legacy code paths that need frame access
+**Usage**: Called by legacy code paths that need frame access. These functions assert that recording is active, bridging legacy implicit state to explicit tokens.
 
-**Key Point**: These functions assert that recording is active. They bridge legacy implicit state to explicit tokens.
-
-### 8.3 Token Creation in Legacy Paths
+### 11.3 Token Creation in Legacy Paths
 
 **Pattern**: Legacy code calls `gr_vulkan_*` functions, which create tokens internally:
 
 ```cpp
-// Legacy code
+// Legacy engine code
 gr_vulkan_set_viewport(x, y, w, h);
 
-// Bridge function
+// Bridge function in VulkanGraphics.cpp
 void gr_vulkan_set_viewport(int x, int y, int w, int h) {
-    auto ctx = currentFrameCtx();  // Create token
+    auto ctx = currentFrameCtx();  // Create token from global state
     ctx.renderer.setViewport(ctx, viewport);  // Use token
 }
 ```
 
----
+### 11.4 Gradual Migration
 
-## Appendix: Token Hierarchy
+When adding new rendering features:
 
-```
-Frame Lifecycle Tokens:
-    RecordingFrame (internal, move-only)
-        └── FrameCtx (copyable reference wrapper)
-                ├── ModelBoundFrame (proof of model UBO binding)
-                ├── NanoVGBoundFrame (proof of NanoVG UBO binding)
-                └── RenderCtx (move-only, created on demand)
-                        └── Used for draw operations
-        └── InFlightFrame (internal, move-only)
-                └── Created after submit, tracks GPU completion
+1. **New code**: Use token-based APIs directly where possible
+2. **Legacy integration**: Use bridge functions that create tokens from global state
+3. **Validation**: The bridge functions' assertions catch misuse at runtime
 
-Phase-Specific Tokens:
-    UploadCtx (internal, frame start)
-        └── Used for texture uploads
-
-    DeferredGeometryCtx (move-only, typestate)
-        └── DeferredLightingCtx (move-only, typestate)
-                └── Consumed by deferredLightingFinish()
-```
+Over time, more code can be migrated to use tokens directly, improving compile-time safety.
 
 ---
 
 ## References
 
-- `code/graphics/vulkan/VulkanFrameCaps.h` - FrameCtx, ModelBoundFrame, NanoVGBoundFrame
+- `code/graphics/vulkan/VulkanFrameCaps.h` - FrameCtx, ModelBoundFrame, NanoVGBoundFrame, DecalBoundFrame
 - `code/graphics/vulkan/VulkanPhaseContexts.h` - UploadCtx, RenderCtx, DeferredGeometryCtx, DeferredLightingCtx
 - `code/graphics/vulkan/VulkanFrameFlow.h` - RecordingFrame, InFlightFrame, SubmitInfo
 - `code/graphics/vulkan/VulkanRenderer.h` - Token-consuming API declarations
 - `code/graphics/vulkan/VulkanRenderer.cpp` - Token-consuming API implementations
 - `code/graphics/vulkan/VulkanGraphics.cpp` - Token creation helpers and bridge functions
-- `docs/DESIGN_PHILOSOPHY.md` - Capability token principles
-
+- `docs/DESIGN_PHILOSOPHY.md` - Capability token principles and type-driven design philosophy
+- `docs/vulkan/VULKAN_DEFERRED_LIGHTING_FLOW.md` - Deferred lighting pipeline documentation
