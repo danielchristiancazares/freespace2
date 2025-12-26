@@ -644,7 +644,7 @@ Use this checklist when reviewing performance-critical code or diagnosing issues
 
 | Document | Topic |
 |----------|-------|
-| `VULKAN_ARCHITECTURE.md` | High-level renderer structure |
+| `VULKAN_ARCHITECTURE_OVERVIEW.md` | High-level renderer structure |
 | `VULKAN_SYNCHRONIZATION.md` | Fences, semaphores, barriers |
 | `VULKAN_DESCRIPTOR_SETS.md` | Descriptor layout and binding strategy |
 | `VULKAN_PIPELINE_MANAGEMENT.md` | Pipeline key, caching details |

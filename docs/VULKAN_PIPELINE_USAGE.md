@@ -6,7 +6,7 @@ This document provides practical guidance for constructing pipeline keys, bindin
 
 **Related Documentation**:
 - [Pipeline Management](VULKAN_PIPELINE_MANAGEMENT.md) - Pipeline architecture, lifecycle, and state matrix
-- [Vulkan Architecture](VULKAN_ARCHITECTURE.md) - Overall renderer architecture
+- [Vulkan Architecture](VULKAN_ARCHITECTURE_OVERVIEW.md) - Overall renderer architecture
 - [Render Pass Structure](VULKAN_RENDER_PASS_STRUCTURE.md) - Dynamic rendering details
 - [Descriptor Sets](VULKAN_DESCRIPTOR_SETS.md) - Descriptor set management
 

@@ -730,7 +730,7 @@ Located in `code/graphics/shaders/`:
 
 ### Related Documentation
 
-- `VULKAN_ARCHITECTURE.md` - Overall Vulkan renderer architecture
+- `VULKAN_ARCHITECTURE_OVERVIEW.md` - Overall Vulkan renderer architecture
 - `VULKAN_RENDER_PASS_STRUCTURE.md` - Render pass organization
 - `VULKAN_SYNCHRONIZATION.md` - Synchronization primitives
 - `VULKAN_UNIFORM_BINDINGS.md` - Descriptor binding conventions

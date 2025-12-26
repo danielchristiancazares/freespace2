@@ -41,12 +41,12 @@ Before implementing this plan, review the following project documentation:
 | Document | Key Concepts |
 |----------|--------------|
 | `docs/DESIGN_PHILOSOPHY.md` | Capability tokens, typestate, state-as-location, boundary-only conditionals |
-| `docs/vulkan/VULKAN_RENDER_PASS_STRUCTURE.md` | Dynamic rendering, `ActivePass` RAII guard, target typestates, G-buffer specification |
-| `docs/vulkan/VULKAN_SYNCHRONIZATION.md` | Synchronization2 barriers, `stageAccessForLayout()`, layout transitions, frames-in-flight model |
-| `docs/vulkan/VULKAN_DESCRIPTOR_SETS.md` | Push descriptors, descriptor set management |
-| `docs/vulkan/VULKAN_TEXTURE_BINDING.md` | Bindless textures, sampler cache, descriptor validity rules |
-| `docs/vulkan/VULKAN_HUD_RENDERING.md` | HUD/UI ordering, clip/scissor invariants, rendering after post-processing |
-| `docs/vulkan/VULKAN_POST_PROCESSING.md` | Post-processing pipeline stages, bloom, tonemapping, FXAA/SMAA |
+| `docs/VULKAN_RENDER_PASS_STRUCTURE.md` | Dynamic rendering, `ActivePass` RAII guard, target typestates, G-buffer specification |
+| `docs/VULKAN_SYNCHRONIZATION.md` | Synchronization2 barriers, `stageAccessForLayout()`, layout transitions, frames-in-flight model |
+| `docs/VULKAN_DESCRIPTOR_SETS.md` | Push descriptors, descriptor set management |
+| `docs/VULKAN_TEXTURE_BINDING.md` | Bindless textures, sampler cache, descriptor validity rules |
+| `docs/VULKAN_HUD_RENDERING.md` | HUD/UI ordering, clip/scissor invariants, rendering after post-processing |
+| `docs/VULKAN_POST_PROCESSING.md` | Post-processing pipeline stages, bloom, tonemapping, FXAA/SMAA |
 
 ### External References
 
@@ -128,7 +128,7 @@ DLSS Super Resolution requires:
 ### Resolution Invariants
 
 **Invariant A (HUD Resolution):**
-HUD/UI must always render at DisplayExtent. UI coordinates, scissor rects, and text rendering are never affected by RenderExtent. Per `docs/vulkan/VULKAN_HUD_RENDERING.md`, HUD rendering occurs after post-processing on `SwapchainNoDepthTarget`.
+HUD/UI must always render at DisplayExtent. UI coordinates, scissor rects, and text rendering are never affected by RenderExtent. Per `docs/VULKAN_HUD_RENDERING.md`, HUD rendering occurs after post-processing on `SwapchainNoDepthTarget`.
 
 **Invariant B (Disabled Behavior):**
 When DLSS is disabled, `RenderExtent == DisplayExtent`. The frame flow is identical to the current implementation with no observable behavior change.
@@ -154,7 +154,7 @@ Internal logic must not branch on "does DLSS exist?" via null checks or optional
 
 ## Current Vulkan Frame Structure
 
-The Vulkan renderer architecture is documented in detail in `docs/vulkan/VULKAN_RENDER_PASS_STRUCTURE.md` and `docs/vulkan/VULKAN_ARCHITECTURE.md`. The following summarizes the integration points relevant to DLSS.
+The Vulkan renderer architecture is documented in detail in `docs/VULKAN_RENDER_PASS_STRUCTURE.md` and `docs/VULKAN_ARCHITECTURE_OVERVIEW.md`. The following summarizes the integration points relevant to DLSS.
 
 ### Architecture Components
 
@@ -827,7 +827,7 @@ matrix4 applyJitter(const matrix4& proj, vec2d jitterPx, vk::Extent2D extent) {
 
 - HUD renders at DisplayExtent (after DLSS upscaling and post-processing)
 - HUD elements are not temporally accumulated
-- Consistent with `docs/vulkan/VULKAN_HUD_RENDERING.md`: HUD renders on `SwapchainNoDepthTarget` after post-processing
+- Consistent with `docs/VULKAN_HUD_RENDERING.md`: HUD renders on `SwapchainNoDepthTarget` after post-processing
 
 ### Transparency Policy
 
@@ -880,7 +880,7 @@ void VulkanRenderer::evaluateDlss(vk::CommandBuffer cmd) {
 
 ### Layout Transitions
 
-All transitions follow the synchronization2 discipline from `docs/vulkan/VULKAN_SYNCHRONIZATION.md`, using `stageAccessForLayout()` from `VulkanRenderingSession.cpp`:
+All transitions follow the synchronization2 discipline from `docs/VULKAN_SYNCHRONIZATION.md`, using `stageAccessForLayout()` from `VulkanRenderingSession.cpp`:
 
 **Before DLSS Evaluate:**
 
@@ -1081,7 +1081,7 @@ int8_t lodBiasToQuantized(float lodBias) {
 
 ### Descriptor Validity
 
-Per `docs/vulkan/VULKAN_TEXTURE_BINDING.md`, all descriptor slots must remain valid. LOD bias changes require:
+Per `docs/VULKAN_TEXTURE_BINDING.md`, all descriptor slots must remain valid. LOD bias changes require:
 
 1. New sampler creation with updated LOD bias (via existing sampler cache)
 2. Descriptor set update to reference new sampler

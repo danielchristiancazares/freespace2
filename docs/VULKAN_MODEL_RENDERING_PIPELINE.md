@@ -75,7 +75,7 @@ Before reading this document, you should be familiar with:
 
 | Document | Topics Covered |
 |----------|----------------|
-| `VULKAN_ARCHITECTURE.md` | Overall Vulkan renderer structure |
+| `VULKAN_ARCHITECTURE_OVERVIEW.md` | Overall Vulkan renderer structure |
 | `VULKAN_DESCRIPTOR_SETS.md` | Descriptor set organization and binding strategy |
 | `VULKAN_TEXTURE_RESIDENCY.md` | Bindless texture system and residency management |
 | `VULKAN_UNIFORM_BINDINGS.md` | Uniform buffer layout and alignment |

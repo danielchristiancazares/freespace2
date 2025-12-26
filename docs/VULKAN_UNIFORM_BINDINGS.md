@@ -925,8 +925,8 @@ struct fixed {
 - `code/graphics/shaders/decal_common.glsl` - Decal shader common code
 
 ### Related Documentation
-- `docs/vulkan/VULKAN_UNIFORM_ALIGNMENT.md` - Detailed alignment rules and examples
-- `docs/vulkan/VULKAN_PIPELINE_MANAGEMENT.md` - Pipeline creation and caching
-- `docs/vulkan/VULKAN_DEFERRED_LIGHTING_FLOW.md` - Deferred lighting architecture
-- `docs/vulkan/VULKAN_DESCRIPTOR_SETS.md` - Descriptor set management
-- `docs/vulkan/VULKAN_MODEL_RENDERING_PIPELINE.md` - Model rendering details
+- `docs/VULKAN_UNIFORM_ALIGNMENT.md` - Detailed alignment rules and examples
+- `docs/VULKAN_PIPELINE_MANAGEMENT.md` - Pipeline creation and caching
+- `docs/VULKAN_DEFERRED_LIGHTING_FLOW.md` - Deferred lighting architecture
+- `docs/VULKAN_DESCRIPTOR_SETS.md` - Descriptor set management
+- `docs/VULKAN_MODEL_RENDERING_PIPELINE.md` - Model rendering details
