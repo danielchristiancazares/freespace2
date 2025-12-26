@@ -4,7 +4,6 @@
 
 #include "globalincs/version.h"
 #include "graphics/2d.h"
-#include "libs/renderdoc/renderdoc.h"
 #include "cmdline/cmdline.h"
 #include "mod_table/mod_table.h"
 
@@ -362,9 +361,6 @@ VulkanDevice::~VulkanDevice() {
 }
 
 bool VulkanDevice::initialize() {
-	// Load the RenderDoc API if available before doing anything with Vulkan
-	renderdoc::loadApi();
-
 	if (!initDisplayDevice()) {
 		return false;
 	}
