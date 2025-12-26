@@ -46,6 +46,7 @@ public:
   // Target introspection (used to pick the correct pre-deferred capture source).
   bool targetIsSceneHdr() const;
   bool targetIsSwapchain() const;
+  const char* debugTargetName() const;
   void beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive); // selects gbuffer target
   // Select the deferred G-buffer target without modifying clear/load ops (used by decal pass restore).
   void requestDeferredGBufferTarget();

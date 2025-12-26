@@ -1410,6 +1410,34 @@ void gr_vulkan_render_primitives(material *material_info, primitive_type prim_ty
   // Use the shader type requested by the material
   shader_type shaderType = material_info->get_shader_type();
 
+  if (Cmdline_vk_hud_debug) {
+    const bool isUiShader = (shaderType == SDR_TYPE_INTERFACE || shaderType == SDR_TYPE_DEFAULT_MATERIAL ||
+                             shaderType == SDR_TYPE_NANOVG || shaderType == SDR_TYPE_ROCKET_UI);
+    if (isUiShader) {
+      auto* session = ctxBase.renderer.renderingSession();
+      const char* targetName = session ? session->debugTargetName() : "no-session";
+      const auto clipScissor = createClipScissor();
+
+      const bool zeroScissor = (clipScissor.extent.width == 0 || clipScissor.extent.height == 0);
+      const bool drawingToScreen = (gr_screen.rendering_to_texture == -1);
+      const bool nonSwapchainNonSceneTarget =
+        drawingToScreen && session && !session->targetIsSwapchain() && !session->targetIsSceneHdr();
+
+      if (zeroScissor || nonSwapchainNonSceneTarget) {
+        mprintf(("VK_HUD_DEBUG: ui draw state anomaly (shaderType=%d target=%s)\n", static_cast<int>(shaderType),
+                 targetName));
+        mprintf(("  rendering_to_texture=%d custom_size=%d\n", gr_screen.rendering_to_texture,
+                 gr_screen.custom_size ? 1 : 0));
+        mprintf(("  clip: off=(%d,%d) size=(%d,%d) max=(%d,%d)\n", gr_screen.offset_x, gr_screen.offset_y,
+                 gr_screen.clip_width, gr_screen.clip_height, gr_screen.max_w, gr_screen.max_h));
+        mprintf(("  scissor: off=(%d,%d) ext=(%u,%u)\n", clipScissor.offset.x, clipScissor.offset.y,
+                 clipScissor.extent.width, clipScissor.extent.height));
+        mprintf(("  rt: colorFormat=%d depthFormat=%d attachments=%u\n", static_cast<int>(rt.colorFormat),
+                 static_cast<int>(rt.depthFormat), rt.colorAttachmentCount));
+      }
+    }
+  }
+
   // Instrumentation: detect shader/layout mismatches that will cause validation warnings
   // DEFAULT_MATERIAL shader expects vertex color at location 1
   if (shaderType == SDR_TYPE_DEFAULT_MATERIAL) {
