@@ -1828,6 +1828,13 @@ uint32_t VulkanTextureManager::renderTargetMipLevels(int baseFrameHandle) const
   return it->second.mipLevels;
 }
 
+vk::Image VulkanTextureManager::renderTargetImage(int baseFrameHandle) const
+{
+  auto it = m_residentTextures.find(baseFrameHandle);
+  Assertion(it != m_residentTextures.end(), "renderTargetImage called for unknown texture handle %d", baseFrameHandle);
+  return it->second.gpu.image.get();
+}
+
 vk::ImageView VulkanTextureManager::renderTargetAttachmentView(int baseFrameHandle, int face) const
 {
   auto it = m_renderTargets.find(baseFrameHandle);
@@ -1850,6 +1857,41 @@ void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer 
   auto& tex = it->second.gpu;
 
   const auto newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+  if (tex.currentLayout == newLayout) {
+	return;
+  }
+
+  vk::ImageMemoryBarrier2 barrier{};
+  const auto src = stageAccessForLayout(tex.currentLayout);
+  const auto dst = stageAccessForLayout(newLayout);
+  barrier.srcStageMask = src.stageMask;
+  barrier.srcAccessMask = src.accessMask;
+  barrier.dstStageMask = dst.stageMask;
+  barrier.dstAccessMask = dst.accessMask;
+  barrier.oldLayout = tex.currentLayout;
+  barrier.newLayout = newLayout;
+  barrier.image = tex.image.get();
+  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+  barrier.subresourceRange.baseMipLevel = 0;
+  barrier.subresourceRange.levelCount = tex.mipLevels;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount = tex.layers;
+
+  vk::DependencyInfo dep{};
+  dep.imageMemoryBarrierCount = 1;
+  dep.pImageMemoryBarriers = &barrier;
+  cmd.pipelineBarrier2(dep);
+
+  tex.currentLayout = newLayout;
+}
+
+void VulkanTextureManager::transitionRenderTargetToTransferDst(vk::CommandBuffer cmd, int baseFrameHandle)
+{
+  auto it = m_residentTextures.find(baseFrameHandle);
+  Assertion(it != m_residentTextures.end(), "transitionRenderTargetToTransferDst called for unknown texture handle %d", baseFrameHandle);
+  auto& tex = it->second.gpu;
+
+  const auto newLayout = vk::ImageLayout::eTransferDstOptimal;
   if (tex.currentLayout == newLayout) {
 	return;
   }

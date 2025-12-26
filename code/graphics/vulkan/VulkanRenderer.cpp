@@ -341,10 +341,66 @@ void VulkanRenderer::beginFrame(VulkanFrame& frame, uint32_t imageIndex) {
 void VulkanRenderer::endFrame(graphics::vulkan::RecordingFrame& rec) {
   vk::CommandBuffer cmd = rec.cmd();
 
+  updateSavedScreenCopy(rec);
+
   // Terminate any active rendering and transition swapchain for present
   m_renderingSession->endFrame(cmd, rec.imageIndex);
 
   cmd.end();
+}
+
+void VulkanRenderer::updateSavedScreenCopy(graphics::vulkan::RecordingFrame& rec)
+{
+  if (!m_renderingSession || !m_textureManager || !m_vulkanDevice) {
+	return;
+  }
+
+  if ((m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
+	return;
+  }
+
+  const auto extent = m_vulkanDevice->swapchainExtent();
+  if (extent.width == 0 || extent.height == 0) {
+	return;
+  }
+
+  if (m_savedScreen.hasHandle()) {
+	const auto savedExtent = m_savedScreen.extent();
+	if (savedExtent.width != extent.width || savedExtent.height != extent.height) {
+	  const int handle = m_savedScreen.handle();
+	  if (handle >= 0) {
+		bm_release(handle, 1);
+	  }
+	  m_savedScreen.reset();
+	}
+  }
+
+  if (!m_savedScreen.hasHandle()) {
+	const int handle = bm_make_render_target(static_cast<int>(extent.width),
+	  static_cast<int>(extent.height),
+	  BMP_FLAG_RENDER_TARGET_DYNAMIC);
+	if (handle < 0) {
+	  return;
+	}
+	m_savedScreen.setTracking(handle, extent);
+  }
+
+  if (m_savedScreen.isFrozen()) {
+	return;
+  }
+
+  const int handle = m_savedScreen.handle();
+  if (handle < 0 || !m_textureManager->hasRenderTarget(handle)) {
+	m_savedScreen.reset();
+	return;
+  }
+
+  vk::CommandBuffer cmd = rec.cmd();
+  if (!cmd) {
+	return;
+  }
+
+  m_renderingSession->captureSwapchainColorToRenderTarget(cmd, rec.imageIndex, handle);
 }
 
 graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulkan::RecordingFrame& rec) {
@@ -3419,6 +3475,44 @@ void VulkanRenderer::zbufferClear(int mode) {
 	gr_global_zbuffering = 0;
 	m_renderingSession->setDepthTest(false);
   }
+}
+
+int VulkanRenderer::saveScreen()
+{
+  if (m_savedScreen.isFrozen()) {
+	return -1;
+  }
+
+  if (!m_savedScreen.hasHandle()) {
+	return -1;
+  }
+
+  m_savedScreen.freeze();
+  return m_savedScreen.handle();
+}
+
+void VulkanRenderer::freeScreen(int handle)
+{
+  if (!m_savedScreen.hasHandle()) {
+	return;
+  }
+
+  if (handle >= 0) {
+	Assertion(handle == m_savedScreen.handle(),
+	  "freeScreen called with handle %d but saved screen handle is %d",
+	  handle,
+	  m_savedScreen.handle());
+  }
+
+  m_savedScreen.unfreeze();
+}
+
+int VulkanRenderer::frozenScreenHandle() const
+{
+  if (!m_savedScreen.isFrozen()) {
+	return -1;
+  }
+  return m_savedScreen.handle();
 }
 
 void VulkanRenderer::createDeferredLightingResources() {

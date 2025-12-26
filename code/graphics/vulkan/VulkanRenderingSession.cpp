@@ -301,6 +301,84 @@ void VulkanRenderingSession::captureSwapchainColorToSceneCopy(vk::CommandBuffer 
   transitionSwapchainTo(vk::ImageLayout::eColorAttachmentOptimal);
 }
 
+void VulkanRenderingSession::captureSwapchainColorToRenderTarget(vk::CommandBuffer cmd,
+  uint32_t imageIndex,
+  int renderTargetHandle)
+{
+  if ((m_device.swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc) == vk::ImageUsageFlags{}) {
+	return;
+  }
+
+  if (!m_textures.hasRenderTarget(renderTargetHandle)) {
+	return;
+  }
+
+  const auto swapExtent = m_device.swapchainExtent();
+  const auto targetExtent = m_textures.renderTargetExtent(renderTargetHandle);
+  if (swapExtent.width != targetExtent.width || swapExtent.height != targetExtent.height) {
+	return;
+  }
+
+  Assertion(imageIndex < m_swapchainLayouts.size(),
+	"captureSwapchainColorToRenderTarget: imageIndex %u out of bounds (swapchain has %zu images)",
+	imageIndex, m_swapchainLayouts.size());
+
+  endActivePass();
+
+  auto transitionSwapchainTo = [&](vk::ImageLayout newLayout) {
+	const auto oldLayout = m_swapchainLayouts[imageIndex];
+	if (oldLayout == newLayout) {
+	  return;
+	}
+
+	vk::ImageMemoryBarrier2 barrier{};
+	const auto src = stageAccessForLayout(oldLayout);
+	const auto dst = stageAccessForLayout(newLayout);
+	barrier.srcStageMask = src.stageMask;
+	barrier.srcAccessMask = src.accessMask;
+	barrier.dstStageMask = dst.stageMask;
+	barrier.dstAccessMask = dst.accessMask;
+	barrier.oldLayout = oldLayout;
+	barrier.newLayout = newLayout;
+	barrier.image = m_device.swapchainImage(imageIndex);
+	barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.layerCount = 1;
+
+	vk::DependencyInfo dep{};
+	dep.imageMemoryBarrierCount = 1;
+	dep.pImageMemoryBarriers = &barrier;
+	cmd.pipelineBarrier2(dep);
+
+	m_swapchainLayouts[imageIndex] = newLayout;
+  };
+
+  transitionSwapchainTo(vk::ImageLayout::eTransferSrcOptimal);
+  m_textures.transitionRenderTargetToTransferDst(cmd, renderTargetHandle);
+
+  vk::ImageCopy region{};
+  region.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.srcSubresource.mipLevel = 0;
+  region.srcSubresource.baseArrayLayer = 0;
+  region.srcSubresource.layerCount = 1;
+  region.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+  region.dstSubresource.mipLevel = 0;
+  region.dstSubresource.baseArrayLayer = 0;
+  region.dstSubresource.layerCount = 1;
+  region.extent = vk::Extent3D(swapExtent.width, swapExtent.height, 1);
+
+  cmd.copyImage(
+	m_device.swapchainImage(imageIndex),
+	vk::ImageLayout::eTransferSrcOptimal,
+	m_textures.renderTargetImage(renderTargetHandle),
+	vk::ImageLayout::eTransferDstOptimal,
+	1,
+	&region);
+
+  m_textures.transitionRenderTargetToShaderRead(cmd, renderTargetHandle);
+  transitionSwapchainTo(vk::ImageLayout::eColorAttachmentOptimal);
+}
+
 void VulkanRenderingSession::transitionSceneHdrToShaderRead(vk::CommandBuffer cmd)
 {
   transitionSceneHdrToLayout(cmd, vk::ImageLayout::eShaderReadOnlyOptimal);
