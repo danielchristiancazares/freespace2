@@ -11,7 +11,7 @@ namespace graphics {
 namespace vulkan {
 
 class VulkanRenderTargets {
-  public:
+public:
   // G-buffer attachments:
   // 0: Color
   // 1: Normal
@@ -21,7 +21,7 @@ class VulkanRenderTargets {
   static constexpr uint32_t kGBufferCount = 5;
   static constexpr uint32_t kGBufferEmissiveIndex = 4;
 
-  explicit VulkanRenderTargets(VulkanDevice& device);
+  explicit VulkanRenderTargets(VulkanDevice &device);
 
   void create(vk::Extent2D extent);
   void resize(vk::Extent2D newExtent);
@@ -53,7 +53,9 @@ class VulkanRenderTargets {
   vk::ImageView sceneColorView(uint32_t swapchainIndex) const { return m_sceneColorViews[swapchainIndex].get(); }
   vk::Sampler sceneColorSampler() const { return m_sceneColorSampler.get(); }
   vk::ImageLayout sceneColorLayout(uint32_t swapchainIndex) const { return m_sceneColorLayouts[swapchainIndex]; }
-  void setSceneColorLayout(uint32_t swapchainIndex, vk::ImageLayout layout) { m_sceneColorLayouts[swapchainIndex] = layout; }
+  void setSceneColorLayout(uint32_t swapchainIndex, vk::ImageLayout layout) {
+    m_sceneColorLayouts[swapchainIndex] = layout;
+  }
 
   // Scene HDR color (float) used for scene_texture_begin/end + post-processing.
   vk::Format sceneHdrFormat() const { return m_sceneHdrFormat; }
@@ -116,7 +118,7 @@ class VulkanRenderTargets {
 
   vk::Sampler postLinearSampler() const { return m_postLinearSampler.get(); }
 
-  private:
+private:
   void createDepthResources(vk::Extent2D extent);
   void createGBufferResources(vk::Extent2D extent);
   void createSceneColorResources(vk::Extent2D extent);
@@ -125,7 +127,7 @@ class VulkanRenderTargets {
   vk::Format findDepthFormat() const;
   static bool formatHasStencil(vk::Format format);
 
-  VulkanDevice& m_device;
+  VulkanDevice &m_device;
 
   // Depth resources
   vk::UniqueImage m_depthImage;

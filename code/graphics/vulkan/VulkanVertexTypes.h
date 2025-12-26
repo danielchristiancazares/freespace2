@@ -6,9 +6,9 @@ namespace graphics {
 namespace vulkan {
 
 struct DefaultMaterialVertex {
-	float position[4];
-	float color[4];
-	float texcoord[4];
+  float position[4];
+  float color[4];
+  float texcoord[4];
 };
 
 static_assert(offsetof(DefaultMaterialVertex, position) == 0, "position offset must be 0");
@@ -18,4 +18,3 @@ static_assert(sizeof(DefaultMaterialVertex) == 48, "DefaultMaterialVertex size m
 
 } // namespace vulkan
 } // namespace graphics
-

@@ -6,8 +6,7 @@
 namespace graphics {
 namespace vulkan {
 
-bool VulkanRenderTargets::formatHasStencil(vk::Format format)
-{
+bool VulkanRenderTargets::formatHasStencil(vk::Format format) {
   switch (format) {
   case vk::Format::eD32SfloatS8Uint:
   case vk::Format::eD24UnormS8Uint:
@@ -17,13 +16,9 @@ bool VulkanRenderTargets::formatHasStencil(vk::Format format)
   }
 }
 
-bool VulkanRenderTargets::depthHasStencil() const
-{
-  return formatHasStencil(m_depthFormat);
-}
+bool VulkanRenderTargets::depthHasStencil() const { return formatHasStencil(m_depthFormat); }
 
-vk::ImageAspectFlags VulkanRenderTargets::depthAttachmentAspectMask() const
-{
+vk::ImageAspectFlags VulkanRenderTargets::depthAttachmentAspectMask() const {
   auto aspects = vk::ImageAspectFlags(vk::ImageAspectFlagBits::eDepth);
   if (depthHasStencil()) {
     aspects |= vk::ImageAspectFlagBits::eStencil;
@@ -31,20 +26,15 @@ vk::ImageAspectFlags VulkanRenderTargets::depthAttachmentAspectMask() const
   return aspects;
 }
 
-vk::ImageLayout VulkanRenderTargets::depthAttachmentLayout() const
-{
+vk::ImageLayout VulkanRenderTargets::depthAttachmentLayout() const {
   return depthHasStencil() ? vk::ImageLayout::eDepthStencilAttachmentOptimal : vk::ImageLayout::eDepthAttachmentOptimal;
 }
 
-vk::ImageLayout VulkanRenderTargets::depthReadLayout() const
-{
+vk::ImageLayout VulkanRenderTargets::depthReadLayout() const {
   return depthHasStencil() ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eShaderReadOnlyOptimal;
 }
 
-VulkanRenderTargets::VulkanRenderTargets(VulkanDevice& device)
-  : m_device(device)
-{
-}
+VulkanRenderTargets::VulkanRenderTargets(VulkanDevice &device) : m_device(device) {}
 
 void VulkanRenderTargets::create(vk::Extent2D extent) {
   createDepthResources(extent);
@@ -130,60 +120,60 @@ void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
 
   // Cockpit depth (separate attachment, same format)
   {
-	vk::ImageCreateInfo cinfo;
-	cinfo.imageType = vk::ImageType::e2D;
-	cinfo.format = m_depthFormat;
-	cinfo.extent = vk::Extent3D(extent.width, extent.height, 1);
-	cinfo.mipLevels = 1;
-	cinfo.arrayLayers = 1;
-	cinfo.samples = vk::SampleCountFlagBits::e1;
-	cinfo.tiling = vk::ImageTiling::eOptimal;
-	cinfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
-	cinfo.initialLayout = vk::ImageLayout::eUndefined;
+    vk::ImageCreateInfo cinfo;
+    cinfo.imageType = vk::ImageType::e2D;
+    cinfo.format = m_depthFormat;
+    cinfo.extent = vk::Extent3D(extent.width, extent.height, 1);
+    cinfo.mipLevels = 1;
+    cinfo.arrayLayers = 1;
+    cinfo.samples = vk::SampleCountFlagBits::e1;
+    cinfo.tiling = vk::ImageTiling::eOptimal;
+    cinfo.usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled;
+    cinfo.initialLayout = vk::ImageLayout::eUndefined;
 
-	m_cockpitDepthImage = m_device.device().createImageUnique(cinfo);
+    m_cockpitDepthImage = m_device.device().createImageUnique(cinfo);
 
-	vk::MemoryRequirements cockpitMemReqs = m_device.device().getImageMemoryRequirements(m_cockpitDepthImage.get());
-	vk::MemoryAllocateInfo cockpitAllocInfo;
-	cockpitAllocInfo.allocationSize = cockpitMemReqs.size;
-	cockpitAllocInfo.memoryTypeIndex = m_device.findMemoryType(cockpitMemReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-	m_cockpitDepthMemory = m_device.device().allocateMemoryUnique(cockpitAllocInfo);
-	m_device.device().bindImageMemory(m_cockpitDepthImage.get(), m_cockpitDepthMemory.get(), 0);
+    vk::MemoryRequirements cockpitMemReqs = m_device.device().getImageMemoryRequirements(m_cockpitDepthImage.get());
+    vk::MemoryAllocateInfo cockpitAllocInfo;
+    cockpitAllocInfo.allocationSize = cockpitMemReqs.size;
+    cockpitAllocInfo.memoryTypeIndex =
+        m_device.findMemoryType(cockpitMemReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    m_cockpitDepthMemory = m_device.device().allocateMemoryUnique(cockpitAllocInfo);
+    m_device.device().bindImageMemory(m_cockpitDepthImage.get(), m_cockpitDepthMemory.get(), 0);
 
-	vk::ImageViewCreateInfo cockpitViewInfo;
-	cockpitViewInfo.image = m_cockpitDepthImage.get();
-	cockpitViewInfo.viewType = vk::ImageViewType::e2D;
-	cockpitViewInfo.format = m_depthFormat;
-	cockpitViewInfo.subresourceRange.aspectMask = depthAttachmentAspectMask();
-	cockpitViewInfo.subresourceRange.levelCount = 1;
-	cockpitViewInfo.subresourceRange.layerCount = 1;
-	m_cockpitDepthImageView = m_device.device().createImageViewUnique(cockpitViewInfo);
+    vk::ImageViewCreateInfo cockpitViewInfo;
+    cockpitViewInfo.image = m_cockpitDepthImage.get();
+    cockpitViewInfo.viewType = vk::ImageViewType::e2D;
+    cockpitViewInfo.format = m_depthFormat;
+    cockpitViewInfo.subresourceRange.aspectMask = depthAttachmentAspectMask();
+    cockpitViewInfo.subresourceRange.levelCount = 1;
+    cockpitViewInfo.subresourceRange.layerCount = 1;
+    m_cockpitDepthImageView = m_device.device().createImageViewUnique(cockpitViewInfo);
 
-	vk::ImageViewCreateInfo cockpitSampleViewInfo{};
-	cockpitSampleViewInfo.image = m_cockpitDepthImage.get();
-	cockpitSampleViewInfo.viewType = vk::ImageViewType::e2D;
-	cockpitSampleViewInfo.format = m_depthFormat;
-	cockpitSampleViewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
-	cockpitSampleViewInfo.subresourceRange.levelCount = 1;
-	cockpitSampleViewInfo.subresourceRange.layerCount = 1;
-	m_cockpitDepthSampleView = m_device.device().createImageViewUnique(cockpitSampleViewInfo);
+    vk::ImageViewCreateInfo cockpitSampleViewInfo{};
+    cockpitSampleViewInfo.image = m_cockpitDepthImage.get();
+    cockpitSampleViewInfo.viewType = vk::ImageViewType::e2D;
+    cockpitSampleViewInfo.format = m_depthFormat;
+    cockpitSampleViewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+    cockpitSampleViewInfo.subresourceRange.levelCount = 1;
+    cockpitSampleViewInfo.subresourceRange.layerCount = 1;
+    m_cockpitDepthSampleView = m_device.device().createImageViewUnique(cockpitSampleViewInfo);
   }
 }
 
-vk::Format VulkanRenderTargets::findDepthFormat() const
-{
+vk::Format VulkanRenderTargets::findDepthFormat() const {
   // Candidate depth formats in preference order (stencil variants first for
   // future stencil buffer support, pure depth last for maximum compatibility)
   const std::vector<vk::Format> candidates = {
-    vk::Format::eD32SfloatS8Uint,
-    vk::Format::eD24UnormS8Uint,
-    vk::Format::eD32Sfloat,
+      vk::Format::eD32SfloatS8Uint,
+      vk::Format::eD24UnormS8Uint,
+      vk::Format::eD32Sfloat,
   };
 
   // Required features: depth buffer is used both as attachment and sampled
   // for deferred lighting (see createDepthResources usage flags and m_depthSampleView)
-  constexpr auto requiredFeatures = vk::FormatFeatureFlagBits::eDepthStencilAttachment |
-                                    vk::FormatFeatureFlagBits::eSampledImage;
+  constexpr auto requiredFeatures =
+      vk::FormatFeatureFlagBits::eDepthStencilAttachment | vk::FormatFeatureFlagBits::eSampledImage;
 
   for (auto format : candidates) {
     vk::FormatProperties props = m_device.physicalDevice().getFormatProperties(format);
@@ -199,8 +189,8 @@ vk::Format VulkanRenderTargets::findDepthFormat() const
 }
 
 void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
-    m_gbufferLayouts.fill(vk::ImageLayout::eUndefined);
-    for (uint32_t i = 0; i < kGBufferCount; ++i) {
+  m_gbufferLayouts.fill(vk::ImageLayout::eUndefined);
+  for (uint32_t i = 0; i < kGBufferCount; ++i) {
     vk::ImageCreateInfo imageInfo{};
     imageInfo.imageType = vk::ImageType::e2D;
     imageInfo.format = m_gbufferFormat;
@@ -217,7 +207,8 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
     vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(m_gbufferImages[i].get());
     vk::MemoryAllocateInfo allocInfo{};
     allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    allocInfo.memoryTypeIndex =
+        m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     m_gbufferMemories[i] = m_device.device().allocateMemoryUnique(allocInfo);
     m_device.device().bindImageMemory(m_gbufferImages[i].get(), m_gbufferMemories[i].get(), 0);
@@ -230,8 +221,8 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.layerCount = 1;
 
-        m_gbufferViews[i] = m_device.device().createImageViewUnique(viewInfo);
-    }
+    m_gbufferViews[i] = m_device.device().createImageViewUnique(viewInfo);
+  }
 
   // Sampler for G-buffer textures in lighting pass
   vk::SamplerCreateInfo samplerInfo{};
@@ -243,8 +234,7 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
   m_gbufferSampler = m_device.device().createSamplerUnique(samplerInfo);
 }
 
-void VulkanRenderTargets::createSceneColorResources(vk::Extent2D extent)
-{
+void VulkanRenderTargets::createSceneColorResources(vk::Extent2D extent) {
   const uint32_t imageCount = m_device.swapchainImageCount();
   m_sceneColorImages.clear();
   m_sceneColorMemories.clear();
@@ -261,11 +251,10 @@ void VulkanRenderTargets::createSceneColorResources(vk::Extent2D extent)
   // Captured scene color is sampled in a fullscreen copy shader, so ensure the format supports sampling.
   {
     const vk::FormatProperties props = m_device.physicalDevice().getFormatProperties(format);
-    const bool sampledOk = (props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImage) != vk::FormatFeatureFlags{};
-    Assertion(sampledOk,
-              "Swapchain format %u does not support sampled image usage (optimalTilingFeatures=0x%x)",
-              static_cast<uint32_t>(format),
-              static_cast<uint32_t>(props.optimalTilingFeatures));
+    const bool sampledOk =
+        (props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImage) != vk::FormatFeatureFlags{};
+    Assertion(sampledOk, "Swapchain format %u does not support sampled image usage (optimalTilingFeatures=0x%x)",
+              static_cast<uint32_t>(format), static_cast<uint32_t>(props.optimalTilingFeatures));
   }
 
   vk::ImageCreateInfo imageInfo{};
@@ -285,7 +274,8 @@ void VulkanRenderTargets::createSceneColorResources(vk::Extent2D extent)
     vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(image.get());
     vk::MemoryAllocateInfo allocInfo{};
     allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex = m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    allocInfo.memoryTypeIndex =
+        m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     auto memory = m_device.device().allocateMemoryUnique(allocInfo);
     m_device.device().bindImageMemory(image.get(), memory.get(), 0);
@@ -318,8 +308,7 @@ void VulkanRenderTargets::createSceneColorResources(vk::Extent2D extent)
   }
 }
 
-void VulkanRenderTargets::createScenePostProcessResources(vk::Extent2D extent)
-{
+void VulkanRenderTargets::createScenePostProcessResources(vk::Extent2D extent) {
   // Scene HDR target (float) + effect snapshot (float).
   // These are sampled by fullscreen post-process passes and may also be copied via transfer ops.
   const vk::Format format = m_sceneHdrFormat;
@@ -335,80 +324,79 @@ void VulkanRenderTargets::createScenePostProcessResources(vk::Extent2D extent)
   imageInfo.initialLayout = vk::ImageLayout::eUndefined;
 
   // Scene HDR: render target + sampled + transfer src (for effect snapshot).
-  imageInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
-                    vk::ImageUsageFlagBits::eSampled |
+  imageInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
                     vk::ImageUsageFlagBits::eTransferSrc;
 
   m_sceneHdrImage = m_device.device().createImageUnique(imageInfo);
   {
-	vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(m_sceneHdrImage.get());
-	vk::MemoryAllocateInfo allocInfo{};
-	allocInfo.allocationSize = memReqs.size;
-	allocInfo.memoryTypeIndex = m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-	m_sceneHdrMemory = m_device.device().allocateMemoryUnique(allocInfo);
-	m_device.device().bindImageMemory(m_sceneHdrImage.get(), m_sceneHdrMemory.get(), 0);
+    vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(m_sceneHdrImage.get());
+    vk::MemoryAllocateInfo allocInfo{};
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex =
+        m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    m_sceneHdrMemory = m_device.device().allocateMemoryUnique(allocInfo);
+    m_device.device().bindImageMemory(m_sceneHdrImage.get(), m_sceneHdrMemory.get(), 0);
 
-	vk::ImageViewCreateInfo viewInfo{};
-	viewInfo.image = m_sceneHdrImage.get();
-	viewInfo.viewType = vk::ImageViewType::e2D;
-	viewInfo.format = format;
-	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-	viewInfo.subresourceRange.levelCount = 1;
-	viewInfo.subresourceRange.layerCount = 1;
-	m_sceneHdrView = m_device.device().createImageViewUnique(viewInfo);
+    vk::ImageViewCreateInfo viewInfo{};
+    viewInfo.image = m_sceneHdrImage.get();
+    viewInfo.viewType = vk::ImageViewType::e2D;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    m_sceneHdrView = m_device.device().createImageViewUnique(viewInfo);
   }
 
   // Effect snapshot: sampled + transfer dst, and allow rendering into it for future parity.
-  imageInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
-                    vk::ImageUsageFlagBits::eSampled |
+  imageInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
                     vk::ImageUsageFlagBits::eTransferDst;
   m_sceneEffectImage = m_device.device().createImageUnique(imageInfo);
   {
-	vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(m_sceneEffectImage.get());
-	vk::MemoryAllocateInfo allocInfo{};
-	allocInfo.allocationSize = memReqs.size;
-	allocInfo.memoryTypeIndex = m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-	m_sceneEffectMemory = m_device.device().allocateMemoryUnique(allocInfo);
-	m_device.device().bindImageMemory(m_sceneEffectImage.get(), m_sceneEffectMemory.get(), 0);
+    vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(m_sceneEffectImage.get());
+    vk::MemoryAllocateInfo allocInfo{};
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex =
+        m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    m_sceneEffectMemory = m_device.device().allocateMemoryUnique(allocInfo);
+    m_device.device().bindImageMemory(m_sceneEffectImage.get(), m_sceneEffectMemory.get(), 0);
 
-	vk::ImageViewCreateInfo viewInfo{};
-	viewInfo.image = m_sceneEffectImage.get();
-	viewInfo.viewType = vk::ImageViewType::e2D;
-	viewInfo.format = format;
-	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-	viewInfo.subresourceRange.levelCount = 1;
-	viewInfo.subresourceRange.layerCount = 1;
-	m_sceneEffectView = m_device.device().createImageViewUnique(viewInfo);
+    vk::ImageViewCreateInfo viewInfo{};
+    viewInfo.image = m_sceneEffectImage.get();
+    viewInfo.viewType = vk::ImageViewType::e2D;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    m_sceneEffectView = m_device.device().createImageViewUnique(viewInfo);
   }
 
   // Samplers (shared config; separate handles for future specialization).
   if (!m_sceneHdrSampler) {
-	vk::SamplerCreateInfo samplerInfo{};
-	samplerInfo.magFilter = vk::Filter::eLinear;
-	samplerInfo.minFilter = vk::Filter::eLinear;
-	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
-	samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-	samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-	samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-	m_sceneHdrSampler = m_device.device().createSamplerUnique(samplerInfo);
+    vk::SamplerCreateInfo samplerInfo{};
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+    m_sceneHdrSampler = m_device.device().createSamplerUnique(samplerInfo);
   }
   if (!m_sceneEffectSampler) {
-	vk::SamplerCreateInfo samplerInfo{};
-	samplerInfo.magFilter = vk::Filter::eLinear;
-	samplerInfo.minFilter = vk::Filter::eLinear;
-	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
-	samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-	samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-	samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-	m_sceneEffectSampler = m_device.device().createSamplerUnique(samplerInfo);
+    vk::SamplerCreateInfo samplerInfo{};
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+    m_sceneEffectSampler = m_device.device().createSamplerUnique(samplerInfo);
   }
 
   m_sceneHdrLayout = vk::ImageLayout::eUndefined;
   m_sceneEffectLayout = vk::ImageLayout::eUndefined;
 }
 
-void VulkanRenderTargets::createPostProcessResources(vk::Extent2D extent)
-{
+void VulkanRenderTargets::createPostProcessResources(vk::Extent2D extent) {
   // Post-processing intermediate targets:
   // - LDR color (RGBA8 UNORM)
   // - FXAA luminance (RGBA8 UNORM)
@@ -418,37 +406,38 @@ void VulkanRenderTargets::createPostProcessResources(vk::Extent2D extent)
   const vk::Format ldrFormat = vk::Format::eB8G8R8A8Unorm;
 
   auto createColorImage = [&](vk::Format format, vk::Extent2D ex, uint32_t mipLevels, vk::ImageUsageFlags usage,
-							  vk::UniqueImage& outImg, vk::UniqueDeviceMemory& outMem, vk::UniqueImageView& outView) {
-	vk::ImageCreateInfo info{};
-	info.imageType = vk::ImageType::e2D;
-	info.format = format;
-	info.extent = vk::Extent3D(ex.width, ex.height, 1);
-	info.mipLevels = mipLevels;
-	info.arrayLayers = 1;
-	info.samples = vk::SampleCountFlagBits::e1;
-	info.tiling = vk::ImageTiling::eOptimal;
-	info.usage = usage;
-	info.initialLayout = vk::ImageLayout::eUndefined;
+                              vk::UniqueImage &outImg, vk::UniqueDeviceMemory &outMem, vk::UniqueImageView &outView) {
+    vk::ImageCreateInfo info{};
+    info.imageType = vk::ImageType::e2D;
+    info.format = format;
+    info.extent = vk::Extent3D(ex.width, ex.height, 1);
+    info.mipLevels = mipLevels;
+    info.arrayLayers = 1;
+    info.samples = vk::SampleCountFlagBits::e1;
+    info.tiling = vk::ImageTiling::eOptimal;
+    info.usage = usage;
+    info.initialLayout = vk::ImageLayout::eUndefined;
 
-	outImg = m_device.device().createImageUnique(info);
+    outImg = m_device.device().createImageUnique(info);
 
-	vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(outImg.get());
-	vk::MemoryAllocateInfo allocInfo{};
-	allocInfo.allocationSize = memReqs.size;
-	allocInfo.memoryTypeIndex = m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-	outMem = m_device.device().allocateMemoryUnique(allocInfo);
-	m_device.device().bindImageMemory(outImg.get(), outMem.get(), 0);
+    vk::MemoryRequirements memReqs = m_device.device().getImageMemoryRequirements(outImg.get());
+    vk::MemoryAllocateInfo allocInfo{};
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex =
+        m_device.findMemoryType(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+    outMem = m_device.device().allocateMemoryUnique(allocInfo);
+    m_device.device().bindImageMemory(outImg.get(), outMem.get(), 0);
 
-	vk::ImageViewCreateInfo viewInfo{};
-	viewInfo.image = outImg.get();
-	viewInfo.viewType = vk::ImageViewType::e2D;
-	viewInfo.format = format;
-	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-	viewInfo.subresourceRange.baseMipLevel = 0;
-	viewInfo.subresourceRange.levelCount = mipLevels;
-	viewInfo.subresourceRange.baseArrayLayer = 0;
-	viewInfo.subresourceRange.layerCount = 1;
-	outView = m_device.device().createImageViewUnique(viewInfo);
+    vk::ImageViewCreateInfo viewInfo{};
+    viewInfo.image = outImg.get();
+    viewInfo.viewType = vk::ImageViewType::e2D;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = mipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+    outView = m_device.device().createImageViewUnique(viewInfo);
   };
 
   const auto fullUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
@@ -461,14 +450,14 @@ void VulkanRenderTargets::createPostProcessResources(vk::Extent2D extent)
 
   // Linear sampler for post textures
   if (!m_postLinearSampler) {
-	vk::SamplerCreateInfo samplerInfo{};
-	samplerInfo.magFilter = vk::Filter::eLinear;
-	samplerInfo.minFilter = vk::Filter::eLinear;
-	samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
-	samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-	samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-	samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-	m_postLinearSampler = m_device.device().createSamplerUnique(samplerInfo);
+    vk::SamplerCreateInfo samplerInfo{};
+    samplerInfo.magFilter = vk::Filter::eLinear;
+    samplerInfo.minFilter = vk::Filter::eLinear;
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+    m_postLinearSampler = m_device.device().createSamplerUnique(samplerInfo);
   }
 
   // Bloom ping-pong: half-res, RGBA16F, mip chain, also used for blit-based mip generation
@@ -477,29 +466,28 @@ void VulkanRenderTargets::createPostProcessResources(vk::Extent2D extent)
   const vk::Extent2D bloomExtent{bw, bh};
 
   const vk::Format bloomFormat = vk::Format::eR16G16B16A16Sfloat;
-  const auto bloomUsage = vk::ImageUsageFlagBits::eColorAttachment |
-                          vk::ImageUsageFlagBits::eSampled |
-                          vk::ImageUsageFlagBits::eTransferSrc |
-                          vk::ImageUsageFlagBits::eTransferDst;
+  const auto bloomUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
+                          vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
 
   for (uint32_t i = 0; i < kBloomPingPongCount; ++i) {
-	vk::UniqueImageView fullView;
-	createColorImage(bloomFormat, bloomExtent, kBloomMipLevels, bloomUsage, m_bloomImages[i], m_bloomMemories[i], fullView);
-	m_bloomViews[i] = std::move(fullView);
+    vk::UniqueImageView fullView;
+    createColorImage(bloomFormat, bloomExtent, kBloomMipLevels, bloomUsage, m_bloomImages[i], m_bloomMemories[i],
+                     fullView);
+    m_bloomViews[i] = std::move(fullView);
 
-	// Per-mip render views (single mip)
-	for (uint32_t mip = 0; mip < kBloomMipLevels; ++mip) {
-	  vk::ImageViewCreateInfo viewInfo{};
-	  viewInfo.image = m_bloomImages[i].get();
-	  viewInfo.viewType = vk::ImageViewType::e2D;
-	  viewInfo.format = bloomFormat;
-	  viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-	  viewInfo.subresourceRange.baseMipLevel = mip;
-	  viewInfo.subresourceRange.levelCount = 1;
-	  viewInfo.subresourceRange.baseArrayLayer = 0;
-	  viewInfo.subresourceRange.layerCount = 1;
-	  m_bloomMipViews[i][mip] = m_device.device().createImageViewUnique(viewInfo);
-	}
+    // Per-mip render views (single mip)
+    for (uint32_t mip = 0; mip < kBloomMipLevels; ++mip) {
+      vk::ImageViewCreateInfo viewInfo{};
+      viewInfo.image = m_bloomImages[i].get();
+      viewInfo.viewType = vk::ImageViewType::e2D;
+      viewInfo.format = bloomFormat;
+      viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+      viewInfo.subresourceRange.baseMipLevel = mip;
+      viewInfo.subresourceRange.levelCount = 1;
+      viewInfo.subresourceRange.baseArrayLayer = 0;
+      viewInfo.subresourceRange.layerCount = 1;
+      m_bloomMipViews[i][mip] = m_device.device().createImageViewUnique(viewInfo);
+    }
   }
 
   m_postLdrLayout = vk::ImageLayout::eUndefined;

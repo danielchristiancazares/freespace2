@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+staged_files=()
+while IFS= read -r file; do
+  staged_files+=("$file")
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+targets=()
+for file in "${staged_files[@]}"; do
+  case "$file" in
+    code/graphics/vulkan/*.h|code/graphics/vulkan/*.hpp|code/graphics/vulkan/*.cpp|code/graphics/vulkan/*.cc)
+      if [[ "$file" != "code/graphics/vulkan/vk_mem_alloc.h" ]]; then
+        targets+=("$file")
+      fi
+      ;;
+  esac
+done
+
+if ((${#targets[@]})); then
+  clang-format -i "${targets[@]}"
+  git add -- "${targets[@]}"
+fi
