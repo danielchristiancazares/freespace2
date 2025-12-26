@@ -1331,6 +1331,7 @@ void sim_room_do_frame(float  /*frametime*/)
 		}
 	}
 
+	gr_reset_clip();
 	GR_MAYBE_CLEAR_RES(Background_bitmap);
 	if (Background_bitmap >= 0) {
 		gr_set_bitmap(Background_bitmap);
