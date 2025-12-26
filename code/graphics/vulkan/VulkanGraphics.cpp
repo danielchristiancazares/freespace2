@@ -332,7 +332,15 @@ int gr_vulkan_preload(int bitmap_num, int is_aabitmap)
 }
 void stub_resize_buffer(gr_buffer_handle /*handle*/, size_t /*size*/) {}
 
-int stub_save_screen() { return 1; }
+int gr_vulkan_save_screen()
+{
+  if (!g_backend || !g_backend->renderer) {
+	return -1;
+  }
+
+  gr_reset_clip();
+  return currentRenderer().saveScreen();
+}
 
 int stub_zbuffer_get() { return 0; }
 
@@ -342,7 +350,14 @@ void gr_set_fill_mode_stub(int /*mode*/) {}
 
 void stub_clear() {}
 
-void stub_free_screen(int /*id*/) {}
+void gr_vulkan_free_screen(int id)
+{
+  if (!g_backend || !g_backend->renderer) {
+	return;
+  }
+
+  currentRenderer().freeScreen(id);
+}
 
 void stub_get_region(int /*front*/, int /*w*/, int /*h*/, ubyte* /*data*/) {}
 
@@ -381,7 +396,31 @@ SCP_string stub_blob_screen() { return {}; }
 	}
   }
 
-void stub_restore_screen(int /*id*/) {}
+void gr_vulkan_restore_screen(int id)
+{
+  gr_reset_clip();
+
+  if (!g_backend || !g_backend->renderer) {
+	gr_clear();
+	return;
+  }
+
+  const int handle = currentRenderer().frozenScreenHandle();
+  if (handle < 0) {
+	gr_clear();
+	return;
+  }
+
+  if (id >= 0) {
+	Assertion(id == handle,
+	  "gr_vulkan_restore_screen called with handle %d but saved screen handle is %d",
+	  id,
+	  handle);
+  }
+
+  gr_set_bitmap(handle);
+  gr_bitmap(0, 0, GR_RESIZE_NONE);
+}
 
 void gr_vulkan_update_buffer_data(gr_buffer_handle handle, size_t size, const void* data)
 {
@@ -2408,6 +2447,10 @@ void init_function_pointers()
 
 		render.cmd.clearAttachments(1, &attachment, 1, &clearRect);
   };
+
+  gr_screen.gf_save_screen = gr_vulkan_save_screen;
+  gr_screen.gf_restore_screen = gr_vulkan_restore_screen;
+  gr_screen.gf_free_screen = gr_vulkan_free_screen;
   gr_screen.gf_set_clear_color = [](int r, int g, int b) {
 		// Keep the shared engine state in sync; other code reads gr_screen.current_clear_color directly.
 		gr_init_color(&gr_screen.current_clear_color, r, g, b);

@@ -193,10 +193,12 @@ class VulkanTextureManager {
 		vk::Extent2D renderTargetExtent(int baseFrameHandle) const;
 		vk::Format renderTargetFormat(int baseFrameHandle) const;
 		uint32_t renderTargetMipLevels(int baseFrameHandle) const;
+		vk::Image renderTargetImage(int baseFrameHandle) const;
 		vk::ImageView renderTargetAttachmentView(int baseFrameHandle, int face) const;
 
 		// Layout transitions and mip generation for render targets. These record GPU work into the provided cmd buffer.
 		void transitionRenderTargetToAttachment(vk::CommandBuffer cmd, int baseFrameHandle);
+		void transitionRenderTargetToTransferDst(vk::CommandBuffer cmd, int baseFrameHandle);
 		void transitionRenderTargetToShaderRead(vk::CommandBuffer cmd, int baseFrameHandle);
 		void generateRenderTargetMipmaps(vk::CommandBuffer cmd, int baseFrameHandle);
 

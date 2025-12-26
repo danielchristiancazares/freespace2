@@ -62,6 +62,9 @@ public:
   // Capture the current swapchain image into the scene-color snapshot for this swapchain image index.
   // No-op if the swapchain was not created with TRANSFER_SRC usage.
   void captureSwapchainColorToSceneCopy(vk::CommandBuffer cmd, uint32_t imageIndex);
+  // Capture the current swapchain image into the provided bitmap render target.
+  // No-op if the swapchain was not created with TRANSFER_SRC usage.
+  void captureSwapchainColorToRenderTarget(vk::CommandBuffer cmd, uint32_t imageIndex, int renderTargetHandle);
 
   // Transition scene HDR color to shader-read for post-processing.
   void transitionSceneHdrToShaderRead(vk::CommandBuffer cmd);

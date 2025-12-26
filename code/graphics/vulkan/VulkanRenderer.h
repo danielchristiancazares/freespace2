@@ -27,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <variant>
 #include <vulkan/vulkan.hpp>
 
 namespace graphics {
@@ -67,6 +68,9 @@ class VulkanRenderer {
 	int getZbufferMode() const;
 	void requestClear();
 	void zbufferClear(int mode);
+	int saveScreen();
+	void freeScreen(int handle);
+	int frozenScreenHandle() const;
 
 
 		// Helper methods for rendering
@@ -284,6 +288,7 @@ class VulkanRenderer {
 	uint32_t acquireImageOrThrow(VulkanFrame& frame); // Throws on failure, no sentinels
 		void beginFrame(VulkanFrame& frame, uint32_t imageIndex);
 		void endFrame(graphics::vulkan::RecordingFrame& rec); // Recording-only
+		void updateSavedScreenCopy(graphics::vulkan::RecordingFrame& rec); // Recording-only
 		void logFrameCounters();
 
 		// Container-based frame management (replaces warmup/steady states)
@@ -378,6 +383,63 @@ class VulkanRenderer {
 	};
 	SmaaLookupTexture m_smaaAreaTex;
 	SmaaLookupTexture m_smaaSearchTex;
+
+	// Saved-screen capture state: tracking updates or frozen for restore.
+	struct SavedScreenCapture {
+		struct Tracking {
+			int handle = -1;
+			vk::Extent2D extent{};
+		};
+		struct Frozen {
+			int handle = -1;
+			vk::Extent2D extent{};
+		};
+
+		using State = std::variant<std::monostate, Tracking, Frozen>;
+		State state{};
+
+		bool isTracking() const { return std::holds_alternative<Tracking>(state); }
+		bool isFrozen() const { return std::holds_alternative<Frozen>(state); }
+		bool hasHandle() const { return !std::holds_alternative<std::monostate>(state); }
+
+		int handle() const
+		{
+			if (auto* tracking = std::get_if<Tracking>(&state)) {
+				return tracking->handle;
+			}
+			if (auto* frozen = std::get_if<Frozen>(&state)) {
+				return frozen->handle;
+			}
+			return -1;
+		}
+
+		vk::Extent2D extent() const
+		{
+			if (auto* tracking = std::get_if<Tracking>(&state)) {
+				return tracking->extent;
+			}
+			if (auto* frozen = std::get_if<Frozen>(&state)) {
+				return frozen->extent;
+			}
+			return vk::Extent2D{};
+		}
+
+		void setTracking(int handle, vk::Extent2D extent) { state = Tracking{handle, extent}; }
+		void freeze()
+		{
+			if (auto* tracking = std::get_if<Tracking>(&state)) {
+				state = Frozen{tracking->handle, tracking->extent};
+			}
+		}
+		void unfreeze()
+		{
+			if (auto* frozen = std::get_if<Frozen>(&state)) {
+				state = Tracking{frozen->handle, frozen->extent};
+			}
+		}
+		void reset() { state = std::monostate{}; }
+	};
+	SavedScreenCapture m_savedScreen;
 
 	// Scene texture typestate: presence == active (state as location).
 	struct SceneTextureState {
