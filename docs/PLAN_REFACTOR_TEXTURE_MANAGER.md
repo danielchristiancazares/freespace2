@@ -93,10 +93,10 @@ A function that consumes one type and produces another, encoding a valid state c
 | Document | Relevance |
 |----------|-----------|
 | `docs/DESIGN_PHILOSOPHY.md` | Core principles: make invalid states unrepresentable |
-| `docs/vulkan/VULKAN_CAPABILITY_TOKENS.md` | Phase tokens (`UploadCtx`, `FrameCtx`, etc.) |
-| `docs/vulkan/VULKAN_TEXTURE_BINDING.md` | Bindless binding model, reserved slots, sampler caching |
-| `docs/vulkan/VULKAN_TEXTURE_RESIDENCY.md` | Current residency state machine |
-| `docs/vulkan/VULKAN_SYNCHRONIZATION.md` | Serial/timeline model, safe points, deferred release |
+| `docs/VULKAN_CAPABILITY_TOKENS.md` | Phase tokens (`UploadCtx`, `FrameCtx`, etc.) |
+| `docs/VULKAN_TEXTURE_BINDING.md` | Bindless binding model, reserved slots, sampler caching |
+| `docs/VULKAN_TEXTURE_RESIDENCY.md` | Current residency state machine |
+| `docs/VULKAN_SYNCHRONIZATION.md` | Serial/timeline model, safe points, deferred release |
 
 ---
 
@@ -285,7 +285,7 @@ The plan is incremental. Each phase is a coherent "correctness win" with a clear
   - `test/src/graphics/test_vulkan_fallback_texture.cpp`
   - `test/src/graphics/test_vulkan_texture_render_target.cpp`
   - `test/src/graphics/test_vulkan_texture_upload_alignment.cpp`
-- Optionally add an "invariants checklist" section to `docs/vulkan/VULKAN_TEXTURE_RESIDENCY.md`
+- Optionally add an "invariants checklist" section to `docs/VULKAN_TEXTURE_RESIDENCY.md`
 
 **Exit Criteria**:
 
@@ -599,9 +599,9 @@ return *info;
 
 | Document | Updates |
 |----------|---------|
-| `docs/vulkan/VULKAN_TEXTURE_RESIDENCY.md` | Update state machine containers; remove unavailable reasons; document slot assignment phase |
-| `docs/vulkan/VULKAN_TEXTURE_BINDING.md` | Document one-frame delay semantics for bindless slot activation (if adopted) |
-| `docs/vulkan/VULKAN_SYNCHRONIZATION.md` | Document fence vs timeline pattern changes |
+| `docs/VULKAN_TEXTURE_RESIDENCY.md` | Update state machine containers; remove unavailable reasons; document slot assignment phase |
+| `docs/VULKAN_TEXTURE_BINDING.md` | Document one-frame delay semantics for bindless slot activation (if adopted) |
+| `docs/VULKAN_SYNCHRONIZATION.md` | Document fence vs timeline pattern changes |
 
 **Test Updates**:
 
@@ -936,6 +936,6 @@ To keep diffs reviewable and regression risk low:
 - `code/graphics/vulkan/VulkanTextureId.h` - Strong-typed texture identity
 - `code/graphics/vulkan/VulkanPhaseContexts.h` - Capability tokens (`UploadCtx`, etc.)
 - `docs/DESIGN_PHILOSOPHY.md` - Type-driven design principles
-- `docs/vulkan/VULKAN_TEXTURE_BINDING.md` - Bindless binding architecture
-- `docs/vulkan/VULKAN_TEXTURE_RESIDENCY.md` - Current residency state machine
-- `docs/vulkan/VULKAN_SYNCHRONIZATION.md` - Synchronization infrastructure
+- `docs/VULKAN_TEXTURE_BINDING.md` - Bindless binding architecture
+- `docs/VULKAN_TEXTURE_RESIDENCY.md` - Current residency state machine
+- `docs/VULKAN_SYNCHRONIZATION.md` - Synchronization infrastructure

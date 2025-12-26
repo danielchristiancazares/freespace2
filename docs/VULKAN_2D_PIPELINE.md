@@ -6,7 +6,7 @@ This document provides comprehensive technical documentation of the FreeSpace 2 
 
 | Property | Value |
 |----------|-------|
-| Related Docs | [VULKAN_ARCHITECTURE.md](VULKAN_ARCHITECTURE.md), [VULKAN_HUD_RENDERING.md](VULKAN_HUD_RENDERING.md), [VULKAN_RENDER_PASS_STRUCTURE.md](VULKAN_RENDER_PASS_STRUCTURE.md) |
+| Related Docs | [VULKAN_ARCHITECTURE_OVERVIEW.md](VULKAN_ARCHITECTURE_OVERVIEW.md), [VULKAN_HUD_RENDERING.md](VULKAN_HUD_RENDERING.md), [VULKAN_RENDER_PASS_STRUCTURE.md](VULKAN_RENDER_PASS_STRUCTURE.md) |
 | Key Files | `code/graphics/render.cpp`, `code/graphics/matrix.cpp`, `code/graphics/vulkan/VulkanClip.h` |
 
 ## Prerequisites
@@ -18,7 +18,7 @@ Before reading this document, you should be familiar with:
 - Matrix transformations (orthographic projection, model-view)
 - The concept of NDC (Normalized Device Coordinates)
 
-For Vulkan-specific context, see [VULKAN_ARCHITECTURE.md](VULKAN_ARCHITECTURE.md) first.
+For Vulkan-specific context, see [VULKAN_ARCHITECTURE_OVERVIEW.md](VULKAN_ARCHITECTURE_OVERVIEW.md) first.
 
 ---
 

@@ -836,7 +836,7 @@ LRU tracking (`lastUsedFrame`, `lastUsedSerial`) adds minimal overhead per textu
 
 ## Future Work
 
-A proposed redesign of the texture ownership model is documented in `docs/vulkan/VULKAN_DESIGN_PHILOSOPHY_COMPLIANCE_PLAN.md`. The plan proposes:
+A proposed redesign of the texture ownership model is documented in `docs/PLAN_REFACTOR_TEXTURE_MANAGER.md`. The plan proposes:
 
 - Replacing `UnavailableTexture` struct with a simple `set<int>` for permanent failures
 - Removing the retry loop mechanism (`retryPendingBindlessSlots`)
