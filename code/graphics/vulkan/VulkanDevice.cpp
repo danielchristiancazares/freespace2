@@ -793,7 +793,6 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues &deviceValues) {
 }
 
 void VulkanDevice::queryDeviceCapabilities(const PhysicalDeviceValues &deviceValues) {
-  // Initialize vertex buffer alignment
   m_vertexBufferAlignment = static_cast<uint32_t>(sizeof(float));
 
   // Query extended dynamic state 3 capabilities per-feature
@@ -803,13 +802,11 @@ void VulkanDevice::queryDeviceCapabilities(const PhysicalDeviceValues &deviceVal
                    }) != deviceValues.extensions.end()) {
     m_supportsExtDyn3 = true;
 
-    // Query per-capability support
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT extDyn3Feats{};
     vk::PhysicalDeviceFeatures2 feats2;
     feats2.pNext = &extDyn3Feats;
     m_physicalDevice.getFeatures2(&feats2);
 
-    // Set capabilities based on what's actually supported
     m_extDyn3Caps.colorBlendEnable = extDyn3Feats.extendedDynamicState3ColorBlendEnable;
     m_extDyn3Caps.colorWriteMask = extDyn3Feats.extendedDynamicState3ColorWriteMask;
     m_extDyn3Caps.polygonMode = extDyn3Feats.extendedDynamicState3PolygonMode;
@@ -1019,7 +1016,6 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
   m_device->waitIdle();
 
-  // Destroy old swapchain resources
   m_swapchainImageViews.clear();
   auto oldSwapchain = std::move(m_swapchain);
 
@@ -1041,16 +1037,13 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
   tempValues.presentQueueIndex.index = m_presentQueueIndex;
   tempValues.presentQueueIndex.initialized = true;
 
-  // Choose image count
   uint32_t imageCount = m_surfaceCapabilities.minImageCount + 1;
   if (m_surfaceCapabilities.maxImageCount > 0 && imageCount > m_surfaceCapabilities.maxImageCount) {
     imageCount = m_surfaceCapabilities.maxImageCount;
   }
 
-  // Choose surface format (use the same format as before if possible)
   vk::SurfaceFormatKHR surfaceFormat = chooseSurfaceFormat(tempValues);
 
-  // Create new swapchain
   vk::SwapchainCreateInfoKHR createInfo;
   createInfo.surface = m_surface.get();
   createInfo.minImageCount = imageCount;
@@ -1095,17 +1088,14 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
     return false;
   }
 
-  // Destroy old swapchain now that new one is created
   oldSwapchain.reset();
 
-  // Get new swapchain images
   std::vector<vk::Image> swapchainImages = m_device->getSwapchainImagesKHR(m_swapchain.get());
   m_swapchainImages = SCP_vector<vk::Image>(swapchainImages.begin(), swapchainImages.end());
   m_swapchainFormat = surfaceFormat.format;
   m_swapchainExtent = createInfo.imageExtent;
   m_swapchainUsage = createInfo.imageUsage;
 
-  // Create new image views
   m_swapchainImageViews.reserve(m_swapchainImages.size());
   for (const auto &image : m_swapchainImages) {
     vk::ImageViewCreateInfo viewCreateInfo;

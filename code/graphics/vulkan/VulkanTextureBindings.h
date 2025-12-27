@@ -19,23 +19,39 @@ public:
   // Returns a valid descriptor (falls back if not resident) and queues an upload if needed.
   vk::DescriptorImageInfo descriptor(TextureId id, uint32_t currentFrameIndex,
                                      const VulkanTextureManager::SamplerKey &samplerKey) {
-    auto info = m_textures.getTextureDescriptorInfo(id.baseFrame(), samplerKey);
-    if (info.imageView) {
-      m_textures.markTextureUsedBaseFrame(id.baseFrame(), currentFrameIndex);
-    } else {
-      m_textures.queueTextureUploadBaseFrame(id.baseFrame(), currentFrameIndex, samplerKey);
-      info = m_textures.fallbackDescriptor(samplerKey);
+    auto info = m_textures.tryGetResidentDescriptor(id, samplerKey);
+    if (info.has_value()) {
+      m_textures.markTextureUsed(id, currentFrameIndex);
+      return *info;
     }
 
-    Assertion(info.imageView, "TextureBindings::descriptor must return a valid imageView");
-    return info;
+    m_textures.queueTextureUpload(id, currentFrameIndex, samplerKey);
+    return m_textures.fallbackDescriptor(samplerKey);
   }
 
   // Returns a stable bindless slot index for this texture id.
-  // - If the texture is not resident yet, the slot's descriptor points at fallback until the upload completes.
-  // - If no slot can be assigned due to pressure, returns slot 0 (fallback) for this frame and retries at frame start.
+  // - If the texture is not resident or does not have a slot yet, returns fallback.
+  // - Slot assignment is upload-phase only; draw paths must not allocate/evict slots.
   // Also queues an upload for missing textures.
-  uint32_t bindlessIndex(TextureId id) { return m_textures.getBindlessSlotIndex(id.baseFrame()); }
+  uint32_t bindlessIndex(TextureId id, uint32_t currentFrameIndex) {
+    m_textures.requestBindlessSlot(id);
+
+    if (!m_textures.isResident(id)) {
+      VulkanTextureManager::SamplerKey samplerKey{};
+      samplerKey.address = vk::SamplerAddressMode::eRepeat;
+      samplerKey.filter = vk::Filter::eLinear;
+      m_textures.queueTextureUpload(id, currentFrameIndex, samplerKey);
+      return kBindlessTextureSlotFallback;
+    }
+
+    const auto slotOpt = m_textures.tryGetBindlessSlot(id);
+    if (!slotOpt.has_value()) {
+      return kBindlessTextureSlotFallback;
+    }
+
+    m_textures.markTextureUsed(id, currentFrameIndex);
+    return *slotOpt;
+  }
 
 private:
   VulkanTextureManager &m_textures;

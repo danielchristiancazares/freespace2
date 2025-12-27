@@ -168,7 +168,6 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
     binding.stride = static_cast<uint32_t>(stride);
     binding.inputRate = vk::VertexInputRate::eVertex;
 
-    // Check if any component has divisor (instanced)
     for (const auto *comp : components) {
       if (comp->divisor != 0) {
         binding.inputRate = vk::VertexInputRate::eInstance;
@@ -187,6 +186,9 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
       auto it = VERTEX_FORMAT_MAP.find(component->format_type);
       Assertion(it != VERTEX_FORMAT_MAP.end(), "Unknown vertex format type %d - add to VERTEX_FORMAT_MAP",
                 static_cast<int>(component->format_type));
+      if (it == VERTEX_FORMAT_MAP.end()) {
+        throw std::runtime_error("Unknown vertex format type; add to VERTEX_FORMAT_MAP.");
+      }
 
       const auto &mapping = it->second;
 
@@ -225,14 +227,11 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 VulkanPipelineManager::VulkanPipelineManager(vk::Device device, vk::PipelineLayout pipelineLayout,
                                              vk::PipelineLayout modelPipelineLayout,
                                              vk::PipelineLayout deferredPipelineLayout, vk::PipelineCache pipelineCache,
-                                             bool supportsExtendedDynamicState, bool supportsExtendedDynamicState2,
                                              bool supportsExtendedDynamicState3,
                                              const ExtendedDynamicState3Caps &extDyn3Caps,
                                              bool supportsVertexAttributeDivisor, bool dynamicRenderingEnabled)
     : m_device(device), m_pipelineLayout(pipelineLayout), m_modelPipelineLayout(modelPipelineLayout),
       m_deferredPipelineLayout(deferredPipelineLayout), m_pipelineCache(pipelineCache),
-      m_supportsExtendedDynamicState(supportsExtendedDynamicState),
-      m_supportsExtendedDynamicState2(supportsExtendedDynamicState2),
       m_supportsExtendedDynamicState3(supportsExtendedDynamicState3), m_extDyn3Caps(extDyn3Caps),
       m_supportsVertexAttributeDivisor(supportsVertexAttributeDivisor),
       m_dynamicRenderingEnabled(dynamicRenderingEnabled) {
@@ -241,8 +240,8 @@ VulkanPipelineManager::VulkanPipelineManager(vk::Device device, vk::PipelineLayo
   }
 }
 
-// Targeting Vulkan 1.4: Extended Dynamic State 1 was promoted in 1.3, so the base dynamic states below are
-// guaranteed; Extended Dynamic State 2 is only partly core, so we only conditionally add EXT3 bits when supported.
+// Targeting Vulkan 1.4: Extended Dynamic State 1/2 are core and always available for this engine.
+// Extended Dynamic State 3 remains optional and is gated by supportsExtendedDynamicState3 + per-feature caps.
 std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool supportsExtendedDynamicState3,
                                                                            const ExtendedDynamicState3Caps &caps) {
   std::vector<vk::DynamicState> dynamicStates = {
@@ -273,27 +272,25 @@ std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(bool 
 vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey &key, const ShaderModules &modules,
                                                 const vertex_layout &layout) {
   // Enforce layout contract in all builds: if the shader uses vertex attributes, the key's
-  // layout_hash must match the supplied layout. Correctness by construction: we fix the key
-  // rather than silently reusing a mismatched pipeline.
-  PipelineKey adjustedKey = key;
+  // layout_hash must match the supplied layout (mismatches are treated as a hard error).
   const auto &layoutSpec = getShaderLayoutSpec(key.type);
   if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
     const size_t expectedHash = layout.hash();
-    if (adjustedKey.layout_hash != expectedHash) {
-      adjustedKey.layout_hash = expectedHash;
+    if (key.layout_hash != expectedHash) {
       throw std::runtime_error("PipelineKey.layout_hash mismatches provided vertex_layout for VertexAttributes shader");
     }
   }
 
-  // Lookup with the (possibly validated) key
+  // Pipelines are cached by PipelineKey.
+  std::lock_guard<std::mutex> guard(m_mutex);
   auto it = m_pipelines.find(key);
   if (it != m_pipelines.end()) {
     return it->second.get();
   }
 
-  auto pipeline = createPipeline(adjustedKey, modules, layout);
+  auto pipeline = createPipeline(key, modules, layout);
   auto handle = pipeline.get();
-  m_pipelines.emplace(adjustedKey, std::move(pipeline));
+  m_pipelines.emplace(key, std::move(pipeline));
   return handle;
 }
 
@@ -409,9 +406,15 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
         hasLoc0 = true;
     }
     Assertion(hasLoc0, "Vertex input pipeline created without Location 0 attribute");
+    if (!hasLoc0) {
+      throw std::runtime_error("VertexAttributes pipeline created without Location 0 attribute.");
+    }
   }
 
   vk::PipelineDepthStencilStateCreateInfo depthStencil{};
+  if (key.stencil_test_enable && !formatHasStencil(depthFormat)) {
+    throw std::runtime_error("Stencil test enabled but render target depth format has no stencil component.");
+  }
   if (depthFormat != vk::Format::eUndefined) {
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = VK_TRUE;

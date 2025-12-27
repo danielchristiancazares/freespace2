@@ -121,7 +121,7 @@ Phase-Specific Tokens:
 
 **Purpose**: Proof that a frame is currently recording commands.
 
-**Definition** (`VulkanFrameFlow.h:18-37`):
+**Definition** (`VulkanFrameFlow.h`):
 ```cpp
 struct RecordingFrame {
     RecordingFrame(const RecordingFrame&) = delete;  // Move-only
@@ -158,7 +158,7 @@ private:
 
 **Purpose**: Encapsulates frame submission metadata for tracking in-flight work.
 
-**Definition** (`VulkanFrameFlow.h:11-16`):
+**Definition** (`VulkanFrameFlow.h`):
 ```cpp
 struct SubmitInfo {
     uint32_t imageIndex;   // Swapchain image index
@@ -179,7 +179,7 @@ struct SubmitInfo {
 
 **Purpose**: Represents a frame that has been submitted to the GPU and is awaiting completion.
 
-**Definition** (`VulkanFrameFlow.h:39-51`):
+**Definition** (`VulkanFrameFlow.h`):
 ```cpp
 struct InFlightFrame {
     std::reference_wrapper<VulkanFrame> frame;
@@ -207,7 +207,7 @@ struct InFlightFrame {
 
 **Purpose**: Proof of active recording frame plus renderer instance reference.
 
-**Definition** (`VulkanFrameCaps.h:13-27`):
+**Definition** (`VulkanFrameCaps.h`):
 ```cpp
 struct FrameCtx {
     VulkanRenderer& renderer;
@@ -244,7 +244,7 @@ These types extend `FrameCtx` with additional proof that specific uniform buffer
 
 **Purpose**: Proof that the model uniform buffer (ModelData UBO) is bound.
 
-**Definition** (`VulkanFrameCaps.h:29-48`):
+**Definition** (`VulkanFrameCaps.h`):
 ```cpp
 struct ModelBoundFrame {
     FrameCtx ctx;
@@ -274,7 +274,7 @@ inline ModelBoundFrame requireModelBound(FrameCtx ctx)
 
 **Purpose**: Proof that the NanoVG uniform buffer is bound.
 
-**Definition** (`VulkanFrameCaps.h:50-62`):
+**Definition** (`VulkanFrameCaps.h`):
 ```cpp
 struct NanoVGBoundFrame {
     FrameCtx ctx;
@@ -297,7 +297,7 @@ inline NanoVGBoundFrame requireNanoVGBound(FrameCtx ctx)
 
 **Purpose**: Proof that both decal uniform buffers (DecalGlobals and DecalInfo) are bound.
 
-**Definition** (`VulkanFrameCaps.h:64-80`):
+**Definition** (`VulkanFrameCaps.h`):
 ```cpp
 struct DecalBoundFrame {
     FrameCtx ctx;
@@ -324,7 +324,7 @@ inline DecalBoundFrame requireDecalBound(FrameCtx ctx)
 
 **Purpose**: Proof that dynamic rendering is active.
 
-**Definition** (`VulkanPhaseContexts.h:36-48`):
+**Definition** (`VulkanPhaseContexts.h`):
 ```cpp
 struct RenderCtx {
     vk::CommandBuffer cmd;
@@ -355,7 +355,7 @@ private:
 
 **Purpose**: Proof that upload phase is active.
 
-**Definition** (`VulkanPhaseContexts.h:15-32`):
+**Definition** (`VulkanPhaseContexts.h`):
 ```cpp
 struct UploadCtx {
     VulkanFrame& frame;
@@ -390,7 +390,7 @@ These tokens implement a typestate pattern that enforces the correct call sequen
 
 **Purpose**: Proof that deferred geometry pass is active.
 
-**Definition** (`VulkanPhaseContexts.h:51-62`):
+**Definition** (`VulkanPhaseContexts.h`):
 ```cpp
 struct DeferredGeometryCtx {
     uint32_t frameIndex = 0;  // Used to validate token matches current frame
@@ -414,7 +414,7 @@ private:
 
 **Purpose**: Proof that deferred lighting pass is active.
 
-**Definition** (`VulkanPhaseContexts.h:64-75`):
+**Definition** (`VulkanPhaseContexts.h`):
 ```cpp
 struct DeferredLightingCtx {
     uint32_t frameIndex = 0;  // Used to validate token matches current frame
@@ -448,7 +448,7 @@ private:
 
 **Called At**: Frame start, after acquiring swapchain image
 
-**Implementation** (`VulkanRenderer.cpp:472-479`):
+**Implementation** (`VulkanRenderer.cpp`):
 ```cpp
 graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 {
@@ -467,7 +467,7 @@ graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 
 **Function**: `currentFrameCtx()` helper
 
-**Location**: `VulkanGraphics.cpp:96-101`
+**Location**: `VulkanGraphics.cpp`
 
 **Implementation**:
 ```cpp
@@ -493,7 +493,7 @@ void someRenderingFunction() {
 
 **Function**: `VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)`
 
-**Implementation** (`VulkanRenderer.cpp:496-506`):
+**Implementation** (`VulkanRenderer.cpp`):
 ```cpp
 RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
 {
@@ -1041,7 +1041,7 @@ void gr_vulkan_draw_something() {
 
 **Functions**: `currentFrameCtx()`, `currentFrame()`, `currentRecording()`, `currentRenderer()`
 
-**Location**: `VulkanGraphics.cpp:76-101`
+**Location**: `VulkanGraphics.cpp`
 
 **Implementation**:
 ```cpp

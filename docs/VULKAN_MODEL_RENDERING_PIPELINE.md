@@ -176,7 +176,7 @@ Engine Model Data
 
 **Function**: `VulkanRenderer::setModelVertexHeapHandle(gr_buffer_handle handle)`
 
-**Location**: `VulkanRenderer.cpp:2681-2686`
+**Location**: `VulkanRenderer.cpp`
 
 **Called At**: When `GPUMemoryHeap` creates the ModelVertex heap during engine initialization.
 
@@ -203,7 +203,7 @@ void VulkanRenderer::setModelVertexHeapHandle(gr_buffer_handle handle) {
 
 **Called At**: Before descriptor sync at frame start
 
-**Example** (from `VulkanRenderer.cpp:332-334`):
+**Example** (from `VulkanRenderer.cpp`):
 ```cpp
 // Ensure vertex heap buffer exists and sync descriptors
 vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
@@ -312,7 +312,7 @@ void main() {
 
 ### 7.2 Uniform Data Structure
 
-**Definition**: `code/graphics/util/uniform_structs.h:79-145`
+**Definition**: `code/graphics/util/uniform_structs.h`
 
 The `model_uniform_data` structure contains:
 
@@ -332,7 +332,7 @@ The `model_uniform_data` structure contains:
 
 **Function**: `VulkanRenderer::setModelUniformBinding()`
 
-**Location**: `VulkanRenderer.cpp:2924-2967`
+**Location**: `VulkanRenderer.cpp`
 
 **Process**:
 
@@ -370,7 +370,7 @@ The `model_uniform_data` structure contains:
 
 **Function**: `VulkanRenderer::beginModelDescriptorSync()`
 
-**Location**: `VulkanRenderer.cpp:3112-3138`
+**Location**: `VulkanRenderer.cpp`
 
 **Called At**: Frame start, after texture uploads complete
 
@@ -402,7 +402,7 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame,
 
 **Function**: `VulkanRenderer::updateModelDescriptors()`
 
-**Location**: `VulkanRenderer.cpp:2990-3110`
+**Location**: `VulkanRenderer.cpp`
 
 This function batches all descriptor writes for efficiency:
 
@@ -481,7 +481,7 @@ std::array<ModelBindlessDescriptorCache, kFramesInFlight> m_modelBindlessCache;
 
 **Function**: `gr_vulkan_render_model()`
 
-**Location**: `VulkanGraphics.cpp:1143-1330`
+**Location**: `VulkanGraphics.cpp`
 
 **Parameters**:
 - `material_info`: Material properties, shader flags, blend mode
@@ -512,7 +512,7 @@ vk::Pipeline pipeline = renderer.getPipeline(key, modules, emptyLayout);
 
 **Function**: `issueModelDraw()`
 
-**Location**: `VulkanGraphics.cpp:1085-1141`
+**Location**: `VulkanGraphics.cpp`
 
 ```cpp
 const auto modelSet = ctx.bound.modelSet;
@@ -584,7 +584,7 @@ cmd.drawIndexed(
 
 ### 10.1 Structure Definition
 
-**Location**: `VulkanModelTypes.h:21-50`
+**Location**: `VulkanModelTypes.h`
 
 **Size**: 64 bytes (verified by `static_assert`)
 
@@ -621,7 +621,7 @@ static_assert(sizeof(ModelPushConstants) == 64, "Must be 64 bytes");
 
 ### 10.2 Vertex Attribute Mask Bits
 
-**Location**: `VulkanModelTypes.h:10-16`
+**Location**: `VulkanModelTypes.h`
 
 | Bit | Constant | Meaning |
 |-----|----------|---------|
@@ -953,7 +953,7 @@ vk::IndexType indexType = use32Bit ? vk::IndexType::eUint32 : vk::IndexType::eUi
 
 ### Model Pipeline Layout
 
-**Location**: `VulkanDescriptorLayouts.cpp:109-193`
+**Location**: `VulkanDescriptorLayouts.cpp`
 
 | Binding | Type | Count | Stage | Purpose |
 |---------|------|-------|-------|---------|

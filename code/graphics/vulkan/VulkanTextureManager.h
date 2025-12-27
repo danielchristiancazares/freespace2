@@ -4,15 +4,20 @@
 #include "VulkanDeferredRelease.h"
 #include "VulkanFrame.h"
 #include "VulkanModelTypes.h"
+#include "VulkanTextureId.h"
 
 #include <array>
 #include <cstddef>
+#include <deque>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 #include <vulkan/vulkan.hpp>
+
+class PendingUploadQueueTest;
+class SlotGatingTest;
 
 namespace graphics {
 namespace vulkan {
@@ -93,24 +98,6 @@ public:
   VulkanTextureManager(vk::Device device, const vk::PhysicalDeviceMemoryProperties &memoryProps,
                        vk::Queue transferQueue, uint32_t transferQueueIndex);
 
-  enum class UnavailableReason {
-    InvalidHandle,
-    InvalidArray,
-    BmpLockFailed,
-    TooLargeForStaging,
-    UnsupportedFormat,
-  };
-
-  struct ResidentTexture {
-    VulkanTexture gpu;
-    uint32_t lastUsedFrame = 0;
-    uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
-  };
-
-  struct UnavailableTexture {
-    UnavailableReason reason = UnavailableReason::InvalidHandle;
-  };
-
   struct SamplerKey {
     vk::Filter filter = vk::Filter::eLinear;
     vk::SamplerAddressMode address = vk::SamplerAddressMode::eRepeat;
@@ -122,6 +109,8 @@ public:
   void queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey &samplerKey);
   // Variant for callers that already have a base-frame handle.
   void queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex, const SamplerKey &samplerKey);
+  // Variant for callers that already have a validated TextureId.
+  void queueTextureUpload(TextureId id, uint32_t currentFrameIndex, const SamplerKey &samplerKey);
 
   // Preload uploads immediately. Return value follows bmpman gf_preload semantics:
   // - false: abort further preloading (out of memory)
@@ -138,14 +127,18 @@ public:
   // Cleanup all resources
   void cleanup();
 
-  // Descriptor binding management
-  // Returns a stable bindless slot index for this texture handle.
-  // - If the handle is missing/unavailable/not-yet-resident, the slot's descriptor points at fallback.
-  // - If no slot can be assigned safely, returns slot 0 (fallback).
-  uint32_t getBindlessSlotIndex(int textureHandle);
+  // Bindless slot ownership (draw-path safe: request is CPU-only; lookup is read-only).
+  void requestBindlessSlot(TextureId id);
+  [[nodiscard]] std::optional<uint32_t> tryGetBindlessSlot(TextureId id) const;
+  [[nodiscard]] bool hasBindlessSlot(TextureId id) const { return tryGetBindlessSlot(id).has_value(); }
 
-  // Mark a texture as used by the upcoming submission (bindless or descriptor bind).
-  void markTextureUsedBaseFrame(int baseFrame, uint32_t currentFrameIndex);
+  // Residency / usage tracking.
+  [[nodiscard]] bool isResident(TextureId id) const;
+  void markTextureUsed(TextureId id, uint32_t currentFrameIndex);
+
+  // Get descriptor for a resident texture. Absence is represented as std::nullopt (no fake inhabitant).
+  [[nodiscard]] std::optional<vk::DescriptorImageInfo> tryGetResidentDescriptor(TextureId id,
+                                                                                const SamplerKey &samplerKey) const;
 
   void collect(uint64_t completedSerial);
 
@@ -156,10 +149,8 @@ public:
   vk::DescriptorImageInfo defaultNormalDescriptor(const SamplerKey &samplerKey) const;
   vk::DescriptorImageInfo defaultSpecDescriptor(const SamplerKey &samplerKey) const;
 
-  // Populate (slot, baseFrameHandle) pairs for bindless descriptor updates.
-  void appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, int>> &out) const;
-  // Query slot assignment state (state-as-location: presence in m_bindlessSlots).
-  bool hasBindlessSlot(int baseFrameHandle) const;
+  // Populate (slot, TextureId) pairs for bindless descriptor updates.
+  void appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, TextureId>> &out) const;
 
   // Serial at/after which it is safe to destroy newly-retired resources.
   // During frame recording this should be the serial of the upcoming submit; after submit it should match the last
@@ -168,9 +159,6 @@ public:
 
   // Current CPU frame counter (monotonic). Used for LRU bookkeeping.
   void setCurrentFrameIndex(uint32_t frameIndex) { m_currentFrameIndex = frameIndex; }
-
-  // Get texture descriptor info without frame/cmd (for already-resident textures)
-  vk::DescriptorImageInfo getTextureDescriptorInfo(int textureHandle, const SamplerKey &samplerKey);
 
   // ------------------------------------------------------------------------
   // Bitmap render targets (bmpman RTT)
@@ -193,6 +181,8 @@ public:
 
 private:
   friend class VulkanTextureUploader;
+  friend class ::PendingUploadQueueTest;
+  friend class ::SlotGatingTest;
 
   struct BuiltinTextures {
     VulkanTexture fallback;
@@ -213,11 +203,25 @@ private:
   // Update the contents of an existing bitmap texture (upload phase only; records GPU work).
   bool updateTexture(const UploadCtx &ctx, int bitmapHandle, int bpp, const ubyte *data, int width, int height);
 
+  struct SamplerKeyHash {
+    size_t operator()(const SamplerKey &key) const noexcept {
+      const size_t filter = static_cast<size_t>(key.filter);
+      const size_t address = static_cast<size_t>(key.address);
+      return (filter << 4) ^ address;
+    }
+  };
+
+  struct UsageTracking {
+    uint32_t lastUsedFrame = 0;
+    uint64_t lastUsedSerial = 0; // Serial of most recent submission that may reference this texture
+  };
+
+  struct BitmapTexture {
+    VulkanTexture gpu;
+    UsageTracking usage;
+  };
+
   void processPendingRetirements();
-  void retryPendingBindlessSlots();
-  bool tryAssignBindlessSlot(int textureHandle, bool allowResidentEvict);
-  void onTextureResident(int textureHandle);
-  void retireTexture(int textureHandle, uint64_t retireSerial);
 
   struct RenderTargetRecord {
     vk::Extent2D extent{};
@@ -231,7 +235,31 @@ private:
     std::array<vk::UniqueImageView, 6> faceViews{};
   };
 
-  std::optional<RenderTargetRecord> tryTakeRenderTargetRecord(int baseFrameHandle);
+  struct RenderTargetTexture {
+    VulkanTexture gpu;
+    RenderTargetRecord rt;
+    UsageTracking usage;
+  };
+
+  class PendingUploadQueue {
+  public:
+    // Returns true if newly enqueued; false if already present (idempotent).
+    bool enqueue(TextureId id);
+    // Returns true if the id was present and removed.
+    bool erase(TextureId id);
+
+    bool empty() const { return m_fifo.empty(); }
+    std::deque<TextureId> takeAll();
+
+  private:
+    std::deque<TextureId> m_fifo;
+    std::unordered_set<TextureId, TextureIdHasher> m_membership;
+  };
+
+  void assignBindlessSlots(const UploadCtx &ctx);
+  [[nodiscard]] std::optional<TextureId> findEvictionCandidate() const;
+  [[nodiscard]] std::optional<uint32_t> acquireFreeSlotOrEvict(const UploadCtx &ctx);
+  void retireTexture(TextureId id, uint64_t retireSerial);
 
   vk::Device m_device;
   vk::PhysicalDeviceMemoryProperties m_memoryProperties;
@@ -241,32 +269,31 @@ private:
   vk::UniqueSampler m_defaultSampler;
 
   // State as location:
-  // - presence in m_residentTextures => resident
-  // - presence in m_pendingUploads   => queued for upload
-  // - presence in m_unavailable      => permanently unavailable (non-retriable under current algorithm)
-  // - presence in m_bindlessSlots    => has a bindless slot assigned
-  std::unordered_map<int, ResidentTexture> m_residentTextures;       // keyed by bmpman base frame handle
-  std::unordered_map<int, UnavailableTexture> m_unavailableTextures; // keyed by base frame
-  std::unordered_map<int, RenderTargetRecord> m_renderTargets;       // keyed by base frame (bmpman render targets)
-  std::unordered_map<int, uint32_t> m_bindlessSlots;                 // keyed by base frame
-  std::unordered_set<int>
-      m_pendingBindlessSlots; // textures waiting for a bindless slot assignment (retry each frame start)
-  std::unordered_set<int>
+  // - presence in m_bitmaps  => resident sampled bitmap texture
+  // - presence in m_targets  => resident bmpman render target
+  // - presence in m_pendingUploads => queued for upload
+  // - presence in m_bindlessSlots  => has a bindless slot assigned (dynamic slots only)
+  // - presence in m_permanentlyRejected => outside supported upload domain (do not retry automatically)
+  std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps;
+  std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets;
+  std::unordered_set<TextureId, TextureIdHasher> m_permanentlyRejected;
+  std::unordered_map<TextureId, uint32_t, TextureIdHasher> m_bindlessSlots;
+  std::unordered_set<TextureId, TextureIdHasher> m_bindlessRequested;
+  std::unordered_set<TextureId, TextureIdHasher>
       m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)
-  mutable std::unordered_map<size_t, vk::UniqueSampler> m_samplerCache;
-  std::vector<int> m_pendingUploads; // base frame handles queued for upload
+  mutable std::unordered_map<SamplerKey, vk::UniqueSampler, SamplerKeyHash> m_samplerCache;
+  PendingUploadQueue m_pendingUploads;
 
   uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
   void createDefaultSampler();
 
   vk::Sampler getOrCreateSampler(const SamplerKey &key) const;
-  bool uploadImmediate(int baseFrame, bool isAABitmap);
+  bool uploadImmediate(TextureId id, bool isAABitmap);
   VulkanTexture createSolidTexture(const uint8_t rgba[4]);
   void createFallbackTexture();
   void createDefaultTexture();
   void createDefaultNormalTexture();
   void createDefaultSpecTexture();
-  bool isUploadQueued(int baseFrame) const;
 
   // Pool of bindless texture slots (excluding reserved default slots; see VulkanConstants.h)
   std::vector<uint32_t> m_freeBindlessSlots;

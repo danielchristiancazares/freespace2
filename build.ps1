@@ -17,6 +17,81 @@ Param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Ensure the MSVC developer environment is loaded when using Ninja on Windows.
+# Without this, builds can fail due to missing standard headers (e.g. float.h) if the
+# script is run outside a Developer PowerShell/Command Prompt.
+function Ensure-MsvcEnvironment {
+    function Test-HeaderInIncludePath {
+        param([string]$Header)
+
+        if (-not $env:INCLUDE) {
+            return $false
+        }
+
+        foreach ($dir in ($env:INCLUDE -split ";")) {
+            if (-not $dir) { continue }
+            if (Test-Path (Join-Path $dir $Header)) {
+                return $true
+            }
+        }
+
+        return $false
+    }
+
+    if (Test-HeaderInIncludePath "float.h") {
+        return
+    }
+
+    $pf86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if (-not $pf86) {
+        Write-Error "MSVC environment not detected (VCToolsInstallDir unset) and ProgramFiles(x86) is missing."
+        exit 1
+    }
+
+    $vswhere = Join-Path $pf86 "Microsoft Visual Studio\\Installer\\vswhere.exe"
+    if (-not (Test-Path $vswhere)) {
+        Write-Error "MSVC environment not detected (VCToolsInstallDir unset) and vswhere.exe was not found at '$vswhere'."
+        exit 1
+    }
+
+    # Request a VS instance with the C++ toolset installed.
+    $installPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath) |
+        Select-Object -First 1
+    if (-not $installPath) {
+        Write-Error "vswhere.exe did not find a Visual Studio instance with the C++ toolset installed."
+        exit 1
+    }
+
+    $vsDevCmd = Join-Path $installPath "Common7\\Tools\\VsDevCmd.bat"
+    if (-not (Test-Path $vsDevCmd)) {
+        Write-Error "VsDevCmd.bat was not found at '$vsDevCmd'."
+        exit 1
+    }
+
+    Write-Host "Setting up Visual Studio build environment... " -NoNewline
+    $env:VSCMD_SKIP_SENDTELEMETRY = "1"
+
+    # Import environment variables set by VsDevCmd into the current PowerShell session.
+    $dump = & cmd.exe /c "call `"$vsDevCmd`" -no_logo -arch=x64 -host_arch=x64 && set" 2>$null
+    foreach ($line in $dump) {
+        if ($line -match "^(.*?)=(.*)$") {
+            $name = $matches[1]
+            $value = $matches[2]
+            # Skip special cmd.exe internal vars like "=C:".
+            if ($name.StartsWith("=")) { continue }
+            Set-Item -Path ("Env:" + $name) -Value $value
+        }
+    }
+
+    if (-not (Test-HeaderInIncludePath "float.h")) {
+        Write-Host "FAILED" -ForegroundColor Red
+        Write-Error "Failed to initialize the MSVC developer environment (standard headers still missing from INCLUDE). Try running from a Visual Studio Developer PowerShell."
+        exit 1
+    }
+
+    Write-Host "OK" -ForegroundColor Green
+}
+
 # Run a command, capturing output. Show output only on failure (unless verbose).
 function Invoke-Quietly {
     param(
@@ -163,10 +238,13 @@ if ($EnableForceShaders -and -not $EnableClean) {
         Remove-Item -Recurse -Force $shaderDepDir
         $deleted = $true
     }
-    if ($deleted) {
+if ($deleted) {
         Write-Host "OK" -ForegroundColor Green
     }
 }
+
+# Make sure we have the MSVC environment before configuring/building with Ninja.
+Ensure-MsvcEnvironment
 
 # Configure
 $configureArgs = @(

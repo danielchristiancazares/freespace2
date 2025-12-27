@@ -700,10 +700,10 @@ Use RenderDoc to capture frames and inspect each post-processing pass. Key thing
 
 | File | Description |
 |------|-------------|
-| `code/graphics/vulkan/VulkanRenderer.cpp:701-1042` | `endSceneTexture()` implementation |
+| `code/graphics/vulkan/VulkanRenderer.cpp` | `endSceneTexture()` implementation |
 | `code/graphics/vulkan/VulkanRenderTargets.h` | Render target definitions |
 | `code/graphics/vulkan/VulkanRenderTargets.cpp` | Render target creation |
-| `code/graphics/util/uniform_structs.h:210-420` | Uniform struct definitions (`generic_data` namespace) |
+| `code/graphics/util/uniform_structs.h` | Uniform struct definitions (`generic_data` namespace) |
 | `code/graphics/post_processing.h` | Post-processing manager and global functions |
 | `code/graphics/2d.h` | `gr_is_fxaa_mode()`, `gr_is_smaa_mode()` |
 | `code/lighting/lighting_profiles.h` | `TonemapperAlgorithm` enum |

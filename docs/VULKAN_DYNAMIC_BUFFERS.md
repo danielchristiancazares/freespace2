@@ -128,7 +128,7 @@ The Vulkan renderer employs a two-tier buffer management architecture:
 
 ### 3.1 Buffer Types
 
-Defined in `code/graphics/2d.h:654-658`:
+Defined in `code/graphics/2d.h`:
 
 ```cpp
 enum class BufferType {
@@ -138,7 +138,7 @@ enum class BufferType {
 };
 ```
 
-Each type maps to specific Vulkan usage flags in `VulkanBufferManager.cpp:40-52`:
+Each type maps to specific Vulkan usage flags:
 
 | BufferType | Vulkan Usage Flags | Purpose |
 |------------|-------------------|---------|
@@ -148,13 +148,13 @@ Each type maps to specific Vulkan usage flags in `VulkanBufferManager.cpp:40-52`
 
 ### 3.2 Usage Hints
 
-Defined in `code/graphics/2d.h:660`:
+Defined in `code/graphics/2d.h`:
 
 ```cpp
 enum class BufferUsageHint { Static, Dynamic, Streaming, PersistentMapping };
 ```
 
-Memory placement strategy from `VulkanBufferManager.cpp:55-69`:
+Memory placement strategy:
 
 | UsageHint | Memory Properties | Behavior | Typical Use |
 |-----------|------------------|----------|-------------|
@@ -191,7 +191,7 @@ Need maximum GPU performance?
 
 ### 4.1 Ring Buffer Architecture
 
-Each `VulkanFrame` contains three ring buffers for per-frame transient allocations (`VulkanFrame.h:45-47`):
+Each `VulkanFrame` contains three ring buffers for per-frame transient allocations:
 
 ```cpp
 VulkanRingBuffer& uniformBuffer() { return m_uniformRing; }
@@ -201,7 +201,7 @@ VulkanRingBuffer& stagingBuffer() { return m_stagingRing; }
 
 ### 4.2 Ring Buffer Sizes
 
-Defined in `VulkanRenderer.h:206-208`:
+Defined in `VulkanRenderer.h`:
 
 ```cpp
 static constexpr vk::DeviceSize UNIFORM_RING_SIZE  = 512 * 1024;       // 512 KB
@@ -217,7 +217,7 @@ static constexpr vk::DeviceSize STAGING_RING_SIZE  = 12 * 1024 * 1024; // 12 MB
 
 ### 4.3 Ring Buffer Class Structure
 
-From `VulkanRingBuffer.h:12-53`:
+From `VulkanRingBuffer.h`:
 
 ```cpp
 class VulkanRingBuffer {
@@ -255,7 +255,7 @@ private:
 
 ### 4.4 Allocation Algorithm
 
-From `VulkanRingBuffer.cpp:48-67`:
+From `VulkanRingBuffer.cpp`:
 
 ```cpp
 std::optional<VulkanRingBuffer::Allocation> VulkanRingBuffer::try_allocate(
@@ -293,7 +293,7 @@ std::optional<VulkanRingBuffer::Allocation> VulkanRingBuffer::try_allocate(
 
 ### 4.5 Per-Frame Reset
 
-At frame start, all ring cursors reset to zero (`VulkanFrame.cpp:79-93`):
+At frame start, all ring cursors reset to zero:
 
 ```cpp
 void VulkanFrame::reset()
@@ -317,7 +317,7 @@ void VulkanFrame::reset()
 
 ### 5.1 Buffer Handle System
 
-Buffers are identified by opaque, type-safe handles (`code/graphics/2d.h:364-366`):
+Buffers are identified by opaque, type-safe handles (`code/graphics/2d.h`):
 
 ```cpp
 struct gr_buffer_handle_tag {};
@@ -328,7 +328,7 @@ The handle is an index into `VulkanBufferManager::m_buffers`. The invalid handle
 
 ### 5.2 Buffer Record Structure
 
-From `VulkanBufferManager.h:12-20`:
+From `VulkanBufferManager.h`:
 
 ```cpp
 struct VulkanBuffer {
@@ -344,7 +344,7 @@ struct VulkanBuffer {
 
 ### 5.3 Buffer Creation
 
-From `VulkanBufferManager.cpp:171-183`:
+From `VulkanBufferManager.cpp`:
 
 ```cpp
 gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageHint usage)
@@ -364,7 +364,7 @@ gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageH
 
 ### 5.4 Buffer Update Paths
 
-From `VulkanBufferManager.cpp:210-243`:
+From `VulkanBufferManager.cpp`:
 
 ```cpp
 void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size, const void* data)
@@ -452,7 +452,7 @@ OpenGL solves this with "buffer orphaning": calling `glBufferData` with the same
 
 ### 6.2 Vulkan Orphaning Implementation
 
-From `VulkanBufferManager.cpp:318-371`:
+From `VulkanBufferManager.cpp`:
 
 ```cpp
 void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
@@ -505,7 +505,7 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size)
 
 ### 6.3 Static Buffer Updates via Staging
 
-For device-local buffers, updates go through a staging buffer (`VulkanBufferManager.cpp:71-169`):
+For device-local buffers, updates go through a staging buffer:
 
 ```cpp
 void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer& buffer,
@@ -555,7 +555,7 @@ void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer& buffer,
 
 ### 7.1 Double-Buffered Frame Pipeline
 
-From `VulkanConstants.h:8`:
+From `VulkanConstants.h`:
 
 ```cpp
 constexpr uint32_t kFramesInFlight = 2;
@@ -612,7 +612,7 @@ Frame 0:                            [Recording] ----+--> [GPU Executing] -->
 
 ### 7.3 Frame Preparation and Recycling
 
-From `VulkanRenderer.cpp:430-458`:
+From `VulkanRenderer.cpp`:
 
 ```cpp
 void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial)
@@ -645,7 +645,7 @@ void VulkanRenderer::recycleOneInFlight()
 
 ### 7.4 Frame Advance Flow
 
-From `VulkanRenderer.cpp:482-494`:
+From `VulkanRenderer.cpp`:
 
 ```cpp
 RecordingFrame VulkanRenderer::advanceFrame(RecordingFrame prev)
@@ -673,7 +673,7 @@ GPU resources cannot be destroyed while still referenced by in-flight commands. 
 
 ### 8.2 Implementation
 
-From `VulkanDeferredRelease.h:56-98`:
+From `VulkanDeferredRelease.h`:
 
 ```cpp
 class DeferredReleaseQueue {
@@ -709,7 +709,7 @@ public:
 
 ### 8.3 Serial Management
 
-From `VulkanBufferManager.h:45-48`:
+From `VulkanBufferManager.h`:
 
 ```cpp
 // Set before recording; resources retired during this frame use serial+1
@@ -723,7 +723,7 @@ The retirement serial is set conservatively. Resources orphaned during frame N's
 
 ### 8.4 MoveOnlyFunction
 
-The queue uses a custom `MoveOnlyFunction` type-erased wrapper (`VulkanDeferredRelease.h:13-54`) because `std::function` requires copyable callables, but Vulkan RAII handles (`vk::UniqueBuffer`, `vk::UniqueDeviceMemory`) are move-only.
+The queue uses a custom `MoveOnlyFunction` type-erased wrapper (`VulkanDeferredRelease.h`) because `std::function` requires copyable callables, but Vulkan RAII handles (`vk::UniqueBuffer`, `vk::UniqueDeviceMemory`) are move-only.
 
 ---
 
@@ -733,12 +733,12 @@ The queue uses a custom `MoveOnlyFunction` type-erased wrapper (`VulkanDeferredR
 
 Ring buffers and host-visible managed buffers use persistent mapping:
 
-From `VulkanRingBuffer.cpp:35`:
+From `VulkanRingBuffer.cpp`:
 ```cpp
 m_mapped = m_device.mapMemory(m_memory.get(), 0, size);
 ```
 
-From `VulkanBufferManager.cpp:366-368`:
+From `VulkanBufferManager.cpp`:
 ```cpp
 if (getMemoryProperties(buffer.usage) & vk::MemoryPropertyFlagBits::eHostVisible) {
     buffer.mapped = m_device.mapMemory(buffer.memory.get(), 0, VK_WHOLE_SIZE);
@@ -749,7 +749,7 @@ The mapping persists for the buffer's lifetime. No `mapMemory`/`unmapMemory` cal
 
 ### 9.2 Host-Coherent Memory
 
-All host-visible buffers use `eHostCoherent` memory (`VulkanBufferManager.cpp:61-64`):
+All host-visible buffers use `eHostCoherent` memory:
 
 ```cpp
 case BufferUsageHint::Dynamic:
@@ -784,7 +784,7 @@ GPU: shader reads data
 
 ### 9.4 flushMappedBuffer Is a No-Op
 
-From `VulkanBufferManager.cpp:286-300`:
+From `VulkanBufferManager.cpp`:
 
 ```cpp
 void VulkanBufferManager::flushMappedBuffer(gr_buffer_handle handle, size_t offset, size_t size)
@@ -821,7 +821,7 @@ matrixInfo.range = sizeof(matrices);
 
 ### 10.2 Transform Buffer Upload
 
-From `VulkanGraphics.cpp:404-448`:
+From `VulkanGraphics.cpp`:
 
 ```cpp
 void gr_vulkan_update_transform_buffer(void* data, size_t size)
@@ -1037,15 +1037,15 @@ When capturing with RenderDoc:
 From various source files:
 
 ```cpp
-// VulkanConstants.h:8
+// VulkanConstants.h
 constexpr uint32_t kFramesInFlight = 2;
 
-// VulkanRenderer.h:206-208
+// VulkanRenderer.h
 static constexpr vk::DeviceSize UNIFORM_RING_SIZE  = 512 * 1024;       // 512 KB
 static constexpr vk::DeviceSize VERTEX_RING_SIZE   = 1024 * 1024;      // 1 MB
 static constexpr vk::DeviceSize STAGING_RING_SIZE  = 12 * 1024 * 1024; // 12 MB
 
-// VulkanConstants.h:9
+// VulkanConstants.h
 constexpr uint32_t kMaxBindlessTextures = 1024;
 ```
 

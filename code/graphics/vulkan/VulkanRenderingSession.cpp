@@ -175,52 +175,51 @@ bool VulkanRenderingSession::targetIsSwapchain() const {
          dynamic_cast<SwapchainNoDepthTarget *>(m_target.get()) != nullptr;
 }
 
-const char* VulkanRenderingSession::debugTargetName() const
-{
+const char *VulkanRenderingSession::debugTargetName() const {
   if (!m_target) {
     return "none";
   }
 
-  if (dynamic_cast<SwapchainWithDepthTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SwapchainWithDepthTarget *>(m_target.get()) != nullptr) {
     return "swapchain+depth";
   }
-  if (dynamic_cast<SwapchainNoDepthTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SwapchainNoDepthTarget *>(m_target.get()) != nullptr) {
     return "swapchain";
   }
-  if (dynamic_cast<SceneHdrWithDepthTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SceneHdrWithDepthTarget *>(m_target.get()) != nullptr) {
     return "scene_hdr+depth";
   }
-  if (dynamic_cast<SceneHdrNoDepthTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SceneHdrNoDepthTarget *>(m_target.get()) != nullptr) {
     return "scene_hdr";
   }
-  if (dynamic_cast<PostLdrTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<PostLdrTarget *>(m_target.get()) != nullptr) {
     return "post_ldr";
   }
-  if (dynamic_cast<PostLuminanceTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<PostLuminanceTarget *>(m_target.get()) != nullptr) {
     return "post_luminance";
   }
-  if (dynamic_cast<SmaaEdgesTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SmaaEdgesTarget *>(m_target.get()) != nullptr) {
     return "smaa_edges";
   }
-  if (dynamic_cast<SmaaBlendTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SmaaBlendTarget *>(m_target.get()) != nullptr) {
     return "smaa_blend";
   }
-  if (dynamic_cast<SmaaOutputTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<SmaaOutputTarget *>(m_target.get()) != nullptr) {
     return "smaa_output";
   }
-  if (dynamic_cast<BloomMipTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<BloomMipTarget *>(m_target.get()) != nullptr) {
     return "bloom_mip";
   }
-  if (dynamic_cast<DeferredGBufferTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<DeferredGBufferTarget *>(m_target.get()) != nullptr) {
     return "gbuffer";
   }
-  if (dynamic_cast<GBufferEmissiveTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<GBufferEmissiveTarget *>(m_target.get()) != nullptr) {
     return "gbuffer_emissive";
   }
-  if (dynamic_cast<GBufferAttachmentTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<GBufferAttachmentTarget *>(m_target.get()) != nullptr) {
     return "gbuffer_attachment";
   }
-  if (dynamic_cast<BitmapTarget*>(m_target.get()) != nullptr) {
+  if (dynamic_cast<BitmapTarget *>(m_target.get()) != nullptr) {
     return "bitmap";
   }
 

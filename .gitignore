@@ -40,12 +40,6 @@ _ReSharper*/
 [Tt]est[Rr]esult*
 *.sass-cache
 
-#Agent files
-.claude/
-AGENTS.md
-CLAUDE.md
-GEMINI.md
-
 #Project files
 [Bb]uild/
 [Oo]ut/
