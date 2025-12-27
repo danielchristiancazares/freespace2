@@ -407,8 +407,8 @@ The ring buffer system relies on `kFramesInFlight` to ensure resources from the 
 ### For Texture Users
 
 1. **Queue uploads early** - `queueTextureUpload()` at draw time; uploads flush at frame start
-2. **Expect fallback textures** - `getBindlessSlotIndex()` returns fallback if not resident
-3. **Respect staging budget** - very large textures may be marked unavailable
+2. **Expect fallback textures** - bindless sampling uses slot 0 until a texture is resident and has a slot assigned
+3. **Respect staging budget** - very large textures may be permanently rejected by the current upload algorithm
 
 ### For Memory Debugging
 

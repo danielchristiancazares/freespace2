@@ -850,12 +850,12 @@ The following locations use blocking device/queue waits:
 |----------|-----------|---------|
 | `VulkanRenderer.cpp` | `device().waitSemaphores()` (timeline) | `submitInitCommandsAndWait()` - blocking init command completion |
 | `VulkanRenderer.cpp` | `device().waitIdle()` | Shutdown synchronization before resource destruction |
-| `VulkanDevice.cpp:418` | `device->waitIdle()` | Pre-destruction cleanup |
-| `VulkanDevice.cpp:1059` | `device->waitIdle()` | Pre-swapchain recreation (ensure images not in use) |
-| `VulkanBufferManager.cpp:164` | `waitForFences()` | Buffer upload completion |
-| `VulkanTextureManager.cpp:289` | `transferQueue.waitIdle()` | Solid texture creation |
-| `VulkanTextureManager.cpp:549` | `transferQueue.waitIdle()` | Immediate texture upload |
-| `VulkanTextureManager.cpp:1785` | `transferQueue.waitIdle()` | Render target clear |
+| `VulkanDevice.cpp` | `device->waitIdle()` | Pre-destruction cleanup |
+| `VulkanDevice.cpp` | `device->waitIdle()` | Pre-swapchain recreation (ensure images not in use) |
+| `VulkanBufferManager.cpp` | `waitForFences()` | Buffer upload completion |
+| `VulkanTextureManager.cpp` | `transferQueue.waitIdle()` | Solid texture creation |
+| `VulkanTextureManager.cpp` | `transferQueue.waitIdle()` | Immediate texture upload |
+| `VulkanTextureManager.cpp` | `transferQueue.waitIdle()` | Render target clear |
 
 **Best Practices:**
 - Prefer fence waits over `waitIdle()` when possible (more targeted)

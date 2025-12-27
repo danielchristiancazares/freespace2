@@ -59,8 +59,8 @@ The HUD rendering system bridges the legacy immediate-mode graphics API (`gr_*` 
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `HudGauge` | `code/hud/hud.h:214` | Base class for all HUD gauges with render methods |
-| `material` | `code/graphics/material.h:32` | Encapsulates all pipeline state for a draw call |
+| `HudGauge` | `code/hud/hud.h` | Base class for all HUD gauges with render methods |
+| `material` | `code/graphics/material.h` | Encapsulates all pipeline state for a draw call |
 | `interface_material` | `code/graphics/material.h` | Specialized material for HUD/UI rendering |
 | `gr_vulkan_render_primitives` | `code/graphics/vulkan/VulkanGraphics.cpp` | Core Vulkan primitive rendering function |
 | `interface.frag` | `code/graphics/shaders/interface.frag` | Fragment shader for HUD rendering |
@@ -71,28 +71,28 @@ The HUD rendering system bridges the legacy immediate-mode graphics API (`gr_*` 
 The HUD system uses several shader types depending on the content being rendered:
 
 ```
-SDR_TYPE_INTERFACE (2d.h:201)
+SDR_TYPE_INTERFACE (2d.h)
     Purpose: HUD bitmaps, UI elements, gr_aabitmap()
     Shader files: interface.vert, interface.frag
     Color source: Uniform buffer (not per-vertex)
     Vertex format: Position + TexCoord only
 
-SDR_TYPE_DEFAULT_MATERIAL (2d.h:200)
+SDR_TYPE_DEFAULT_MATERIAL (2d.h)
     Purpose: Legacy text rendering (VFNT bitmap fonts)
     Shader files: default-material.vert, default-material.frag
     Color source: Per-vertex color attribute
     Vertex format: Position + TexCoord + Color
 
-SDR_TYPE_NANOVG (2d.h:202)
+SDR_TYPE_NANOVG (2d.h)
     Purpose: NanoVG text rendering (TrueType fonts)
     Requirement: Stencil buffer for path rendering
     Note: More complex pipeline with fill/stroke operations
 
-SDR_TYPE_BATCHED_BITMAP (2d.h:199)
+SDR_TYPE_BATCHED_BITMAP (2d.h)
     Purpose: Particle systems, batched effects
     Note: Optimized for many similar draw calls
 
-SDR_TYPE_ROCKET_UI (2d.h:206)
+SDR_TYPE_ROCKET_UI (2d.h)
     Purpose: RocketUI/RmlUI menu system
     Note: Separate UI framework with its own rendering
 ```
@@ -135,7 +135,7 @@ game_render_frame()
 
 ### Entry Point: hud_render_all()
 
-**File:** `code/hud/hud.cpp:2064`
+**File:** `code/hud/hud.cpp`
 
 ```cpp
 void hud_render_all(float frametime)
@@ -157,7 +157,7 @@ void hud_render_all(float frametime)
 
 ### Gauge Rendering Loop: hud_render_gauges()
 
-**File:** `code/hud/hud.cpp:2081`
+**File:** `code/hud/hud.cpp`
 
 This function iterates through all gauges and renders them. The `cockpit_display_num` parameter determines whether rendering targets the screen (`-1`) or a cockpit texture (`>= 0`).
 
@@ -228,7 +228,7 @@ void hud_render_gauges(int cockpit_display_num, float frametime)
 
 ### HudGauge Base Class
 
-**File:** `code/hud/hud.h:214`
+**File:** `code/hud/hud.h`
 
 The `HudGauge` class provides the foundation for all HUD elements. All specific gauge types (radar, target brackets, messages, etc.) inherit from this class.
 
@@ -314,7 +314,7 @@ public:
 
 #### renderBitmap()
 
-**File:** `code/hud/hud.cpp:1052`
+**File:** `code/hud/hud.cpp`
 
 Renders a bitmap using `gr_aabitmap()` with proper scaling and EMP jitter effects:
 
@@ -362,7 +362,7 @@ void HudGauge::renderBitmap(int x, int y, float scale, bool config) const
 
 #### renderString()
 
-**File:** `code/hud/hud.cpp:899`
+**File:** `code/hud/hud.cpp`
 
 Renders text with optional shadow effect for readability:
 
@@ -635,7 +635,7 @@ vec4 linear_to_srgb(vec4 val) {
 
 ### Blend Mode Enumeration
 
-**File:** `code/graphics/grinternal.h:60`
+**File:** `code/graphics/grinternal.h`
 
 ```cpp
 typedef enum gr_alpha_blend {
@@ -702,7 +702,7 @@ AA (Anti-Aliased) bitmaps are single-channel (grayscale) textures where the valu
 
 ### Texture Cache Types
 
-**File:** `code/graphics/grinternal.h:50`
+**File:** `code/graphics/grinternal.h`
 
 ```cpp
 #define TCACHE_TYPE_AABITMAP    0  // Single-channel alpha/coverage texture
@@ -716,7 +716,7 @@ AA (Anti-Aliased) bitmaps are single-channel (grayscale) textures where the valu
 
 ### gr_aabitmap() Implementation
 
-**File:** `code/graphics/render.cpp:199`
+**File:** `code/graphics/render.cpp`
 
 ```cpp
 void gr_aabitmap(int x, int y, int resize_mode, bool mirror, float scale_factor)
@@ -781,7 +781,7 @@ void gr_aabitmap(int x, int y, int resize_mode, bool mirror, float scale_factor)
 
 ### AA Bitmap Material Setup
 
-**File:** `code/graphics/render.cpp:179`
+**File:** `code/graphics/render.cpp`
 
 ```cpp
 static void bitmap_ex_internal(..., bool aabitmap, ...)
@@ -811,7 +811,7 @@ static void bitmap_ex_internal(..., bool aabitmap, ...)
 
 ### Shader Handling of AA Textures
 
-**File:** `code/graphics/shaders/interface.frag:28-31`
+**File:** `code/graphics/shaders/interface.frag`
 
 ```glsl
 // AA bitmaps are R8 format - coverage is in the red channel
@@ -897,7 +897,7 @@ vk::Rect2D createClipScissor()
 
 HUD gauges use a virtual coordinate system based on a reference resolution (typically 1024x768 or 640x480). These coordinates are scaled to match the actual screen resolution at render time.
 
-**File:** `code/hud/hud.cpp:906`
+**File:** `code/hud/hud.cpp`
 
 ```cpp
 if (gr_screen.rendering_to_texture != -1) {
@@ -966,7 +966,7 @@ struct font_data {
 
 ### VFNT Text Rendering Path
 
-**File:** `code/graphics/render.cpp:567`
+**File:** `code/graphics/render.cpp`
 
 VFNT rendering builds a vertex buffer of quads (2 triangles each) and submits them in batches:
 
@@ -1124,7 +1124,7 @@ int ship_start_render_cockpit_display(size_t cockpit_display_num)
 
 ### Gauge Render Canvas Setup
 
-**File:** `code/hud/hud.cpp:1453`
+**File:** `code/hud/hud.cpp`
 
 This function determines whether a gauge should render to the current target:
 
@@ -1244,7 +1244,7 @@ cmd.setScissor(0, 1, &scissor);
 
 ### Z-Buffer Type Enumeration
 
-**File:** `code/graphics/grinternal.h:69`
+**File:** `code/graphics/grinternal.h`
 
 ```cpp
 typedef enum gr_zbuffer_type {
@@ -1313,7 +1313,7 @@ These integrate with:
 
 EMP effects can disable HUD gauge rendering and add random jitter to positions:
 
-**File:** `code/hud/hud.h:88`
+**File:** `code/hud/hud.h`
 
 ```cpp
 #define GR_AABITMAP(a, b, c) {                  \
@@ -1376,7 +1376,7 @@ if ( cockpit_display_num >= 0 ) {
 
 HUD rendering is completely disabled during supernova events to enhance the dramatic effect:
 
-**File:** `code/hud/hud.cpp:2102`
+**File:** `code/hud/hud.cpp`
 
 ```cpp
 if( supernova_stage() >= SUPERNOVA_STAGE::HIT) {
@@ -1424,16 +1424,16 @@ mat.set_texture_type(material::TEX_TYPE_AABITMAP);  // For fonts/masks
 
 | Purpose | File Path |
 |---------|-----------|
-| HUD gauge base class | `code/hud/hud.h:214` |
-| HUD rendering entry point | `code/hud/hud.cpp:2064` |
+| HUD gauge base class | `code/hud/hud.h` |
+| HUD rendering entry point | `code/hud/hud.cpp` |
 | Vulkan primitive rendering | `code/graphics/vulkan/VulkanGraphics.cpp` |
 | Interface fragment shader | `code/graphics/shaders/interface.frag` |
 | Interface vertex shader | `code/graphics/shaders/interface.vert` |
-| Material class | `code/graphics/material.h:32` |
-| Blend mode definitions | `code/graphics/grinternal.h:60` |
-| Font rendering | `code/graphics/render.cpp:567` |
-| gr_aabitmap implementation | `code/graphics/render.cpp:199` |
-| Shader type enumeration | `code/graphics/2d.h:199` |
+| Material class | `code/graphics/material.h` |
+| Blend mode definitions | `code/graphics/grinternal.h` |
+| Font rendering | `code/graphics/render.cpp` |
+| gr_aabitmap implementation | `code/graphics/render.cpp` |
+| Shader type enumeration | `code/graphics/2d.h` |
 | Gamma conversion functions | `code/def_files/data/effects/gamma.sdr` |
 
 ---

@@ -14,6 +14,8 @@ set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 			${SHADER_DIR}/decal_diffuse.frag
 			${SHADER_DIR}/decal_emissive.frag
 			${SHADER_DIR}/decal_normal.frag
+			${SHADER_DIR}/flat-color.frag
+			${SHADER_DIR}/flat-color.vert
 			${SHADER_DIR}/tonemapping.frag
 			${SHADER_DIR}/tonemapping.vert
 			${SHADER_DIR}/post_uv.vert

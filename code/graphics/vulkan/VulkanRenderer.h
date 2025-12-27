@@ -244,7 +244,7 @@ private:
 
   // Descriptor sync helpers (called from beginFrame).
   void updateModelDescriptors(uint32_t frameIndex, vk::DescriptorSet set, vk::Buffer vertexHeapBuffer,
-                              vk::Buffer transformBuffer, const std::vector<std::pair<uint32_t, int>> &textures);
+                              vk::Buffer transformBuffer, const std::vector<std::pair<uint32_t, TextureId>> &textures);
 
   void createUploadCommandPool();
   void createSubmitTimelineSemaphore();

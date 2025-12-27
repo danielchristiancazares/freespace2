@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -155,13 +156,34 @@ void VulkanTextureManager::createDefaultSampler() {
   m_defaultSampler = m_device.createSamplerUnique(samplerInfo);
 }
 
+bool VulkanTextureManager::PendingUploadQueue::enqueue(TextureId id) {
+  if (!m_membership.insert(id).second) {
+    return false;
+  }
+  m_fifo.push_back(id);
+  return true;
+}
+
+bool VulkanTextureManager::PendingUploadQueue::erase(TextureId id) {
+  if (m_membership.erase(id) == 0) {
+    return false;
+  }
+  auto newEnd = std::remove(m_fifo.begin(), m_fifo.end(), id);
+  m_fifo.erase(newEnd, m_fifo.end());
+  return true;
+}
+
+std::deque<TextureId> VulkanTextureManager::PendingUploadQueue::takeAll() {
+  m_membership.clear();
+  return std::exchange(m_fifo, {});
+}
+
 VulkanTexture VulkanTextureManager::createSolidTexture(const uint8_t rgba[4]) {
   // Create a 1x1 RGBA texture for use as a stable descriptor target.
   constexpr uint32_t width = 1;
   constexpr uint32_t height = 1;
   constexpr vk::Format format = vk::Format::eR8G8B8A8Unorm;
 
-  // Create staging buffer
   vk::BufferCreateInfo bufInfo;
   bufInfo.size = 4;
   bufInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
@@ -176,12 +198,10 @@ VulkanTexture VulkanTextureManager::createSolidTexture(const uint8_t rgba[4]) {
   auto stagingMem = m_device.allocateMemoryUnique(allocInfo);
   m_device.bindBufferMemory(stagingBuf.get(), stagingMem.get(), 0);
 
-  // Copy pixel data to staging
   void *mapped = m_device.mapMemory(stagingMem.get(), 0, 4);
   std::memcpy(mapped, rgba, 4);
   m_device.unmapMemory(stagingMem.get());
 
-  // Create image
   vk::ImageCreateInfo imageInfo;
   imageInfo.imageType = vk::ImageType::e2D;
   imageInfo.format = format;
@@ -264,14 +284,13 @@ VulkanTexture VulkanTextureManager::createSolidTexture(const uint8_t rgba[4]) {
 
   cmdBuf.end();
 
-  // Submit and wait
   vk::SubmitInfo submitInfo;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmdBuf;
-  m_transferQueue.submit(submitInfo, nullptr);
-  m_transferQueue.waitIdle();
+  auto fence = m_device.createFenceUnique(vk::FenceCreateInfo{});
+  m_transferQueue.submit(submitInfo, fence.get());
+  (void)m_device.waitForFences(fence.get(), VK_TRUE, std::numeric_limits<uint64_t>::max());
 
-  // Create view
   vk::ImageViewCreateInfo viewInfo;
   viewInfo.image = image.get();
   viewInfo.viewType = vk::ImageViewType::e2DArray;
@@ -296,8 +315,7 @@ VulkanTexture VulkanTextureManager::createSolidTexture(const uint8_t rgba[4]) {
 }
 
 vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey &key) const {
-  const size_t hash = (static_cast<size_t>(key.filter) << 4) ^ static_cast<size_t>(key.address);
-  auto it = m_samplerCache.find(hash);
+  auto it = m_samplerCache.find(key);
   if (it != m_samplerCache.end()) {
     return it->second.get();
   }
@@ -321,11 +339,12 @@ vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey &key) cons
 
   auto sampler = m_device.createSamplerUnique(samplerInfo);
   vk::Sampler handle = sampler.get();
-  m_samplerCache.emplace(hash, std::move(sampler));
+  m_samplerCache.emplace(key, std::move(sampler));
   return handle;
 }
 
-bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
+bool VulkanTextureManager::uploadImmediate(TextureId id, bool isAABitmap) {
+  int baseFrame = id.baseFrame();
   int numFrames = 1;
   const int resolvedBase = bm_get_base_frame(baseFrame, &numFrames);
   if (resolvedBase < 0) {
@@ -368,7 +387,6 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   const size_t layerSize = layout.layerSize;
   const size_t totalSize = layout.totalSize;
 
-  // Create staging buffer
   vk::BufferCreateInfo bufInfo;
   bufInfo.size = static_cast<vk::DeviceSize>(totalSize);
   bufInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
@@ -383,7 +401,6 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   auto stagingMem = m_device.allocateMemoryUnique(allocInfo);
   m_device.bindBufferMemory(stagingBuf.get(), stagingMem.get(), 0);
 
-  // Map and copy
   void *mapped = m_device.mapMemory(stagingMem.get(), 0, static_cast<vk::DeviceSize>(totalSize));
   for (uint32_t layer = 0; layer < layers; ++layer) {
     const size_t offset = layout.layerOffsets[layer];
@@ -431,7 +448,6 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   }
   m_device.unmapMemory(stagingMem.get());
 
-  // Create image
   vk::ImageCreateInfo imageInfo;
   imageInfo.imageType = vk::ImageType::e2D;
   imageInfo.format = format;
@@ -451,7 +467,6 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   auto imageMem = m_device.allocateMemoryUnique(imgAllocInfo);
   m_device.bindImageMemory(image.get(), imageMem.get(), 0);
 
-  // Command pool + buffer
   vk::CommandPoolCreateInfo poolInfo;
   poolInfo.queueFamilyIndex = m_transferQueueIndex;
   poolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient;
@@ -521,10 +536,10 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   vk::SubmitInfo submitInfo;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmdBuf;
-  m_transferQueue.submit(submitInfo, nullptr);
-  m_transferQueue.waitIdle();
+  auto fence = m_device.createFenceUnique(vk::FenceCreateInfo{});
+  m_transferQueue.submit(submitInfo, fence.get());
+  (void)m_device.waitForFences(fence.get(), VK_TRUE, std::numeric_limits<uint64_t>::max());
 
-  // Create view
   vk::ImageViewCreateInfo viewInfo;
   viewInfo.image = image.get();
   viewInfo.viewType = vk::ImageViewType::e2DArray;
@@ -534,8 +549,8 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   viewInfo.subresourceRange.layerCount = layers;
   auto view = m_device.createImageViewUnique(viewInfo);
 
-  // Store as resident texture
-  ResidentTexture record{};
+  (void)isAABitmap;
+  BitmapTexture record{};
   record.gpu.image = std::move(image);
   record.gpu.memory = std::move(imageMem);
   record.gpu.imageView = std::move(view);
@@ -547,9 +562,11 @@ bool VulkanTextureManager::uploadImmediate(int baseFrame, bool isAABitmap) {
   record.gpu.format = format;
   // Image already transitioned to shader read layout in the upload command buffer.
   record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  record.usage.lastUsedFrame = m_currentFrameIndex;
+  record.usage.lastUsedSerial = m_safeRetireSerial;
 
-  m_residentTextures[baseFrame] = std::move(record);
-  onTextureResident(baseFrame);
+  const TextureId resolvedId = TextureId::fromBaseFrameUnchecked(baseFrame);
+  m_bitmaps.insert_or_assign(resolvedId, std::move(record));
   return true;
 }
 
@@ -621,268 +638,252 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
 
   processPendingRetirements();
 
-  // Resolve any pending bindless slot requests at the frame-start safe point (before descriptor sync).
-  retryPendingBindlessSlots();
+  if (!m_pendingUploads.empty()) {
+    const vk::DeviceSize stagingBudget = frame.stagingBuffer().size();
+    vk::DeviceSize stagingUsed = 0;
+    PendingUploadQueue remaining;
 
-  if (m_pendingUploads.empty()) {
-    return;
-  }
-
-  vk::DeviceSize stagingBudget = frame.stagingBuffer().size();
-  vk::DeviceSize stagingUsed = 0;
-  std::vector<int> remaining;
-  remaining.reserve(m_pendingUploads.size());
-
-  auto markUnavailable = [&](int baseFrame, UnavailableReason reason) {
-    m_unavailableTextures.insert_or_assign(baseFrame, UnavailableTexture{reason});
-    m_pendingBindlessSlots.erase(baseFrame);
-
-    // Drop any slot mapping: an unavailable texture should not consume bindless slots.
-    auto slotIt = m_bindlessSlots.find(baseFrame);
-    if (slotIt != m_bindlessSlots.end()) {
-      const uint32_t slot = slotIt->second;
-      m_bindlessSlots.erase(slotIt);
-      if (isDynamicBindlessSlot(slot)) {
-        m_freeBindlessSlots.push_back(slot);
+    const auto pending = m_pendingUploads.takeAll();
+    for (const TextureId id : pending) {
+      if (isResident(id)) {
+        continue;
       }
-    }
-  };
+      if (m_permanentlyRejected.find(id) != m_permanentlyRejected.end()) {
+        continue;
+      }
 
-  for (int baseFrame : m_pendingUploads) {
-    // State as location:
-    // - If already resident, nothing to do.
-    // - If permanently unavailable, do not retry.
-    if (m_residentTextures.find(baseFrame) != m_residentTextures.end()) {
-      continue;
-    }
-    if (m_unavailableTextures.find(baseFrame) != m_unavailableTextures.end()) {
-      continue;
-    }
+      const int baseFrame = id.baseFrame();
+      int numFrames = 1;
+      const int resolvedBase = bm_get_base_frame(baseFrame, &numFrames);
+      if (resolvedBase < 0) {
+        // bmpman released this handle; releaseBitmap() should have removed it from the queue,
+        // but handle it defensively to prevent poisoning.
+        continue;
+      }
 
-    int numFrames = 1;
-    const int resolvedBase = bm_get_base_frame(baseFrame, &numFrames);
-    if (resolvedBase < 0) {
-      markUnavailable(baseFrame, UnavailableReason::InvalidHandle);
-      continue;
-    }
-    const bool isArray = bm_is_texture_array(baseFrame);
-    const uint32_t layers = isArray ? static_cast<uint32_t>(numFrames) : 1u;
+      const bool isArray = bm_is_texture_array(baseFrame);
+      const uint32_t layers = isArray ? static_cast<uint32_t>(numFrames) : 1u;
 
-    ushort flags = 0;
-    int w = 0, h = 0;
-    bm_get_info(baseFrame, &w, &h, &flags, nullptr, nullptr);
+      ushort flags = 0;
+      bm_get_info(baseFrame, nullptr, nullptr, &flags, nullptr, nullptr);
 
-    auto *bmp0 = bm_lock(baseFrame, 32, flags);
-    if (!bmp0) {
-      markUnavailable(baseFrame, UnavailableReason::BmpLockFailed);
-      continue;
-    }
-    const bool compressed = isCompressed(*bmp0);
-    const vk::Format format = selectFormat(*bmp0);
-    const bool singleChannel = format == vk::Format::eR8Unorm;
-    const uint32_t width = bmp0->w;
-    const uint32_t height = bmp0->h;
-    bm_unlock(baseFrame);
+      auto *bmp0 = bm_lock(baseFrame, 32, flags);
+      if (!bmp0) {
+        // Transient failure: do not cache. Caller will re-request if needed.
+        continue;
+      }
 
-    bool validArray = true;
-    if (isArray) {
-      for (int i = 0; i < numFrames; ++i) {
-        ushort f = 0;
-        int fw = 0, fh = 0;
-        bm_get_info(baseFrame + i, &fw, &fh, &f, nullptr, nullptr);
-        if (static_cast<uint32_t>(fw) != width || static_cast<uint32_t>(fh) != height ||
-            ((f & BMP_TEX_COMP) != (flags & BMP_TEX_COMP))) {
-          validArray = false;
+      const bool compressed = isCompressed(*bmp0);
+      const vk::Format format = selectFormat(*bmp0);
+      const bool singleChannel = format == vk::Format::eR8Unorm;
+      const uint32_t width = bmp0->w;
+      const uint32_t height = bmp0->h;
+      bm_unlock(baseFrame);
+
+      bool validArray = true;
+      if (isArray) {
+        for (int i = 0; i < numFrames; ++i) {
+          ushort f = 0;
+          int fw = 0, fh = 0;
+          bm_get_info(baseFrame + i, &fw, &fh, &f, nullptr, nullptr);
+          if (static_cast<uint32_t>(fw) != width || static_cast<uint32_t>(fh) != height ||
+              ((f & BMP_TEX_COMP) != (flags & BMP_TEX_COMP))) {
+            validArray = false;
+            break;
+          }
+        }
+      }
+
+      if (!validArray) {
+        // Domain invalid under current algorithm - do not retry automatically.
+        m_permanentlyRejected.insert(id);
+        continue;
+      }
+
+      // Estimate upload size for budget check.
+      size_t totalUploadSize = 0;
+      for (uint32_t layer = 0; layer < layers; ++layer) {
+        totalUploadSize += compressed      ? calculateCompressedSize(width, height, format)
+                           : singleChannel ? static_cast<size_t>(width) * height
+                                           : static_cast<size_t>(width) * height * 4;
+      }
+
+      // Textures that can never fit in the staging buffer are outside the supported domain for this upload algorithm.
+      if (static_cast<vk::DeviceSize>(totalUploadSize) > stagingBudget) {
+        m_permanentlyRejected.insert(id);
+        continue;
+      }
+
+      if (stagingUsed + static_cast<vk::DeviceSize>(totalUploadSize) > stagingBudget) {
+        (void)remaining.enqueue(id);
+        continue; // defer to next frame
+      }
+
+      std::vector<vk::BufferImageCopy> regions;
+      regions.reserve(layers);
+      bool stagingFailed = false;
+
+      for (uint32_t layer = 0; layer < layers; ++layer) {
+        const int frameHandle = isArray ? baseFrame + static_cast<int>(layer) : baseFrame;
+        auto *frameBmp = bm_lock(frameHandle, 32, flags);
+        if (!frameBmp) {
+          stagingFailed = true;
           break;
         }
-      }
-    }
-    if (!validArray) {
-      markUnavailable(baseFrame, UnavailableReason::InvalidArray);
-      continue;
-    }
 
-    // Estimate upload size for budget check
-    size_t totalUploadSize = 0;
-    for (uint32_t layer = 0; layer < layers; ++layer) {
-      totalUploadSize += compressed      ? calculateCompressedSize(width, height, format)
-                         : singleChannel ? static_cast<size_t>(width) * height
-                                         : static_cast<size_t>(width) * height * 4;
-    }
+        const size_t layerSize = compressed      ? calculateCompressedSize(width, height, format)
+                                 : singleChannel ? static_cast<size_t>(width) * height
+                                                 : static_cast<size_t>(width) * height * 4;
 
-    // Textures that can never fit in the staging buffer are unavailable under the current algorithm.
-    if (totalUploadSize > stagingBudget) {
-      markUnavailable(baseFrame, UnavailableReason::TooLargeForStaging);
-      continue;
-    }
+        auto allocOpt = frame.stagingBuffer().try_allocate(static_cast<vk::DeviceSize>(layerSize));
+        if (!allocOpt) {
+          // Staging buffer exhausted - defer to next frame.
+          bm_unlock(frameHandle);
+          (void)remaining.enqueue(id);
+          stagingFailed = true;
+          break;
+        }
+        auto &alloc = *allocOpt;
 
-    if (stagingUsed + totalUploadSize > stagingBudget) {
-      remaining.push_back(baseFrame);
-      continue; // defer to next frame
-    }
+        if (!compressed && !singleChannel && frameBmp->bpp == 24) {
+          auto *src = reinterpret_cast<uint8_t *>(frameBmp->data);
+          auto *dst = static_cast<uint8_t *>(alloc.mapped);
+          for (uint32_t i = 0; i < width * height; ++i) {
+            dst[i * 4 + 0] = src[i * 3 + 0];
+            dst[i * 4 + 1] = src[i * 3 + 1];
+            dst[i * 4 + 2] = src[i * 3 + 2];
+            dst[i * 4 + 3] = 255;
+          }
+        } else if (!compressed && !singleChannel && frameBmp->bpp == 16) {
+          // 16bpp textures in bmpman use A1R5G5B5 packing (see Gr_t_* masks in code/graphics/2d.cpp).
+          // Expand to BGRA8 to match eB8G8R8A8Unorm.
+          auto *src = reinterpret_cast<uint16_t *>(frameBmp->data);
+          auto *dst = static_cast<uint8_t *>(alloc.mapped);
+          for (uint32_t i = 0; i < width * height; ++i) {
+            const uint16_t pixel = src[i];
+            const uint8_t b = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
+            const uint8_t g = static_cast<uint8_t>(((pixel >> 5) & 0x1F) * 255 / 31);
+            const uint8_t r = static_cast<uint8_t>(((pixel >> 10) & 0x1F) * 255 / 31);
+            const uint8_t a = (pixel & 0x8000) ? 255u : 0u;
 
-    std::vector<vk::BufferImageCopy> regions;
-    regions.reserve(layers);
-    bool stagingFailed = false;
+            dst[i * 4 + 0] = b;
+            dst[i * 4 + 1] = g;
+            dst[i * 4 + 2] = r;
+            dst[i * 4 + 3] = a;
+          }
+        } else if (!compressed && singleChannel) {
+          std::memcpy(alloc.mapped, reinterpret_cast<uint8_t *>(frameBmp->data), layerSize);
+        } else {
+          // 32bpp or compressed - use actual data size.
+          const size_t actualSize =
+              compressed ? layerSize : static_cast<size_t>(width) * height * bytesPerPixel(*frameBmp);
+          std::memcpy(alloc.mapped, reinterpret_cast<uint8_t *>(frameBmp->data), actualSize);
+        }
 
-    for (uint32_t layer = 0; layer < layers; ++layer) {
-      const int frameHandle = isArray ? baseFrame + static_cast<int>(layer) : baseFrame;
-      auto *frameBmp = bm_lock(frameHandle, 32, flags);
-      if (!frameBmp) {
-        markUnavailable(baseFrame, UnavailableReason::BmpLockFailed);
-        stagingFailed = true;
-        break;
-      }
+        vk::BufferImageCopy region{};
+        region.bufferOffset = alloc.offset;
+        region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = layer;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = vk::Extent3D(width, height, 1);
+        region.imageOffset = vk::Offset3D(0, 0, 0);
 
-      size_t layerSize = compressed      ? calculateCompressedSize(width, height, format)
-                         : singleChannel ? static_cast<size_t>(width) * height
-                                         : static_cast<size_t>(width) * height * 4;
-
-      auto allocOpt = frame.stagingBuffer().try_allocate(static_cast<vk::DeviceSize>(layerSize));
-      if (!allocOpt) {
-        // Staging buffer exhausted - defer to next frame.
+        regions.push_back(region);
         bm_unlock(frameHandle);
-        remaining.push_back(baseFrame);
-        stagingFailed = true;
-        break;
-      }
-      auto &alloc = *allocOpt;
-
-      if (!compressed && !singleChannel && frameBmp->bpp == 24) {
-        auto *src = reinterpret_cast<uint8_t *>(frameBmp->data);
-        auto *dst = static_cast<uint8_t *>(alloc.mapped);
-        for (uint32_t i = 0; i < width * height; ++i) {
-          dst[i * 4 + 0] = src[i * 3 + 0];
-          dst[i * 4 + 1] = src[i * 3 + 1];
-          dst[i * 4 + 2] = src[i * 3 + 2];
-          dst[i * 4 + 3] = 255;
-        }
-      } else if (!compressed && !singleChannel && frameBmp->bpp == 16) {
-        // 16bpp textures in bmpman use A1R5G5B5 packing (see Gr_t_* masks in code/graphics/2d.cpp).
-        // Expand to BGRA8 to match eB8G8R8A8Unorm.
-        auto *src = reinterpret_cast<uint16_t *>(frameBmp->data);
-        auto *dst = static_cast<uint8_t *>(alloc.mapped);
-        for (uint32_t i = 0; i < width * height; ++i) {
-          const uint16_t pixel = src[i];
-          const uint8_t b = static_cast<uint8_t>((pixel & 0x1F) * 255 / 31);
-          const uint8_t g = static_cast<uint8_t>(((pixel >> 5) & 0x1F) * 255 / 31);
-          const uint8_t r = static_cast<uint8_t>(((pixel >> 10) & 0x1F) * 255 / 31);
-          const uint8_t a = (pixel & 0x8000) ? 255u : 0u;
-
-          dst[i * 4 + 0] = b;
-          dst[i * 4 + 1] = g;
-          dst[i * 4 + 2] = r;
-          dst[i * 4 + 3] = a;
-        }
-      } else if (!compressed && singleChannel) {
-        std::memcpy(alloc.mapped, reinterpret_cast<uint8_t *>(frameBmp->data), layerSize);
-      } else {
-        // 32bpp or compressed - use actual data size
-        size_t actualSize = compressed ? layerSize : static_cast<size_t>(width) * height * bytesPerPixel(*frameBmp);
-        std::memcpy(alloc.mapped, reinterpret_cast<uint8_t *>(frameBmp->data), actualSize);
       }
 
-      vk::BufferImageCopy region{};
-      region.bufferOffset = alloc.offset;
-      region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
-      region.imageSubresource.mipLevel = 0;
-      region.imageSubresource.baseArrayLayer = layer;
-      region.imageSubresource.layerCount = 1;
-      region.imageExtent = vk::Extent3D(width, height, 1);
-      region.imageOffset = vk::Offset3D(0, 0, 0);
+      if (stagingFailed) {
+        continue;
+      }
 
-      regions.push_back(region);
-      bm_unlock(frameHandle);
+      // Create image resources now that staging succeeded.
+      vk::ImageCreateInfo imageInfo{};
+      imageInfo.imageType = vk::ImageType::e2D;
+      imageInfo.format = format;
+      imageInfo.extent = vk::Extent3D(width, height, 1);
+      imageInfo.mipLevels = 1;
+      imageInfo.arrayLayers = layers;
+      imageInfo.samples = vk::SampleCountFlagBits::e1;
+      imageInfo.tiling = vk::ImageTiling::eOptimal;
+      imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+      imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+
+      BitmapTexture record{};
+      record.gpu.image = m_device.createImageUnique(imageInfo);
+      auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
+      vk::MemoryAllocateInfo imgAlloc{};
+      imgAlloc.allocationSize = imgReqs.size;
+      imgAlloc.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
+      record.gpu.memory = m_device.allocateMemoryUnique(imgAlloc);
+      m_device.bindImageMemory(record.gpu.image.get(), record.gpu.memory.get(), 0);
+
+      record.gpu.width = width;
+      record.gpu.height = height;
+      record.gpu.layers = layers;
+      record.gpu.mipLevels = 1;
+      record.gpu.format = format;
+      record.gpu.sampler = m_defaultSampler.get();
+
+      // Transition to transfer dst.
+      vk::ImageMemoryBarrier2 toTransfer{};
+      toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+      toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+      toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+      toTransfer.oldLayout = vk::ImageLayout::eUndefined;
+      toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
+      toTransfer.image = record.gpu.image.get();
+      toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+      toTransfer.subresourceRange.levelCount = 1;
+      toTransfer.subresourceRange.layerCount = layers;
+      vk::DependencyInfo depToTransfer{};
+      depToTransfer.imageMemoryBarrierCount = 1;
+      depToTransfer.pImageMemoryBarriers = &toTransfer;
+      cmd.pipelineBarrier2(depToTransfer);
+
+      stagingUsed += static_cast<vk::DeviceSize>(totalUploadSize);
+      cmd.copyBufferToImage(frame.stagingBuffer().buffer(), record.gpu.image.get(),
+                            vk::ImageLayout::eTransferDstOptimal, static_cast<uint32_t>(regions.size()),
+                            regions.data());
+
+      // Barrier to shader read.
+      vk::ImageMemoryBarrier2 toShader{};
+      toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+      toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+      toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+      toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+      toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+      toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+      toShader.image = record.gpu.image.get();
+      toShader.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+      toShader.subresourceRange.levelCount = 1;
+      toShader.subresourceRange.layerCount = layers;
+      vk::DependencyInfo depToShader{};
+      depToShader.imageMemoryBarrierCount = 1;
+      depToShader.pImageMemoryBarriers = &toShader;
+      cmd.pipelineBarrier2(depToShader);
+
+      vk::ImageViewCreateInfo viewInfo{};
+      viewInfo.image = record.gpu.image.get();
+      viewInfo.viewType = vk::ImageViewType::e2DArray;
+      viewInfo.format = format;
+      viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+      viewInfo.subresourceRange.levelCount = 1;
+      viewInfo.subresourceRange.layerCount = layers;
+      record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
+
+      record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+      record.usage.lastUsedFrame = currentFrameIndex;
+      record.usage.lastUsedSerial = m_safeRetireSerial;
+
+      m_bitmaps.emplace(id, std::move(record));
     }
 
-    if (stagingFailed) {
-      continue;
-    }
-
-    // Create image resources now that staging succeeded
-    vk::ImageCreateInfo imageInfo;
-    imageInfo.imageType = vk::ImageType::e2D;
-    imageInfo.format = format;
-    imageInfo.extent = vk::Extent3D(width, height, 1);
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = layers;
-    imageInfo.samples = vk::SampleCountFlagBits::e1;
-    imageInfo.tiling = vk::ImageTiling::eOptimal;
-    imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
-    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
-
-    ResidentTexture record{};
-
-    record.gpu.image = m_device.createImageUnique(imageInfo);
-    auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
-    vk::MemoryAllocateInfo imgAlloc;
-    imgAlloc.allocationSize = imgReqs.size;
-    imgAlloc.memoryTypeIndex = findMemoryType(imgReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    record.gpu.memory = m_device.allocateMemoryUnique(imgAlloc);
-    m_device.bindImageMemory(record.gpu.image.get(), record.gpu.memory.get(), 0);
-
-    record.gpu.width = width;
-    record.gpu.height = height;
-    record.gpu.layers = layers;
-    record.gpu.mipLevels = 1;
-    record.gpu.format = format;
-    record.gpu.sampler = m_defaultSampler.get();
-
-    // Transition to transfer dst
-    vk::ImageMemoryBarrier2 toTransfer{};
-    toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-    toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-    toTransfer.oldLayout = vk::ImageLayout::eUndefined;
-    toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
-    toTransfer.image = record.gpu.image.get();
-    toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    toTransfer.subresourceRange.levelCount = 1;
-    toTransfer.subresourceRange.layerCount = layers;
-    vk::DependencyInfo depToTransfer{};
-    depToTransfer.imageMemoryBarrierCount = 1;
-    depToTransfer.pImageMemoryBarriers = &toTransfer;
-    cmd.pipelineBarrier2(depToTransfer);
-
-    stagingUsed += static_cast<vk::DeviceSize>(totalUploadSize);
-    cmd.copyBufferToImage(frame.stagingBuffer().buffer(), record.gpu.image.get(), vk::ImageLayout::eTransferDstOptimal,
-                          static_cast<uint32_t>(regions.size()), regions.data());
-
-    // Barrier to shader read
-    vk::ImageMemoryBarrier2 toShader{};
-    toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-    toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-    toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-    toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-    toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    toShader.image = record.gpu.image.get();
-    toShader.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    toShader.subresourceRange.levelCount = 1;
-    toShader.subresourceRange.layerCount = layers;
-    vk::DependencyInfo depToShader{};
-    depToShader.imageMemoryBarrierCount = 1;
-    depToShader.pImageMemoryBarriers = &toShader;
-    cmd.pipelineBarrier2(depToShader);
-
-    // Create view
-    vk::ImageViewCreateInfo viewInfo;
-    viewInfo.image = record.gpu.image.get();
-    viewInfo.viewType = vk::ImageViewType::e2DArray;
-    viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.layerCount = layers;
-    record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
-
-    record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    record.lastUsedFrame = currentFrameIndex;
-
-    m_residentTextures.emplace(baseFrame, std::move(record));
-    onTextureResident(baseFrame);
+    m_pendingUploads = std::move(remaining);
   }
 
-  m_pendingUploads.swap(remaining);
+  // Bindless slot assignment is also an upload-phase safe point; this must run even when no new uploads exist.
+  assignBindlessSlots(ctx);
 }
 
 bool VulkanTextureManager::updateTexture(const UploadCtx &ctx, int bitmapHandle, int bpp, const ubyte *data, int width,
@@ -905,8 +906,14 @@ bool VulkanTextureManager::updateTexture(const UploadCtx &ctx, int bitmapHandle,
     return false;
   }
 
-  // Permanently unavailable textures do not retry.
-  if (m_unavailableTextures.find(baseFrame) != m_unavailableTextures.end()) {
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrame);
+  if (!idOpt.has_value()) {
+    return false;
+  }
+  const TextureId id = *idOpt;
+
+  // Outside the supported domain for this upload algorithm - do not retry automatically.
+  if (m_permanentlyRejected.find(id) != m_permanentlyRejected.end()) {
     return false;
   }
 
@@ -918,10 +925,10 @@ bool VulkanTextureManager::updateTexture(const UploadCtx &ctx, int bitmapHandle,
   const uint32_t h = static_cast<uint32_t>(height);
 
   // Ensure a resident texture exists for this handle. Dynamic updates rely on an existing VkImage.
-  auto it = m_residentTextures.find(baseFrame);
-  if (it == m_residentTextures.end()) {
+  auto it = m_bitmaps.find(id);
+  if (it == m_bitmaps.end()) {
     // Don't overwrite bmpman render targets.
-    if (hasRenderTarget(baseFrame)) {
+    if (m_targets.find(id) != m_targets.end()) {
       return false;
     }
 
@@ -957,7 +964,7 @@ bool VulkanTextureManager::updateTexture(const UploadCtx &ctx, int bitmapHandle,
     imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
     imageInfo.initialLayout = vk::ImageLayout::eUndefined;
 
-    ResidentTexture record{};
+    BitmapTexture record{};
     record.gpu.image = m_device.createImageUnique(imageInfo);
     auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
     vk::MemoryAllocateInfo imgAlloc;
@@ -983,11 +990,10 @@ bool VulkanTextureManager::updateTexture(const UploadCtx &ctx, int bitmapHandle,
     record.gpu.format = format;
     record.gpu.currentLayout = vk::ImageLayout::eUndefined;
 
-    record.lastUsedFrame = currentFrameIndex;
-    record.lastUsedSerial = m_safeRetireSerial;
+    record.usage.lastUsedFrame = currentFrameIndex;
+    record.usage.lastUsedSerial = m_safeRetireSerial;
 
-    it = m_residentTextures.emplace(baseFrame, std::move(record)).first;
-    onTextureResident(baseFrame);
+    it = m_bitmaps.emplace(id, std::move(record)).first;
   }
 
   auto &record = it->second;
@@ -1171,14 +1177,10 @@ bool VulkanTextureManager::updateTexture(const UploadCtx &ctx, int bitmapHandle,
   cmd.pipelineBarrier2(depToShader);
 
   tex.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  record.lastUsedFrame = currentFrameIndex;
-  record.lastUsedSerial = m_safeRetireSerial;
+  record.usage.lastUsedFrame = currentFrameIndex;
+  record.usage.lastUsedSerial = m_safeRetireSerial;
 
   return true;
-}
-
-bool VulkanTextureManager::isUploadQueued(int baseFrame) const {
-  return std::find(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrame) != m_pendingUploads.end();
 }
 
 void VulkanTextureManager::processPendingRetirements() {
@@ -1186,18 +1188,17 @@ void VulkanTextureManager::processPendingRetirements() {
     return;
   }
 
-  for (const int handle : m_pendingRetirements) {
-    // Any pending "slot request" becomes irrelevant once we're deleting the texture.
-    m_pendingBindlessSlots.erase(handle);
+  for (const TextureId id : m_pendingRetirements) {
+    // Retirements are requested at boundaries (bmpman delete). Drop any pending upload request.
+    (void)m_pendingUploads.erase(id);
 
-    // If the texture is resident, retire it (this also releases any bindless slot mapping).
-    if (m_residentTextures.find(handle) != m_residentTextures.end()) {
-      retireTexture(handle, m_safeRetireSerial);
+    if (isResident(id)) {
+      retireTexture(id, m_safeRetireSerial);
       continue;
     }
 
-    // Non-resident: drop any bindless slot assignment so the slot can be reused safely at frame start.
-    auto slotIt = m_bindlessSlots.find(handle);
+    // Non-resident: drop any bindless slot assignment so the slot can be reused safely at an upload-phase safe point.
+    auto slotIt = m_bindlessSlots.find(id);
     if (slotIt != m_bindlessSlots.end()) {
       const uint32_t slot = slotIt->second;
       m_bindlessSlots.erase(slotIt);
@@ -1210,108 +1211,157 @@ void VulkanTextureManager::processPendingRetirements() {
   m_pendingRetirements.clear();
 }
 
-void VulkanTextureManager::retryPendingBindlessSlots() {
-  for (auto it = m_pendingBindlessSlots.begin(); it != m_pendingBindlessSlots.end();) {
-    const int handle = *it;
-    if (m_unavailableTextures.find(handle) != m_unavailableTextures.end()) {
-      it = m_pendingBindlessSlots.erase(it);
-      continue;
-    }
+void VulkanTextureManager::requestBindlessSlot(TextureId id) {
+  if (m_bindlessSlots.find(id) != m_bindlessSlots.end()) {
+    return;
+  }
+  (void)m_bindlessRequested.insert(id);
+}
 
-    if (tryAssignBindlessSlot(handle, /*allowResidentEvict=*/true)) {
-      it = m_pendingBindlessSlots.erase(it);
-      continue;
-    }
+std::optional<uint32_t> VulkanTextureManager::tryGetBindlessSlot(TextureId id) const {
+  auto it = m_bindlessSlots.find(id);
+  if (it == m_bindlessSlots.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
 
-    ++it;
+bool VulkanTextureManager::isResident(TextureId id) const {
+  return m_bitmaps.find(id) != m_bitmaps.end() || m_targets.find(id) != m_targets.end();
+}
+
+void VulkanTextureManager::markTextureUsed(TextureId id, uint32_t currentFrameIndex) {
+  if (auto it = m_bitmaps.find(id); it != m_bitmaps.end()) {
+    it->second.usage.lastUsedFrame = currentFrameIndex;
+    it->second.usage.lastUsedSerial = m_safeRetireSerial;
+    return;
+  }
+
+  if (auto it = m_targets.find(id); it != m_targets.end()) {
+    it->second.usage.lastUsedFrame = currentFrameIndex;
+    it->second.usage.lastUsedSerial = m_safeRetireSerial;
+    return;
   }
 }
 
-bool VulkanTextureManager::tryAssignBindlessSlot(int textureHandle, bool allowResidentEvict) {
-  if (m_bindlessSlots.find(textureHandle) != m_bindlessSlots.end()) {
-    return true;
+std::optional<vk::DescriptorImageInfo>
+VulkanTextureManager::tryGetResidentDescriptor(TextureId id, const SamplerKey &samplerKey) const {
+  const VulkanTexture *tex = nullptr;
+  if (auto it = m_bitmaps.find(id); it != m_bitmaps.end()) {
+    tex = &it->second.gpu;
+  } else if (auto it = m_targets.find(id); it != m_targets.end()) {
+    tex = &it->second.gpu;
+  } else {
+    return std::nullopt;
   }
 
-  auto reclaimNonResidentSlot = [&]() -> bool {
-    for (auto it = m_bindlessSlots.begin(); it != m_bindlessSlots.end(); ++it) {
-      const int handle = it->first;
-      if (m_residentTextures.find(handle) != m_residentTextures.end()) {
-        continue;
-      }
+  vk::DescriptorImageInfo info{};
+  info.imageView = tex->imageView.get();
+  info.sampler = getOrCreateSampler(samplerKey);
+  info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+  return info;
+}
 
-      const uint32_t slot = it->second;
-      m_pendingBindlessSlots.erase(handle);
-      m_bindlessSlots.erase(it);
-      if (isDynamicBindlessSlot(slot)) {
-        m_freeBindlessSlots.push_back(slot);
-      }
-      return true;
+void VulkanTextureManager::appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, TextureId>> &out) const {
+  for (const auto &[id, slot] : m_bindlessSlots) {
+    if (!isResident(id)) {
+      continue;
     }
-    return false;
+    out.emplace_back(slot, id);
+  }
+}
+
+void VulkanTextureManager::assignBindlessSlots(const UploadCtx &ctx) {
+  (void)ctx;
+
+  for (auto it = m_bindlessRequested.begin(); it != m_bindlessRequested.end();) {
+    const TextureId id = *it;
+
+    if (m_permanentlyRejected.find(id) != m_permanentlyRejected.end()) {
+      it = m_bindlessRequested.erase(it);
+      continue;
+    }
+
+    if (m_bindlessSlots.find(id) != m_bindlessSlots.end()) {
+      it = m_bindlessRequested.erase(it);
+      continue;
+    }
+
+    if (!isResident(id)) {
+      ++it;
+      continue;
+    }
+
+    const auto slotOpt = acquireFreeSlotOrEvict(ctx);
+    if (!slotOpt.has_value()) {
+      // Slot pressure with no safe eviction candidate; keep requests for a later safe point.
+      break;
+    }
+
+    m_bindlessSlots.emplace(id, *slotOpt);
+    it = m_bindlessRequested.erase(it);
+  }
+}
+
+std::optional<TextureId> VulkanTextureManager::findEvictionCandidate() const {
+  struct Candidate {
+    TextureId id;
+    uint32_t lastUsedFrame = 0;
   };
+  std::optional<Candidate> best;
 
-  if (m_freeBindlessSlots.empty()) {
-    // Rendering-path safe reclaim:
-    // if we can free a slot from a non-resident mapping, the descriptor for that slot is fallback this frame.
-    if (!reclaimNonResidentSlot() && !allowResidentEvict) {
-      return false;
-    }
-  }
+  for (const auto &[id, slot] : m_bindlessSlots) {
+    (void)slot;
 
-  if (m_freeBindlessSlots.empty() && allowResidentEvict) {
-    // Upload-phase eviction: free a slot by retiring a safe-to-evict resident texture.
-    // Safety rule: only evict textures whose last use has completed on the GPU.
-    uint32_t oldestFrame = UINT32_MAX;
-    int oldestHandle = -1;
-
-    for (const auto &[handle, slot] : m_bindlessSlots) {
-      (void)slot;
-      // Render targets are long-lived GPU resources (cockpit displays, monitors, envmaps).
-      // Treat their bindless slot mapping as pinned: evicting them causes visible flicker.
-      if (m_renderTargets.find(handle) != m_renderTargets.end()) {
-        continue;
-      }
-
-      auto residentIt = m_residentTextures.find(handle);
-      if (residentIt == m_residentTextures.end()) {
-        continue;
-      }
-
-      const auto &other = residentIt->second;
-      if (other.lastUsedSerial <= m_completedSerial) {
-        if (other.lastUsedFrame < oldestFrame) {
-          oldestFrame = other.lastUsedFrame;
-          oldestHandle = handle;
-        }
-      }
-    }
-
-    if (oldestHandle >= 0) {
-      retireTexture(oldestHandle, m_safeRetireSerial);
-    }
-  }
-
-  if (m_freeBindlessSlots.empty()) {
-    return false;
-  }
-
-  uint32_t assignedSlot = m_freeBindlessSlots.back();
-  m_freeBindlessSlots.pop_back();
-  m_bindlessSlots.emplace(textureHandle, assignedSlot);
-  return true;
-}
-
-void VulkanTextureManager::appendResidentBindlessDescriptors(std::vector<std::pair<uint32_t, int>> &out) const {
-  for (const auto &[handle, slot] : m_bindlessSlots) {
-    if (m_residentTextures.find(handle) == m_residentTextures.end()) {
+    // Render targets are long-lived GPU resources (cockpit displays, monitors, envmaps).
+    // Treat their bindless slot mapping as pinned: evicting them causes visible flicker.
+    if (m_targets.find(id) != m_targets.end()) {
       continue;
     }
-    out.emplace_back(slot, handle);
+
+    auto residentIt = m_bitmaps.find(id);
+    if (residentIt == m_bitmaps.end()) {
+      continue;
+    }
+
+    const auto &usage = residentIt->second.usage;
+    if (usage.lastUsedSerial > m_completedSerial) {
+      continue;
+    }
+
+    if (!best.has_value() || usage.lastUsedFrame < best->lastUsedFrame) {
+      best = Candidate{id, usage.lastUsedFrame};
+    }
   }
+
+  if (!best.has_value()) {
+    return std::nullopt;
+  }
+  return best->id;
 }
 
-bool VulkanTextureManager::hasBindlessSlot(int baseFrameHandle) const {
-  return m_bindlessSlots.find(baseFrameHandle) != m_bindlessSlots.end();
+std::optional<uint32_t> VulkanTextureManager::acquireFreeSlotOrEvict(const UploadCtx &ctx) {
+  (void)ctx;
+
+  if (!m_freeBindlessSlots.empty()) {
+    const uint32_t slot = m_freeBindlessSlots.back();
+    m_freeBindlessSlots.pop_back();
+    return slot;
+  }
+
+  const auto victimOpt = findEvictionCandidate();
+  if (!victimOpt.has_value()) {
+    return std::nullopt;
+  }
+
+  retireTexture(*victimOpt, m_safeRetireSerial);
+  if (m_freeBindlessSlots.empty()) {
+    return std::nullopt;
+  }
+
+  const uint32_t slot = m_freeBindlessSlots.back();
+  m_freeBindlessSlots.pop_back();
+  return slot;
 }
 
 bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool isAABitmap) {
@@ -1321,12 +1371,18 @@ bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool isAABitmap) {
     return true;
   }
 
-  if (m_residentTextures.find(baseFrame) != m_residentTextures.end()) {
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrame);
+  if (!idOpt.has_value()) {
+    return true;
+  }
+  const TextureId id = *idOpt;
+
+  if (isResident(id)) {
     return true;
   }
 
   try {
-    if (uploadImmediate(baseFrame, isAABitmap)) {
+    if (uploadImmediate(id, isAABitmap)) {
       return true;
     }
   } catch (const vk::SystemError &err) {
@@ -1342,11 +1398,7 @@ bool VulkanTextureManager::preloadTexture(int bitmapHandle, bool isAABitmap) {
   }
 
   // Anything that isn't an out-of-memory condition should not abort bmpman preloading.
-  // Mark it unavailable so later draw calls don't keep queuing uploads for a texture that will never become resident.
-  m_unavailableTextures.insert_or_assign(baseFrame, UnavailableTexture{UnavailableReason::BmpLockFailed});
-  m_pendingBindlessSlots.erase(baseFrame);
-  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrame);
-  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+  // Treat failure as absence; callers decide whether to request uploads later.
   return true;
 }
 
@@ -1356,14 +1408,19 @@ void VulkanTextureManager::deleteTexture(int bitmapHandle) {
     return;
   }
 
-  // Remove from any queued/unavailable state immediately.
-  m_unavailableTextures.erase(base);
-  m_pendingBindlessSlots.erase(base);
-  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), base);
-  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+  const auto idOpt = TextureId::tryFromBaseFrame(base);
+  if (!idOpt.has_value()) {
+    return;
+  }
+  const TextureId id = *idOpt;
+
+  // Drop any boundary caches/requests immediately.
+  m_permanentlyRejected.erase(id);
+  m_bindlessRequested.erase(id);
+  (void)m_pendingUploads.erase(id);
 
   // Defer slot reuse + resource retirement to the upload-phase flush (frame-start safe point).
-  m_pendingRetirements.insert(base);
+  m_pendingRetirements.insert(id);
 }
 
 void VulkanTextureManager::releaseBitmap(int bitmapHandle) {
@@ -1372,30 +1429,33 @@ void VulkanTextureManager::releaseBitmap(int bitmapHandle) {
     return;
   }
 
+  const auto idOpt = TextureId::tryFromBaseFrame(base);
+  if (!idOpt.has_value()) {
+    return;
+  }
+  const TextureId id = *idOpt;
+
   // Hard lifecycle boundary: bmpman may reuse this handle immediately after release.
   // Drop all cache state for this handle now; GPU lifetime safety is handled via deferred release.
-  m_unavailableTextures.erase(base);
-  m_pendingBindlessSlots.erase(base);
-  m_pendingRetirements.erase(base);
-  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), base);
-  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+  m_permanentlyRejected.erase(id);
+  m_bindlessRequested.erase(id);
+  m_pendingRetirements.erase(id);
+  (void)m_pendingUploads.erase(id);
 
   // If the texture is resident, retire it immediately (releasing any bindless slot mapping).
-  auto it = m_residentTextures.find(base);
-  if (it != m_residentTextures.end()) {
-    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.lastUsedSerial);
-    retireTexture(base, retireSerial);
+  if (auto it = m_bitmaps.find(id); it != m_bitmaps.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.usage.lastUsedSerial);
+    retireTexture(id, retireSerial);
+    return;
+  }
+  if (auto it = m_targets.find(id); it != m_targets.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.usage.lastUsedSerial);
+    retireTexture(id, retireSerial);
     return;
   }
 
-  // If we somehow have a render-target record without a resident texture, still defer its view destruction.
-  if (auto rt = tryTakeRenderTargetRecord(base); rt.has_value()) {
-    const uint64_t retireSerial = m_safeRetireSerial;
-    m_deferredReleases.enqueue(retireSerial, [rt = std::move(rt)]() mutable { (void)rt; });
-  }
-
   // Non-resident: drop any bindless slot assignment so the slot can be reused.
-  auto slotIt = m_bindlessSlots.find(base);
+  auto slotIt = m_bindlessSlots.find(id);
   if (slotIt != m_bindlessSlots.end()) {
     const uint32_t slot = slotIt->second;
     m_bindlessSlots.erase(slotIt);
@@ -1408,72 +1468,19 @@ void VulkanTextureManager::releaseBitmap(int bitmapHandle) {
 void VulkanTextureManager::cleanup() {
   m_deferredReleases.clear();
   m_builtins.reset();
-  m_residentTextures.clear();
-  m_unavailableTextures.clear();
-  m_renderTargets.clear();
+  m_bitmaps.clear();
+  m_targets.clear();
+  m_permanentlyRejected.clear();
   m_bindlessSlots.clear();
-  m_pendingBindlessSlots.clear();
+  m_bindlessRequested.clear();
   m_pendingRetirements.clear();
   m_samplerCache.clear();
   m_defaultSampler.reset();
-  m_pendingUploads.clear();
+  m_pendingUploads = {};
 }
 
-void VulkanTextureManager::onTextureResident(int textureHandle) {
-  Assertion(m_residentTextures.find(textureHandle) != m_residentTextures.end(),
-            "onTextureResident called for unknown texture handle %d", textureHandle);
-  (void)textureHandle;
-}
-
-uint32_t VulkanTextureManager::getBindlessSlotIndex(int textureHandle) {
-  // Domain-real unavailability: bind fallback slot 0 rather than "absent".
-  if (m_unavailableTextures.find(textureHandle) != m_unavailableTextures.end()) {
-    return 0;
-  }
-
-  if (!tryAssignBindlessSlot(textureHandle, /*allowResidentEvict=*/false)) {
-    // Slot pressure: keep returning fallback this frame and retry at the next upload flush.
-    m_pendingBindlessSlots.insert(textureHandle);
-    if (m_residentTextures.find(textureHandle) == m_residentTextures.end() && !isUploadQueued(textureHandle)) {
-      m_pendingUploads.push_back(textureHandle);
-    }
-    return 0;
-  }
-
-  auto slotIt = m_bindlessSlots.find(textureHandle);
-  Assertion(slotIt != m_bindlessSlots.end(), "Assigned bindless slot missing for texture handle %d", textureHandle);
-  const uint32_t slot = slotIt->second;
-
-  auto residentIt = m_residentTextures.find(textureHandle);
-  if (residentIt == m_residentTextures.end()) {
-    if (!isUploadQueued(textureHandle)) {
-      m_pendingUploads.push_back(textureHandle);
-    }
-    return slot; // slot points at fallback until the upload completes
-  }
-
-  auto &record = residentIt->second;
-  record.lastUsedFrame = m_currentFrameIndex;
-  record.lastUsedSerial = m_safeRetireSerial;
-
-  return slot;
-}
-
-void VulkanTextureManager::markTextureUsedBaseFrame(int baseFrame, uint32_t currentFrameIndex) {
-  auto it = m_residentTextures.find(baseFrame);
-  if (it == m_residentTextures.end()) {
-    return;
-  }
-
-  auto &record = it->second;
-  record.lastUsedFrame = currentFrameIndex;
-  record.lastUsedSerial = m_safeRetireSerial;
-}
-
-void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSerial) {
-  m_pendingBindlessSlots.erase(textureHandle);
-
-  auto slotIt = m_bindlessSlots.find(textureHandle);
+void VulkanTextureManager::retireTexture(TextureId id, uint64_t retireSerial) {
+  auto slotIt = m_bindlessSlots.find(id);
   if (slotIt != m_bindlessSlots.end()) {
     const uint32_t slot = slotIt->second;
     m_bindlessSlots.erase(slotIt);
@@ -1482,43 +1489,32 @@ void VulkanTextureManager::retireTexture(int textureHandle, uint64_t retireSeria
     }
   }
 
-  auto it = m_residentTextures.find(textureHandle);
-  Assertion(it != m_residentTextures.end(), "retireTexture called for unknown texture handle %d", textureHandle);
+  if (auto it = m_bitmaps.find(id); it != m_bitmaps.end()) {
+    BitmapTexture record = std::move(it->second);
+    m_bitmaps.erase(it); // Drop cache state immediately; in-flight GPU users are protected by deferred release.
 
-  ResidentTexture record = std::move(it->second);
-  m_residentTextures.erase(it); // Drop cache state immediately; in-flight GPU users are protected by deferred release.
+    VulkanTexture gpu = std::move(record.gpu);
+    m_deferredReleases.enqueue(retireSerial, [gpu = std::move(gpu)]() mutable { (void)gpu; });
+    return;
+  }
 
-  VulkanTexture gpu = std::move(record.gpu);
-  auto rt = tryTakeRenderTargetRecord(textureHandle);
-  m_deferredReleases.enqueue(retireSerial, [gpu = std::move(gpu), rt = std::move(rt)]() mutable {
-    // Capture moved resources in the deferred-release closure to guarantee they are destroyed only after retireSerial.
-    (void)gpu;
-    (void)rt;
-  });
+  if (auto it = m_targets.find(id); it != m_targets.end()) {
+    RenderTargetTexture record = std::move(it->second);
+    m_targets.erase(it); // Drop cache state immediately; in-flight GPU users are protected by deferred release.
+
+    VulkanTexture gpu = std::move(record.gpu);
+    RenderTargetRecord rt = std::move(record.rt);
+    m_deferredReleases.enqueue(retireSerial, [gpu = std::move(gpu), rt = std::move(rt)]() mutable {
+      (void)gpu;
+      (void)rt;
+    });
+    return;
+  }
 }
 
 void VulkanTextureManager::collect(uint64_t completedSerial) {
   m_completedSerial = std::max(m_completedSerial, completedSerial);
   m_deferredReleases.collect(completedSerial);
-}
-
-vk::DescriptorImageInfo VulkanTextureManager::getTextureDescriptorInfo(int textureHandle,
-                                                                       const SamplerKey &samplerKey) {
-  vk::DescriptorImageInfo info{};
-
-  // textureHandle is already the base frame key for resident textures.
-  // Do not call bm_get_base_frame here - bmpman may have released this handle,
-  // but VulkanTextureManager owns the GPU texture independently.
-  auto it = m_residentTextures.find(textureHandle);
-  if (it == m_residentTextures.end()) {
-    return info;
-  }
-
-  auto &record = it->second;
-  info.imageView = record.gpu.imageView.get();
-  info.sampler = getOrCreateSampler(samplerKey);
-  info.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  return info;
 }
 
 void VulkanTextureManager::queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex,
@@ -1532,35 +1528,29 @@ void VulkanTextureManager::queueTextureUpload(int bitmapHandle, uint32_t current
 
 void VulkanTextureManager::queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex,
                                                        const SamplerKey &samplerKey) {
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrame);
+  if (!idOpt.has_value()) {
+    return;
+  }
+  queueTextureUpload(*idOpt, currentFrameIndex, samplerKey);
+}
+
+void VulkanTextureManager::queueTextureUpload(TextureId id, uint32_t currentFrameIndex, const SamplerKey &samplerKey) {
   (void)currentFrameIndex;
 
-  // If already resident, there's nothing to queue.
-  if (m_residentTextures.find(baseFrame) != m_residentTextures.end()) {
+  if (isResident(id)) {
     return;
   }
 
-  // Permanently unavailable textures do not retry.
-  if (m_unavailableTextures.find(baseFrame) != m_unavailableTextures.end()) {
+  // Outside supported domain for this upload algorithm - do not retry automatically.
+  if (m_permanentlyRejected.find(id) != m_permanentlyRejected.end()) {
     return;
   }
 
   // Warm the sampler cache so descriptor requests don't allocate later.
   (void)getOrCreateSampler(samplerKey);
 
-  if (!isUploadQueued(baseFrame)) {
-    m_pendingUploads.push_back(baseFrame);
-  }
-}
-
-std::optional<VulkanTextureManager::RenderTargetRecord>
-VulkanTextureManager::tryTakeRenderTargetRecord(int baseFrameHandle) {
-  auto it = m_renderTargets.find(baseFrameHandle);
-  if (it == m_renderTargets.end()) {
-    return std::nullopt;
-  }
-  RenderTargetRecord rec = std::move(it->second);
-  m_renderTargets.erase(it);
-  return rec;
+  (void)m_pendingUploads.enqueue(id);
 }
 
 bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t width, uint32_t height, int flags,
@@ -1569,19 +1559,30 @@ bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t widt
     return false;
   }
 
-  // Render targets are created explicitly. bmpman handles are reused after release, so we must be
-  // robust to the case where stale GPU state still exists for this handle.
-  m_unavailableTextures.erase(baseFrameHandle);
-  m_pendingBindlessSlots.erase(baseFrameHandle);
-  m_pendingRetirements.erase(baseFrameHandle);
-  auto newEnd = std::remove(m_pendingUploads.begin(), m_pendingUploads.end(), baseFrameHandle);
-  m_pendingUploads.erase(newEnd, m_pendingUploads.end());
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  if (!idOpt.has_value()) {
+    return false;
+  }
+  const TextureId id = *idOpt;
 
-  if (auto it = m_residentTextures.find(baseFrameHandle); it != m_residentTextures.end()) {
-    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.lastUsedSerial);
-    mprintf(("VulkanTextureManager: Recreating texture handle %d as render target (retireSerial=%llu)\n",
-             baseFrameHandle, static_cast<unsigned long long>(retireSerial)));
-    retireTexture(baseFrameHandle, retireSerial);
+  // Render targets are created explicitly. bmpman handles are reused after release, so we must be robust to the case
+  // where stale GPU state still exists for this handle. Drop all CPU-side state immediately; GPU lifetime safety is
+  // handled via deferred release.
+  m_permanentlyRejected.erase(id);
+  m_bindlessRequested.erase(id);
+  m_pendingRetirements.erase(id);
+  (void)m_pendingUploads.erase(id);
+
+  if (auto it = m_bitmaps.find(id); it != m_bitmaps.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it->second.usage.lastUsedSerial);
+    mprintf(("VulkanTextureManager: Recreating handle %d as render target (retireSerial=%llu)\n", baseFrameHandle,
+             static_cast<unsigned long long>(retireSerial)));
+    retireTexture(id, retireSerial);
+  } else if (auto it2 = m_targets.find(id); it2 != m_targets.end()) {
+    const uint64_t retireSerial = std::max(m_safeRetireSerial, it2->second.usage.lastUsedSerial);
+    mprintf(("VulkanTextureManager: Recreating handle %d as render target (retireSerial=%llu)\n", baseFrameHandle,
+             static_cast<unsigned long long>(retireSerial)));
+    retireTexture(id, retireSerial);
   }
 
   const bool isCubemap = (flags & BMP_FLAG_CUBEMAP) != 0;
@@ -1608,7 +1609,7 @@ bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t widt
   imageInfo.sharingMode = vk::SharingMode::eExclusive;
   imageInfo.initialLayout = vk::ImageLayout::eUndefined;
 
-  ResidentTexture record{};
+  RenderTargetTexture record{};
   record.gpu.image = m_device.createImageUnique(imageInfo);
   auto imgReqs = m_device.getImageMemoryRequirements(record.gpu.image.get());
   vk::MemoryAllocateInfo allocInfo{};
@@ -1636,12 +1637,11 @@ bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t widt
   viewInfo.subresourceRange.layerCount = layers;
   record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
 
-  RenderTargetRecord rt{};
-  rt.extent = vk::Extent2D(width, height);
-  rt.format = format;
-  rt.mipLevels = mipLevels;
-  rt.layers = layers;
-  rt.isCubemap = isCubemap;
+  record.rt.extent = vk::Extent2D(width, height);
+  record.rt.format = format;
+  record.rt.mipLevels = mipLevels;
+  record.rt.layers = layers;
+  record.rt.isCubemap = isCubemap;
 
   // Attachment views: one per face (cubemap) or just face 0 (2D target).
   const uint32_t faceCount = isCubemap ? 6u : 1u;
@@ -1655,7 +1655,7 @@ bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t widt
     faceViewInfo.subresourceRange.levelCount = 1;
     faceViewInfo.subresourceRange.baseArrayLayer = face;
     faceViewInfo.subresourceRange.layerCount = 1;
-    rt.faceViews[face] = m_device.createImageViewUnique(faceViewInfo);
+    record.rt.faceViews[face] = m_device.createImageViewUnique(faceViewInfo);
   }
 
   // Initialize the image contents to black (alpha=1) and transition to shader-read.
@@ -1721,62 +1721,80 @@ bool VulkanTextureManager::createRenderTarget(int baseFrameHandle, uint32_t widt
   vk::SubmitInfo submitInfo{};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmd;
-  m_transferQueue.submit(submitInfo, nullptr);
-  m_transferQueue.waitIdle();
+  auto fence = m_device.createFenceUnique(vk::FenceCreateInfo{});
+  m_transferQueue.submit(submitInfo, fence.get());
+  (void)m_device.waitForFences(fence.get(), VK_TRUE, std::numeric_limits<uint64_t>::max());
 
   record.gpu.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  record.lastUsedFrame = m_currentFrameIndex;
+  record.usage.lastUsedFrame = m_currentFrameIndex;
+  record.usage.lastUsedSerial = m_safeRetireSerial;
 
-  m_renderTargets.emplace(baseFrameHandle, std::move(rt));
-  m_residentTextures.emplace(baseFrameHandle, std::move(record));
-  onTextureResident(baseFrameHandle);
+  m_targets.insert_or_assign(id, std::move(record));
 
   // Render targets are frequently sampled via the model bindless set (e.g. cockpit displays).
-  // Request a bindless slot at the next upload flush so the descriptor sync can populate it.
-  m_pendingBindlessSlots.insert(baseFrameHandle);
+  // Record intent now; slot assignment happens at the next upload-phase safe point.
+  requestBindlessSlot(id);
 
   return true;
 }
 
 bool VulkanTextureManager::hasRenderTarget(int baseFrameHandle) const {
-  return m_renderTargets.find(baseFrameHandle) != m_renderTargets.end();
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  if (!idOpt.has_value()) {
+    return false;
+  }
+  return m_targets.find(*idOpt) != m_targets.end();
 }
 
 vk::Extent2D VulkanTextureManager::renderTargetExtent(int baseFrameHandle) const {
-  auto it = m_renderTargets.find(baseFrameHandle);
-  Assertion(it != m_renderTargets.end(), "renderTargetExtent called for unknown render target handle %d",
-            baseFrameHandle);
-  return it->second.extent;
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "renderTargetExtent called for invalid render target handle %d", baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "renderTargetExtent called for unknown render target handle %d", baseFrameHandle);
+  return it->second.rt.extent;
 }
 
 vk::Format VulkanTextureManager::renderTargetFormat(int baseFrameHandle) const {
-  auto it = m_renderTargets.find(baseFrameHandle);
-  if (it == m_renderTargets.end()) {
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  if (!idOpt.has_value()) {
     return vk::Format::eUndefined;
   }
-  return it->second.format;
+  auto it = m_targets.find(*idOpt);
+  if (it == m_targets.end()) {
+    return vk::Format::eUndefined;
+  }
+  return it->second.rt.format;
 }
 
 uint32_t VulkanTextureManager::renderTargetMipLevels(int baseFrameHandle) const {
-  auto it = m_renderTargets.find(baseFrameHandle);
-  if (it == m_renderTargets.end()) {
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  if (!idOpt.has_value()) {
     return 1;
   }
-  return it->second.mipLevels;
+  auto it = m_targets.find(*idOpt);
+  if (it == m_targets.end()) {
+    return 1;
+  }
+  return it->second.rt.mipLevels;
 }
 
 vk::Image VulkanTextureManager::renderTargetImage(int baseFrameHandle) const {
-  auto it = m_residentTextures.find(baseFrameHandle);
-  Assertion(it != m_residentTextures.end(), "renderTargetImage called for unknown texture handle %d", baseFrameHandle);
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "renderTargetImage called for invalid render target handle %d", baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "renderTargetImage called for unknown render target handle %d", baseFrameHandle);
   return it->second.gpu.image.get();
 }
 
 vk::ImageView VulkanTextureManager::renderTargetAttachmentView(int baseFrameHandle, int face) const {
-  auto it = m_renderTargets.find(baseFrameHandle);
-  Assertion(it != m_renderTargets.end(), "renderTargetAttachmentView called for unknown render target handle %d",
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "renderTargetAttachmentView called for invalid render target handle %d",
+            baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "renderTargetAttachmentView called for unknown render target handle %d",
             baseFrameHandle);
 
-  const auto &rt = it->second;
+  const auto &rt = it->second.rt;
   const int clampedFace = (face < 0) ? 0 : face;
   if (!rt.isCubemap) {
     Assertion(clampedFace == 0, "Non-cubemap render target %d requested invalid face %d", baseFrameHandle, clampedFace);
@@ -1788,8 +1806,11 @@ vk::ImageView VulkanTextureManager::renderTargetAttachmentView(int baseFrameHand
 }
 
 void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer cmd, int baseFrameHandle) {
-  auto it = m_residentTextures.find(baseFrameHandle);
-  Assertion(it != m_residentTextures.end(), "transitionRenderTargetToAttachment called for unknown texture handle %d",
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "transitionRenderTargetToAttachment called for invalid render target handle %d",
+            baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "transitionRenderTargetToAttachment called for unknown render target handle %d",
             baseFrameHandle);
   auto &tex = it->second.gpu;
 
@@ -1823,8 +1844,11 @@ void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer 
 }
 
 void VulkanTextureManager::transitionRenderTargetToTransferDst(vk::CommandBuffer cmd, int baseFrameHandle) {
-  auto it = m_residentTextures.find(baseFrameHandle);
-  Assertion(it != m_residentTextures.end(), "transitionRenderTargetToTransferDst called for unknown texture handle %d",
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "transitionRenderTargetToTransferDst called for invalid render target handle %d",
+            baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "transitionRenderTargetToTransferDst called for unknown render target handle %d",
             baseFrameHandle);
   auto &tex = it->second.gpu;
 
@@ -1858,8 +1882,11 @@ void VulkanTextureManager::transitionRenderTargetToTransferDst(vk::CommandBuffer
 }
 
 void VulkanTextureManager::transitionRenderTargetToShaderRead(vk::CommandBuffer cmd, int baseFrameHandle) {
-  auto it = m_residentTextures.find(baseFrameHandle);
-  Assertion(it != m_residentTextures.end(), "transitionRenderTargetToShaderRead called for unknown texture handle %d",
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "transitionRenderTargetToShaderRead called for invalid render target handle %d",
+            baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "transitionRenderTargetToShaderRead called for unknown render target handle %d",
             baseFrameHandle);
   auto &tex = it->second.gpu;
 
@@ -1893,8 +1920,11 @@ void VulkanTextureManager::transitionRenderTargetToShaderRead(vk::CommandBuffer 
 }
 
 void VulkanTextureManager::generateRenderTargetMipmaps(vk::CommandBuffer cmd, int baseFrameHandle) {
-  auto it = m_residentTextures.find(baseFrameHandle);
-  Assertion(it != m_residentTextures.end(), "generateRenderTargetMipmaps called for unknown texture handle %d",
+  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
+  Assertion(idOpt.has_value(), "generateRenderTargetMipmaps called for invalid render target handle %d",
+            baseFrameHandle);
+  auto it = m_targets.find(*idOpt);
+  Assertion(it != m_targets.end(), "generateRenderTargetMipmaps called for unknown render target handle %d",
             baseFrameHandle);
   auto &tex = it->second.gpu;
 

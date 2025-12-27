@@ -35,11 +35,11 @@ The texture binding system consists of several interconnected components that se
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `VulkanTextureManager` | `VulkanTextureManager.h:98-295` | Central texture lifecycle manager; owns GPU resources |
-| `VulkanTextureBindings` | `VulkanTextureBindings.h:15-47` | Draw-path API; returns descriptors and queues uploads |
-| `VulkanTextureUploader` | `VulkanTextureBindings.h:49-66` | Upload-phase API; records GPU transfer commands |
-| `TextureId` | `VulkanTextureId.h:18-48` | Strong-typed texture identity wrapper (non-negative bmpman base frame) |
-| `VulkanMovieManager` | `VulkanMovieManager.h:19-131` | YCbCr movie texture handling with hardware color conversion |
+| `VulkanTextureManager` | `VulkanTextureManager.h` | Central texture lifecycle manager; owns GPU resources |
+| `VulkanTextureBindings` | `VulkanTextureBindings.h` | Draw-path API; returns descriptors and queues uploads |
+| `VulkanTextureUploader` | `VulkanTextureBindings.h` | Upload-phase API; records GPU transfer commands |
+| `TextureId` | `VulkanTextureId.h` | Strong-typed texture identity wrapper (non-negative bmpman base frame) |
+| `VulkanMovieManager` | `VulkanMovieManager.h` | YCbCr movie texture handling with hardware color conversion |
 
 ### Binding Model
 
@@ -54,7 +54,7 @@ A fixed-size array of up to `kMaxBindlessTextures` (1024) texture slots bound vi
 Per-draw immediate descriptor updates via `vkCmdPushDescriptorSetKHR`, bypassing the bindless array for simpler 2D paths where texture locality is unpredictable.
 
 ```cpp
-// VulkanConstants.h:9-21
+// VulkanConstants.h
 constexpr uint32_t kMaxBindlessTextures = 1024;
 constexpr uint32_t kBindlessTextureSlotFallback = 0;     // Black fallback (always valid)
 constexpr uint32_t kBindlessTextureSlotDefaultBase = 1;  // White default
@@ -70,21 +70,22 @@ constexpr uint32_t kBindlessFirstDynamicTextureSlot = 4;  // Dynamic range start
 Texture state is tracked by container membership rather than explicit state fields. This approach eliminates state synchronization bugs and makes invariants explicit:
 
 ```cpp
-// VulkanTextureManager.h:253-265
+// VulkanTextureManager.h (conceptual)
 // State as location:
-// - presence in m_residentTextures   => resident (GPU resources valid)
-// - presence in m_pendingUploads     => queued for upload
-// - presence in m_unavailableTextures => permanently unavailable (non-retriable)
-// - presence in m_bindlessSlots      => has a bindless slot assigned
-// - presence in m_pendingBindlessSlots => waiting for slot assignment
-// - presence in m_renderTargets      => is a render target (pinned)
+// - presence in m_bitmaps            => resident sampled bitmap texture
+// - presence in m_targets            => resident bmpman render target
+// - presence in m_pendingUploads     => queued for upload (unique FIFO)
+// - presence in m_permanentlyRejected => domain-invalid for this upload algorithm (no auto-retry)
+// - presence in m_bindlessSlots      => has a dynamic bindless slot assigned
+// - presence in m_bindlessRequested  => slot requested (pending assignment)
 
-std::unordered_map<int, ResidentTexture> m_residentTextures;      // keyed by bmpman base frame
-std::unordered_map<int, UnavailableTexture> m_unavailableTextures;
-std::unordered_map<int, uint32_t> m_bindlessSlots;
-std::unordered_set<int> m_pendingBindlessSlots;
-std::unordered_set<int> m_pendingRetirements;
-std::vector<int> m_pendingUploads;
+std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps;
+std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets;
+PendingUploadQueue m_pendingUploads;
+std::unordered_set<TextureId, TextureIdHasher> m_permanentlyRejected;
+std::unordered_map<TextureId, uint32_t, TextureIdHasher> m_bindlessSlots;
+std::unordered_set<TextureId, TextureIdHasher> m_bindlessRequested;
+std::unordered_set<TextureId, TextureIdHasher> m_pendingRetirements;
 ```
 
 ### Texture Identity
@@ -92,7 +93,7 @@ std::vector<int> m_pendingUploads;
 The `TextureId` class provides type-safe wrapping of bmpman base-frame handles:
 
 ```cpp
-// VulkanTextureId.h:18-48
+// VulkanTextureId.h
 class TextureId {
 public:
     // Factory method validates handle before construction
@@ -151,7 +152,7 @@ void VulkanTextureManager::createDefaultSampler()
 The `SamplerKey` structure enables sampler reuse through a hash-based cache, minimizing Vulkan object creation:
 
 ```cpp
-// VulkanTextureManager.h:123-131
+// VulkanTextureManager.h (SamplerKey)
 struct SamplerKey {
     vk::Filter filter = vk::Filter::eLinear;
     vk::SamplerAddressMode address = vk::SamplerAddressMode::eRepeat;
@@ -229,9 +230,9 @@ desiredInfos[kBindlessTextureSlotDefaultNormal] = defaultNormalInfo;
 desiredInfos[kBindlessTextureSlotDefaultSpec] = defaultSpecInfo;
 
 // Overlay resident textures onto their assigned slots
-for (const auto& [arrayIndex, handle] : textures) {
-    vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
-    desiredInfos[arrayIndex] = info;
+for (const auto& [arrayIndex, id] : textures) {
+    auto info = m_textureManager->tryGetResidentDescriptor(id, samplerKey);
+    desiredInfos[arrayIndex] = *info; // 'textures' contains resident TextureIds by construction
 }
 ```
 
@@ -350,7 +351,7 @@ vk::Format selectFormat(const bitmap& bmp)
 ### Block-Compressed Format Detection
 
 ```cpp
-// VulkanTextureManager.h:32-43
+// VulkanTextureManager.h (isBlockCompressedFormat)
 inline bool isBlockCompressedFormat(vk::Format format)
 {
     switch (format) {
@@ -405,7 +406,7 @@ for (uint32_t i = 0; i < width * height; ++i) {
 ### Block-Compressed Size Calculation
 
 ```cpp
-// VulkanTextureManager.h:24-30
+// VulkanTextureManager.h (calculateCompressedSize)
 inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
 {
     // BC1 uses 8 bytes per 4x4 block; BC2/BC3/BC7 use 16 bytes
@@ -421,7 +422,7 @@ inline size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format)
 For staging buffer allocation, layer size depends on format:
 
 ```cpp
-// VulkanTextureManager.h:45-55
+// VulkanTextureManager.h (calculateLayerSize)
 inline size_t calculateLayerSize(uint32_t w, uint32_t h, vk::Format format)
 {
     if (isBlockCompressedFormat(format)) {
@@ -551,7 +552,7 @@ void VulkanMovieManager::createMovieYcbcrConfigs()
 ### YCbCr Configuration Index Mapping
 
 ```cpp
-// VulkanMovieManager.cpp:99
+// VulkanMovieManager.cpp (ycbcrIndex)
 uint32_t VulkanMovieManager::ycbcrIndex(MovieColorSpace colorspace, MovieColorRange range) const
 {
     return static_cast<uint32_t>(colorspace) * 2u + static_cast<uint32_t>(range);
@@ -608,13 +609,13 @@ Upload Request (queueTextureUpload)
      |
      v
 +------------------+     flushPendingUploads()     +--------------------+
-| m_pendingUploads | --------------------------->  | m_residentTextures |
+| m_pendingUploads | --------------------------->  | m_bitmaps/m_targets |
 +------------------+                                +--------------------+
      |                                                       |
-     | Upload Failed                                         | deleteTexture() / eviction
+     | Domain invalid (permanent rejection)                  | deleteTexture() / eviction / releaseBitmap()
      v                                                       v
 +------------------------+                         +----------------------+
-| m_unavailableTextures  |                         | DeferredReleaseQueue |
+| m_permanentlyRejected  |                         | DeferredReleaseQueue |
 +------------------------+                         +----------------------+
                                                              |
                                                              | collect(completedSerial)
@@ -627,35 +628,21 @@ Upload Request (queueTextureUpload)
 When bindless slots are exhausted, the manager evicts the least recently used texture to make room for new allocations:
 
 ```cpp
-// VulkanTextureManager.cpp (tryAssignBindlessSlot - eviction logic, conceptual)
-if (m_freeBindlessSlots.empty() && allowResidentEvict) {
-    // Only evict textures whose last use has completed on the GPU
-    uint32_t oldestFrame = UINT32_MAX;
-    int oldestHandle = -1;
-
-    for (const auto& [handle, slot] : m_bindlessSlots) {
-        // Skip render targets (pinned, never evictable)
-        if (m_renderTargets.find(handle) != m_renderTargets.end()) {
-            continue;
-        }
-
-        auto residentIt = m_residentTextures.find(handle);
-        if (residentIt == m_residentTextures.end()) {
-            continue;
-        }
-
-        const auto& other = residentIt->second;
-        // Only evict if GPU is done with this texture (safety check)
-        if (other.lastUsedSerial <= m_completedSerial) {
-            if (other.lastUsedFrame < oldestFrame) {
-                oldestFrame = other.lastUsedFrame;
-                oldestHandle = handle;
-            }
-        }
+// VulkanTextureManager.cpp (findEvictionCandidate - conceptual)
+for (const auto& [id, slot] : m_bindlessSlots) {
+    (void)slot;
+    // Skip render targets (pinned, never evictable)
+    if (m_targets.find(id) != m_targets.end()) {
+        continue;
     }
-
-    if (oldestHandle >= 0) {
-        retireTexture(oldestHandle, m_safeRetireSerial);
+    auto bmpIt = m_bitmaps.find(id);
+    if (bmpIt == m_bitmaps.end()) {
+        continue;
+    }
+    const auto& usage = bmpIt->second.usage;
+    // Only evict if GPU is done with this texture (safety check)
+    if (usage.lastUsedSerial <= m_completedSerial) {
+        // pick oldest by usage.lastUsedFrame
     }
 }
 ```
@@ -668,21 +655,25 @@ if (m_freeBindlessSlots.empty() && allowResidentEvict) {
 ### Resident Texture Tracking
 
 ```cpp
-// VulkanTextureManager.h:113-117
-struct ResidentTexture {
-    VulkanTexture gpu;              // GPU resources (image, memory, view)
-    uint32_t lastUsedFrame = 0;     // CPU frame counter for LRU ordering
-    uint64_t lastUsedSerial = 0;    // GPU submission serial for safety
+// VulkanTextureManager.h (conceptual)
+struct UsageTracking {
+    uint32_t lastUsedFrame = 0;   // CPU frame counter for LRU ordering
+    uint64_t lastUsedSerial = 0;  // GPU submission serial for safety
+};
+
+struct BitmapTexture {
+    VulkanTexture gpu;            // GPU resources (image, memory, view)
+    UsageTracking usage;          // LRU + safety tracking
 };
 ```
 
 Frame and serial tracking is updated on texture access:
 
 ```cpp
-// VulkanTextureManager.cpp (markTextureUsedBaseFrame - conceptual)
-auto& record = residentIt->second;
-record.lastUsedFrame = m_currentFrameIndex;      // LRU bookkeeping
-record.lastUsedSerial = m_safeRetireSerial;       // GPU safety tracking
+// VulkanTextureManager.cpp (markTextureUsed - conceptual)
+auto& usage = residentIt->second.usage;
+usage.lastUsedFrame = m_currentFrameIndex;  // LRU bookkeeping
+usage.lastUsedSerial = m_safeRetireSerial;  // GPU safety tracking
 ```
 
 ### Deferred Resource Release
@@ -690,7 +681,7 @@ record.lastUsedSerial = m_safeRetireSerial;       // GPU safety tracking
 GPU resources are released only after all referencing command buffers complete execution:
 
 ```cpp
-// VulkanDeferredRelease.h:57-84
+// VulkanDeferredRelease.h
 class DeferredReleaseQueue {
     void collect(uint64_t completedSerial)
     {
@@ -718,26 +709,26 @@ Texture uploads share a per-frame staging buffer with budget tracking:
 vk::DeviceSize stagingBudget = frame.stagingBuffer().size();
 vk::DeviceSize stagingUsed = 0;
 
-for (int baseFrame : m_pendingUploads) {
+for (TextureId id : m_pendingUploads.takeAll()) {
     // Calculate required staging space
     size_t totalUploadSize = /* calculated per-texture based on dimensions and format */;
 
-    // Textures too large for staging buffer are permanently unavailable
+    // Textures too large for staging buffer are permanently rejected by the current algorithm
     if (totalUploadSize > stagingBudget) {
-        markUnavailable(baseFrame, UnavailableReason::TooLargeForStaging);
+        m_permanentlyRejected.insert(id);
         continue;
     }
 
     // Defer to next frame if budget exhausted for this frame
     if (stagingUsed + totalUploadSize > stagingBudget) {
-        remaining.push_back(baseFrame);
+        remaining.enqueue(id);
         continue;
     }
 
     // Allocate from per-frame staging buffer
     auto allocOpt = frame.stagingBuffer().try_allocate(layerSize);
     if (!allocOpt) {
-        remaining.push_back(baseFrame);
+        remaining.enqueue(id);
         break;  // No more staging space this frame
     }
 
@@ -800,7 +791,7 @@ record.gpu.imageView = m_device.createImageViewUnique(viewInfo);
 ### Immediate Upload Layout
 
 ```cpp
-// VulkanTextureManager.h:62-83
+// VulkanTextureManager.h (ImmediateUploadLayout)
 struct ImmediateUploadLayout {
     size_t layerSize = 0;          // Size of each layer in bytes
     size_t totalSize = 0;          // Total staging buffer requirement
@@ -946,7 +937,7 @@ void VulkanTextureManager::createDefaultSpecTexture() {
 
 **Descriptor Access**:
 ```cpp
-// VulkanTextureManager.h:166-169
+// VulkanTextureManager.h (descriptor accessors)
 vk::DescriptorImageInfo fallbackDescriptor(const SamplerKey& samplerKey) const;
 vk::DescriptorImageInfo defaultBaseDescriptor(const SamplerKey& samplerKey) const;
 vk::DescriptorImageInfo defaultNormalDescriptor(const SamplerKey& samplerKey) const;
@@ -1019,49 +1010,29 @@ StageAccess stageAccessForLayout(vk::ImageLayout layout)
 
 ---
 
-## 10. Error Handling and Unavailability
+## 10. Error Handling and Permanent Rejection
 
-Textures can become unavailable for several reasons, tracked by the `UnavailableReason` enum:
+The binding layer avoids representing "failed texture state" as a distinct internal state. Non-resident textures are
+simply *absent*.
 
-```cpp
-// VulkanTextureManager.h:105-111
-enum class UnavailableReason {
-    InvalidHandle,       // bmpman handle invalid or released
-    InvalidArray,        // Array frames have mismatched dimensions/formats
-    BmpLockFailed,       // Could not lock bitmap for reading (bmpman error)
-    TooLargeForStaging,  // Exceeds per-frame staging buffer size
-    UnsupportedFormat,   // Format not supported by Vulkan implementation
-};
-```
+Failures are classified:
 
-Unavailable textures are tracked separately and **never retried** (non-retriable failure):
+- **Domain-invalid (cacheable)**: recorded in `m_permanentlyRejected` (`TextureId`), not automatically retried.
+  Examples:
+  - Texture exceeds the per-frame staging buffer capacity
+  - Invalid texture-array shape (mismatched dimensions/compression across frames)
+- **Transient (not cached)**: treated as absence (e.g., `bm_lock` failure). Callers may request an upload again later.
 
-```cpp
-// VulkanTextureManager.cpp (markUnavailable - conceptual)
-auto markUnavailable = [&](int baseFrame, UnavailableReason reason) {
-    m_unavailableTextures.insert_or_assign(baseFrame, UnavailableTexture{reason});
-    m_pendingBindlessSlots.erase(baseFrame);  // Remove from retry queue
-
-    // Release any assigned bindless slot back to free pool
-    auto slotIt = m_bindlessSlots.find(baseFrame);
-    if (slotIt != m_bindlessSlots.end()) {
-        const uint32_t slot = slotIt->second;
-        m_bindlessSlots.erase(slotIt);
-        if (isDynamicBindlessSlot(slot)) {  // Don't free reserved slots 0-3
-            m_freeBindlessSlots.push_back(slot);
-        }
-    }
-};
-```
-
-**Recovery**: Unavailable textures sample the fallback (black) texture. The only recovery path is releasing the bmpman handle entirely and re-loading the asset.
+**Recovery**:
+- For domain-invalid inputs: fix the asset or change the upload strategy.
+- For handle reuse: `releaseBitmap()` clears all TextureId-keyed CPU state immediately to prevent collisions.
 
 ### Bitmap Handle Release
 
 When bmpman releases a handle (slot becomes `BM_TYPE_NONE`), the texture manager must immediately drop GPU mappings:
 
 ```cpp
-// VulkanTextureManager.h:146-148
+// VulkanTextureManager.h (releaseBitmap)
 // Called by bmpman when a bitmap handle is being released.
 // This must drop any GPU mapping immediately so handle reuse cannot collide.
 void releaseBitmap(int bitmapHandle);
@@ -1079,8 +1050,8 @@ This prevents handle reuse collisions where a new bitmap might be assigned the s
 |-----------|---------------|
 | `queueTextureUpload()` | Main thread only |
 | `flushPendingUploads()` | Main thread only (upload phase) |
-| `getBindlessSlotIndex()` | Main thread only (draw phase) |
-| `getTextureDescriptorInfo()` | Main thread only |
+| `requestBindlessSlot()` / `tryGetBindlessSlot()` | Main thread only (draw phase) |
+| `tryGetResidentDescriptor()` | Main thread only |
 | `collect()` | Main thread only (frame end) |
 | bmpman callbacks (`releaseBitmap`) | Main thread only |
 
@@ -1098,10 +1069,10 @@ This prevents handle reuse collisions where a new bitmap might be assigned the s
 ### Common Issues
 
 **Symptom**: Black textures appear in-game
-- **Cause 1**: Texture marked unavailable (check `m_unavailableTextures`)
+- **Cause 1**: Texture permanently rejected as domain-invalid (check `m_permanentlyRejected`)
 - **Cause 2**: Upload not yet complete (texture in `m_pendingUploads`)
 - **Cause 3**: Staging buffer exhausted, upload deferred
-- **Diagnosis**: Enable `vkprintf` logging to see upload status and unavailability reasons
+- **Diagnosis**: Enable `vkprintf` logging to see upload status and permanent rejection decisions
 
 **Symptom**: Texture corruption or visual artifacts
 - **Cause 1**: Format mismatch between bmpman and Vulkan
@@ -1119,19 +1090,20 @@ This prevents handle reuse collisions where a new bitmap might be assigned the s
 - **Cause 1**: LRU eviction not triggering (all textures "in use")
 - **Cause 2**: Deferred release queue not draining
 - **Cause 3**: Too many render targets pinned
-- **Diagnosis**: Log `m_residentTextures.size()` and `m_deferredReleases.size()`
+- **Diagnosis**: Log `m_bitmaps.size()`, `m_targets.size()`, and `m_deferredReleases.size()`
 
 ### Diagnostic APIs
 
 ```cpp
 // Query texture state
-bool hasBindlessSlot(int baseFrameHandle) const;  // Is slot assigned?
+bool hasBindlessSlot(TextureId id) const;         // Is slot assigned?
 bool hasRenderTarget(int baseFrameHandle) const;  // Is this a render target?
 
 // Query collections (for debugging)
-size_t residentCount = m_residentTextures.size();
-size_t pendingCount = m_pendingUploads.size();
-size_t unavailableCount = m_unavailableTextures.size();
+size_t bitmapCount = m_bitmaps.size();
+size_t targetCount = m_targets.size();
+bool hasPendingUploads = !m_pendingUploads.empty(); // PendingUploadQueue is internal; instrument for counts if needed.
+size_t rejectedCount = m_permanentlyRejected.size();
 size_t deferredCount = m_deferredReleases.size();
 ```
 
@@ -1147,16 +1119,16 @@ Enable `VK_LAYER_KHRONOS_validation` to catch:
 
 ## Key Files Reference
 
-| File | Lines | Description |
-|------|-------|-------------|
-| `VulkanTextureManager.h` | 1-296 | Texture manager class definition, helper functions |
-| `VulkanTextureManager.cpp` | ~2000 | Texture manager implementation |
-| `VulkanTextureBindings.h` | 1-70 | Draw-path and upload-path facade APIs |
-| `VulkanTextureId.h` | 1-52 | Strong-typed texture identity (base frame wrapper) |
-| `VulkanMovieManager.h` | 1-131 | Movie texture manager definition |
-| `VulkanMovieManager.cpp` | ~750 | YCbCr movie texture implementation |
-| `VulkanConstants.h` | 1-24 | Bindless slot constants, frames-in-flight |
-| `VulkanDeferredRelease.h` | 1-102 | GPU lifetime management (serial-gated destruction) |
+| File | Description |
+|------|-------------|
+| `VulkanTextureManager.h` | Texture manager class definition, helper functions |
+| `VulkanTextureManager.cpp` | Texture manager implementation |
+| `VulkanTextureBindings.h` | Draw-path and upload-path facade APIs |
+| `VulkanTextureId.h` | Strong-typed texture identity (base frame wrapper) |
+| `VulkanMovieManager.h` | Movie texture manager definition |
+| `VulkanMovieManager.cpp` | YCbCr movie texture implementation |
+| `VulkanConstants.h` | Bindless slot constants, frames-in-flight |
+| `VulkanDeferredRelease.h` | GPU lifetime management (serial-gated destruction) |
 
 ---
 

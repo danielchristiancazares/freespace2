@@ -600,7 +600,8 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
 
 **Slot Assignment**:
 ```cpp
-uint32_t getBindlessSlotIndex(int textureHandle);
+void requestBindlessSlot(TextureId id);
+std::optional<uint32_t> tryGetBindlessSlot(TextureId id) const;
 ```
 
 **Reserved Slots** (`VulkanConstants.h`):

@@ -99,7 +99,7 @@ These errors require application termination or significant recovery logic.
 
 Swapchain recreation is triggered when `acquireNextImage` or `present` returns an out-of-date or suboptimal status.
 
-**Acquire Next Image** (`VulkanDevice.cpp:996-1023`):
+**Acquire Next Image** (`VulkanDevice.cpp`):
 ```cpp
 VulkanDevice::AcquireResult VulkanDevice::acquireNextImage(vk::Semaphore imageAvailable) {
     AcquireResult result;
@@ -124,7 +124,7 @@ VulkanDevice::AcquireResult VulkanDevice::acquireNextImage(vk::Semaphore imageAv
 }
 ```
 
-**Present** (`VulkanDevice.cpp:1025-1056`):
+**Present** (`VulkanDevice.cpp`):
 ```cpp
 VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, uint32_t imageIndex) {
     PresentResult result;
@@ -151,7 +151,7 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 
 **Function**: `VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height)`
 
-**Location**: `VulkanDevice.cpp:1058-1171`
+**Location**: `VulkanDevice.cpp`
 
 **Process**:
 
@@ -207,7 +207,7 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 
 **Function**: `VulkanRenderTargets::resize(vk::Extent2D extent)`
 
-**Called At**: After swapchain recreation (`VulkanRenderer.cpp:242`)
+**Called At**: After swapchain recreation (`VulkanRenderer.cpp`)
 
 **Recreated Resources**:
 - G-buffer attachments (color, normal, position, specular, emissive)
@@ -278,7 +278,7 @@ uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame& frame) {
 - Query result failures
 - Fence wait failures (timeout or device lost)
 
-**Fence Wait Failure Handling** (`VulkanFrame.cpp:65-77`):
+**Fence Wait Failure Handling** (`VulkanFrame.cpp`):
 ```cpp
 void VulkanFrame::wait_for_gpu() {
     auto fence = m_inflightFence.get();
@@ -324,14 +324,14 @@ void VulkanFrame::wait_for_gpu() {
 
 The staging ring buffer is used for CPU-to-GPU transfers (texture uploads, buffer updates).
 
-**Configuration** (`VulkanRenderer.h:208`):
+**Configuration** (`VulkanRenderer.h`):
 ```cpp
 static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024; // 12 MiB per frame
 ```
 
 **Detection**: `VulkanRingBuffer::try_allocate()` returns `std::nullopt` when insufficient space remains.
 
-**Recovery Pattern** (`VulkanTextureManager.cpp:775-782`):
+**Recovery Pattern** (`VulkanTextureManager.cpp`):
 ```cpp
 auto allocOpt = frame.stagingBuffer().try_allocate(static_cast<vk::DeviceSize>(layerSize));
 if (!allocOpt) {
@@ -359,13 +359,13 @@ if (!allocOpt) {
 
 **Pool Sizing** (`VulkanDescriptorLayouts.cpp`):
 
-*Global Descriptor Pool* (lines 93-103):
+*Global Descriptor Pool*:
 | Type | Count | Purpose |
 |------|-------|---------|
 | `CombinedImageSampler` | 6 | G-buffer (5) + depth (1) |
 | Max Sets | 1 | Single global set |
 
-*Model Descriptor Pool* (lines 174-192):
+*Model Descriptor Pool*:
 | Type | Count | Purpose |
 |------|-------|---------|
 | `StorageBuffer` | `kFramesInFlight` | Vertex heap (1 per frame) |
@@ -432,7 +432,7 @@ constexpr uint32_t kBindlessFirstDynamicTextureSlot = 4;
 **Layers Enabled**:
 - `VK_LAYER_KHRONOS_validation` - Comprehensive validation layer
 
-**Debug Callback** (`VulkanDevice.cpp:137-210`):
+**Debug Callback** (`VulkanDevice.cpp`):
 
 The validation callback includes throttling to prevent log spam from repeated errors:
 
@@ -466,7 +466,7 @@ Validation[ERROR] [VALIDATION] id=123 name=VUID-xxx: <message>
 
 ### 6.2 Device Limit Validation
 
-Before creating descriptor layouts, device limits are validated (`VulkanDescriptorLayouts.cpp:12-30`):
+Before creating descriptor layouts, device limits are validated (`VulkanDescriptorLayouts.cpp`):
 
 ```cpp
 void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimits& limits) {
@@ -486,7 +486,7 @@ void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimit
 }
 ```
 
-**Push Constant Validation** (`VulkanDescriptorLayouts.cpp:160-164`):
+**Push Constant Validation** (`VulkanDescriptorLayouts.cpp`):
 ```cpp
 // Static assert: push constants within spec minimum (256 bytes for Vulkan 1.4)
 static_assert(sizeof(ModelPushConstants) <= 256,
@@ -510,7 +510,7 @@ static_assert(sizeof(ModelPushConstants) % 4 == 0,
 
 **Usage**: Development-time invariants that should never fail in correct code.
 
-**Pattern** (`VulkanRenderer.cpp:286`):
+**Pattern** (`VulkanRenderer.cpp`):
 ```cpp
 Assertion(m_renderingSession != nullptr,
           "beginFrame requires an active rendering session");
@@ -748,15 +748,11 @@ if (result == vk::Result::eTimeout) {
 ## References
 
 **Source Files**:
-- `code/graphics/vulkan/VulkanDevice.cpp:996-1023` - `acquireNextImage()` error detection
-- `code/graphics/vulkan/VulkanDevice.cpp:1025-1056` - `present()` error detection
-- `code/graphics/vulkan/VulkanDevice.cpp:1058-1171` - `recreateSwapchain()` implementation
-- `code/graphics/vulkan/VulkanDevice.cpp:137-210` - Validation callback with throttling
-- `code/graphics/vulkan/VulkanRenderer.cpp:232-257` - `acquireImage()` with retry
-- `code/graphics/vulkan/VulkanRenderer.cpp:259-283` - `acquireImageOrThrow()` exception variant
-- `code/graphics/vulkan/VulkanFrame.cpp:65-77` - Fence wait error handling
-- `code/graphics/vulkan/VulkanTextureManager.cpp:775-782` - Staging buffer exhaustion handling
-- `code/graphics/vulkan/VulkanDescriptorLayouts.cpp:12-30` - Device limit validation
+- `code/graphics/vulkan/VulkanDevice.cpp` - Error detection (`acquireNextImage`, `present`), swapchain recreation, validation callback
+- `code/graphics/vulkan/VulkanRenderer.cpp` - Image acquisition with retry logic
+- `code/graphics/vulkan/VulkanFrame.cpp` - Fence wait error handling
+- `code/graphics/vulkan/VulkanTextureManager.cpp` - Staging buffer exhaustion handling
+- `code/graphics/vulkan/VulkanDescriptorLayouts.cpp` - Device limit validation
 - `code/graphics/vulkan/VulkanConstants.h` - Bindless texture slot definitions
 
 **External Documentation**:

@@ -1414,14 +1414,14 @@ void gr_vulkan_render_primitives(material *material_info, primitive_type prim_ty
     const bool isUiShader = (shaderType == SDR_TYPE_INTERFACE || shaderType == SDR_TYPE_DEFAULT_MATERIAL ||
                              shaderType == SDR_TYPE_NANOVG || shaderType == SDR_TYPE_ROCKET_UI);
     if (isUiShader) {
-      auto* session = ctxBase.renderer.renderingSession();
-      const char* targetName = session ? session->debugTargetName() : "no-session";
+      auto *session = ctxBase.renderer.renderingSession();
+      const char *targetName = session ? session->debugTargetName() : "no-session";
       const auto clipScissor = createClipScissor();
 
       const bool zeroScissor = (clipScissor.extent.width == 0 || clipScissor.extent.height == 0);
       const bool drawingToScreen = (gr_screen.rendering_to_texture == -1);
       const bool nonSwapchainNonSceneTarget =
-        drawingToScreen && session && !session->targetIsSwapchain() && !session->targetIsSceneHdr();
+          drawingToScreen && session && !session->targetIsSwapchain() && !session->targetIsSceneHdr();
 
       if (zeroScissor || nonSwapchainNonSceneTarget) {
         mprintf(("VK_HUD_DEBUG: ui draw state anomaly (shaderType=%d target=%s)\n", static_cast<int>(shaderType),

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <optional>
 
 #include "globalincs/pstypes.h"
@@ -43,6 +45,10 @@ private:
 
   friend class VulkanTextureManager;
   friend class VulkanTextureBindings;
+};
+
+struct TextureIdHasher {
+  size_t operator()(const TextureId &id) const noexcept { return std::hash<int>{}(id.baseFrame()); }
 };
 
 } // namespace vulkan

@@ -61,6 +61,7 @@ add_file_folder("Graphics"
 	   graphics/test_vulkan_perdraw_bindings.cpp
 	   graphics/test_vulkan_post_process_targets.cpp
 	   graphics/test_vulkan_post_effects_semantics.cpp
+	   graphics/test_vulkan_pending_upload_queue.cpp
 	   graphics/it_vulkan_model_present.cpp
 	   graphics/it_vulkan_subsystems.cpp
 )

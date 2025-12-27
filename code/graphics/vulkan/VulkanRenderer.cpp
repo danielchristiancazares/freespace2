@@ -50,14 +50,12 @@ bool VulkanRenderer::initialize() {
     return false;
   }
 
-  // Create renderer-specific resources
   createDescriptorResources();
   createRenderTargets();
   createUploadCommandPool();
   createSubmitTimelineSemaphore();
   createFrames();
 
-  // Initialize managers using VulkanDevice handles
   const SCP_string shaderRoot = "code/graphics/shaders/compiled";
   m_shaderManager = std::make_unique<VulkanShaderManager>(m_vulkanDevice->device(), shaderRoot);
 
@@ -68,7 +66,6 @@ bool VulkanRenderer::initialize() {
   m_pipelineManager = std::make_unique<VulkanPipelineManager>(
       m_vulkanDevice->device(), m_descriptorLayouts->pipelineLayout(), m_descriptorLayouts->modelPipelineLayout(),
       m_descriptorLayouts->deferredPipelineLayout(), m_vulkanDevice->pipelineCache(),
-      m_vulkanDevice->supportsExtendedDynamicState(), m_vulkanDevice->supportsExtendedDynamicState2(),
       m_vulkanDevice->supportsExtendedDynamicState3(), m_vulkanDevice->extDyn3Caps(),
       m_vulkanDevice->supportsVertexAttributeDivisor(), m_vulkanDevice->features13().dynamicRendering == VK_TRUE);
 
@@ -2638,15 +2635,15 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(const FrameCtx &ctx
   Assertion(id.has_value(), "Invalid base frame %d in getTextureDescriptor", baseFrame);
 
   // Fast path: already resident.
-  auto info = m_textureManager->getTextureDescriptorInfo(baseFrame, samplerKey);
-  if (info.imageView) {
-    m_textureManager->markTextureUsedBaseFrame(baseFrame, m_frameCounter);
-    return info;
+  auto info = m_textureManager->tryGetResidentDescriptor(*id, samplerKey);
+  if (info.has_value()) {
+    m_textureManager->markTextureUsed(*id, m_frameCounter);
+    return *info;
   }
 
   // Slow path: queue the upload and flush immediately so this draw doesn't sample fallback forever
   // (critical for animations that advance every frame).
-  m_textureManager->queueTextureUploadBaseFrame(baseFrame, m_frameCounter, samplerKey);
+  m_textureManager->queueTextureUpload(*id, m_frameCounter, samplerKey);
   flushQueuedTextureUploads(ctx, /*syncModelDescriptors=*/false);
   return m_textureBindings->descriptor(*id, m_frameCounter, samplerKey);
 }
@@ -2790,30 +2787,13 @@ uint32_t VulkanRenderer::getBindlessTextureIndex(const FrameCtx &ctx, int bitmap
     return kBindlessTextureSlotFallback;
   }
 
-  // If this texture isn't already resident, the bindless slot would point at fallback until next frame
-  // unless we upload + re-sync descriptors now (critical for animated textures).
-  VulkanTextureManager::SamplerKey samplerKey{};
-  samplerKey.address = vk::SamplerAddressMode::eRepeat;
-  samplerKey.filter = vk::Filter::eLinear;
-  const bool wasResident = (m_textureManager->getTextureDescriptorInfo(baseFrame, samplerKey).imageView != nullptr);
-  const bool hadBindlessSlot = m_textureManager->hasBindlessSlot(baseFrame);
-
-  const uint32_t slot = m_textureBindings->bindlessIndex(*id);
+  const bool wasResident = m_textureManager->isResident(*id);
+  const uint32_t slot = m_textureBindings->bindlessIndex(*id, m_frameCounter);
 
   if (!wasResident) {
+    // Critical for animated textures: upload + re-sync descriptors now so this draw doesn't sample fallback forever.
     flushQueuedTextureUploads(ctx, /*syncModelDescriptors=*/true);
-    return slot;
-  }
-
-  // If a resident texture is first assigned a bindless slot after the frame-start descriptor sync,
-  // update the per-frame model descriptor set so this slot is usable immediately.
-  if (!hadBindlessSlot && m_textureManager->hasBindlessSlot(baseFrame) && slot != kBindlessTextureSlotFallback) {
-    Assertion(m_bufferManager != nullptr, "getBindlessTextureIndex requires buffer manager");
-    Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
-    vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
-    if (static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE) {
-      beginModelDescriptorSync(ctx.m_recording.ref(), ctx.m_recording.ref().frameIndex(), vertexHeapBuffer);
-    }
+    return m_textureBindings->bindlessIndex(*id, m_frameCounter);
   }
 
   return slot;
@@ -2837,7 +2817,6 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame &frame, gr_buffer_handle
       m_bufferManager->ensureBuffer(handle, static_cast<vk::DeviceSize>(offset + sizeof(model_uniform_data)));
   Assertion(vkBuffer, "Failed to resolve Vulkan buffer for handle %d", handle.value());
 
-  // Check if buffer handle changed
   if (frame.modelUniformBinding.bufferHandle != handle) {
     vk::DescriptorBufferInfo info{};
     info.buffer = vkBuffer;
@@ -2876,7 +2855,7 @@ void VulkanRenderer::setSceneUniformBinding(VulkanFrame &frame, gr_buffer_handle
 
 void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex, vk::DescriptorSet set, vk::Buffer vertexHeapBuffer,
                                             vk::Buffer transformBuffer,
-                                            const std::vector<std::pair<uint32_t, int>> &textures) {
+                                            const std::vector<std::pair<uint32_t, TextureId>> &textures) {
   std::vector<vk::WriteDescriptorSet> writes;
   writes.reserve(3);
 
@@ -2934,12 +2913,12 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex, vk::DescriptorS
   desiredInfos[kBindlessTextureSlotDefaultNormal] = defaultNormalInfo;
   desiredInfos[kBindlessTextureSlotDefaultSpec] = defaultSpecInfo;
 
-  for (const auto &[arrayIndex, handle] : textures) {
+  for (const auto &[arrayIndex, id] : textures) {
     Assertion(arrayIndex < kMaxBindlessTextures, "updateModelDescriptors: slot index %u out of range (max %u)",
               arrayIndex, kMaxBindlessTextures);
-    vk::DescriptorImageInfo info = m_textureManager->getTextureDescriptorInfo(handle, samplerKey);
-    Assertion(info.imageView, "updateModelDescriptors requires resident texture handle=%d", handle);
-    desiredInfos[arrayIndex] = info;
+    auto info = m_textureManager->tryGetResidentDescriptor(id, samplerKey);
+    Assertion(info.has_value(), "updateModelDescriptors requires resident TextureId baseFrame=%d", id.baseFrame());
+    desiredInfos[arrayIndex] = *info;
   }
 
   auto sameInfo = [](const vk::DescriptorImageInfo &a, const vk::DescriptorImageInfo &b) {
@@ -2964,7 +2943,6 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex, vk::DescriptorS
     cache.infos = desiredInfos;
     cache.initialized = true;
   } else {
-    // Update only the slots that changed since last sync.
     uint32_t i = 0;
     while (i < kMaxBindlessTextures) {
       if (sameInfo(cache.infos[i], desiredInfos[i])) {
@@ -2994,22 +2972,19 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex, vk::DescriptorS
 }
 
 void VulkanRenderer::beginModelDescriptorSync(VulkanFrame &frame, uint32_t frameIndex, vk::Buffer vertexHeapBuffer) {
-  // Precondition: vertexHeapBuffer is valid (caller checked)
   Assertion(static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE,
             "beginModelDescriptorSync called with null vertexHeapBuffer");
   Assertion(m_bufferManager != nullptr, "beginModelDescriptorSync requires buffer manager");
 
-  // frameIndex MUST be ring index [0, FramesInFlight)
   Assertion(frameIndex < kFramesInFlight, "Invalid frame index %u (must be 0..%u)", frameIndex, kFramesInFlight - 1);
 
-  // Descriptor set must be allocated at frame construction (not lazily)
   Assertion(frame.modelDescriptorSet(), "Model descriptor set must be allocated at frame construction");
 
   Assertion(m_textureManager != nullptr, "beginModelDescriptorSync requires texture manager");
 
   // Binding 0: Vertex heap SSBO; Binding 1: bindless textures; Binding 3: batched transform buffer (dynamic SSBO).
   // We batch the writes to avoid issuing one vkUpdateDescriptorSets call per texture.
-  std::vector<std::pair<uint32_t, int>> textures;
+  std::vector<std::pair<uint32_t, TextureId>> textures;
   textures.reserve(kMaxBindlessTextures);
   m_textureManager->appendResidentBindlessDescriptors(textures);
 
@@ -3432,7 +3407,6 @@ void VulkanRenderer::createSmaaLookupTextures(const InitCtx &init) {
     Assertion(width > 0 && height > 0, "createSmaaLookupTextures invalid extent %ux%u", width, height);
     Assertion(sizeBytes > 0, "createSmaaLookupTextures invalid size");
 
-    // Create image (device local).
     vk::ImageCreateInfo imageInfo{};
     imageInfo.imageType = vk::ImageType::e2D;
     imageInfo.format = format;
@@ -3571,7 +3545,6 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx &render, vk::Buffer 
     cmd.setStencilTestEnable(VK_FALSE);
   }
 
-  // Get pipeline and layout for deferred shader
   // Pipelines are cached by VulkanPipelineManager; we still build the key per frame since the render target contract
   // can vary.
   ShaderModules modules = m_shaderManager->getModules(shader_type::SDR_TYPE_DEFERRED_LIGHTING);
@@ -3582,7 +3555,6 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx &render, vk::Buffer 
     return layout;
   }();
 
-  // Create pipeline key for deferred lighting
   const auto &rt = render.targetInfo;
   PipelineKey key{};
   key.type = shader_type::SDR_TYPE_DEFERRED_LIGHTING;
@@ -3601,7 +3573,6 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx &render, vk::Buffer 
   vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, deferredLayout);
   vk::Pipeline ambientPipeline = m_pipelineManager->getPipeline(ambientKey, modules, deferredLayout);
 
-  // Prepare draw context
   DeferredDrawContext ctx{};
   ctx.cmd = cmd;
   ctx.layout = m_descriptorLayouts->deferredPipelineLayout();
@@ -3615,14 +3586,12 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx &render, vk::Buffer 
   // Binding via the standard pipeline layout is not descriptor-set compatible because set 0 differs.
   cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, ctx.layout, 1, 1, &m_globalDescriptorSet, 0, nullptr);
 
-  // Get mesh buffers
   vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
   vk::Buffer sphereVB = m_bufferManager->getBuffer(m_sphereMesh.vbo);
   vk::Buffer sphereIB = m_bufferManager->getBuffer(m_sphereMesh.ibo);
   vk::Buffer cylinderVB = m_bufferManager->getBuffer(m_cylinderMesh.vbo);
   vk::Buffer cylinderIB = m_bufferManager->getBuffer(m_cylinderMesh.ibo);
 
-  // Record each light
   for (const auto &light : lights) {
     std::visit(
         [&](const auto &l) {

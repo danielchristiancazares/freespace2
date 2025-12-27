@@ -329,7 +329,6 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size) {
                                [oldBuf = std::move(buffer.buffer), oldMem = std::move(buffer.memory)]() mutable {});
   }
 
-  // Create new buffer with the new size
   vk::BufferCreateInfo bufferInfo;
   bufferInfo.size = size;
   bufferInfo.usage = getVkUsageFlags(buffer.type);

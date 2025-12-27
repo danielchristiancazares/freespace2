@@ -53,11 +53,10 @@ Tracks remaining architectural work for correctness, phase enforcement, and type
 
 ### 6. Eliminate empty descriptor returns in draw path
 
-- **Current**: `getTextureDescriptorInfo()` returns empty `vk::DescriptorImageInfo` on miss; callers branch on `imageView`.
-- **Fix**: split APIs:
-  - `residentDescriptor(TextureId, SamplerKey)` asserts residency.
-  - `drawDescriptor(TextureId, frameIndex, SamplerKey)` always returns valid descriptor (resident or fallback).
-- **Search gate**: no deep `if (info.imageView)` checks in draw paths.
+- **Current**: the texture manager exposes a domain-optional API:
+  - `tryGetResidentDescriptor(TextureId, SamplerKey) -> std::optional<vk::DescriptorImageInfo>`
+- **Fix**: push fallback decisions to boundary APIs (`VulkanTextureBindings::descriptor`) so draw paths always receive a
+  valid descriptor (resident or fallback) without relying on fake "empty descriptor" inhabitants.
 
 ### 7. Remove session-side dynamic_cast in deferred transitions
 

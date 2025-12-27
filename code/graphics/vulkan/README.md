@@ -10,16 +10,19 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanRenderer.*` | Frame orchestration, submission, per-frame sync, global resource creation |
 | `VulkanRenderingSession.*` | Render pass state machine, layout transitions, dynamic state |
 | `VulkanFrame.*` | Per-frame resources: command buffer, fences, semaphores, ring buffers |
-| `VulkanFrameCaps.h` | Capability tokens (`FrameCtx`, `RenderCtx`) |
-| `VulkanPhaseContexts.h` | Typestate tokens for deferred lighting |
+| `VulkanFrameCaps.h` | Frame capability tokens (`FrameCtx`, `ModelBoundFrame`, `NanoVGBoundFrame`, `DecalBoundFrame`) |
+| `VulkanPhaseContexts.h` | Phase tokens (`UploadCtx`, `RenderCtx`, `DeferredGeometryCtx`, `DeferredLightingCtx`) |
+| `VulkanFrameFlow.h` | Frame recording tokens (`RecordingFrame`, `InFlightFrame`) |
+| `VulkanDeferredRelease.h` | Serial-gated deferred destruction queue |
+| `VulkanTextureId.h` | Type-safe texture identifier |
 | `FrameLifecycleTracker.h` | Debug validation for recording state |
 | `VulkanGraphics.*` | Engine glue: `gr_vulkan_*` functions, `g_currentFrame` injection |
 | `VulkanBufferManager.*` | Buffer creation, updates, deferred deletion |
 | `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache, bitmap render targets |
 | `VulkanMovieManager.*` | YCbCr movie textures: feature checks, pipeline setup, upload/draw, deferred release |
-| `VulkanTextureBindings.h` | Draw-path texture API (safe binding lookup, no GPU recording) |
+| `VulkanTextureBindings.h` | Draw-path texture API (`VulkanTextureBindings`) + upload-phase uploader (`VulkanTextureUploader`) |
 | `VulkanShaderManager.*` | Shader module loading/caching by type + variant |
-| `VulkanShaderReflection.*` | SPIR-V reflection helpers for pipeline layout/validation |
+| `VulkanShaderReflection.h` | SPIR-V reflection helpers for pipeline layout/validation |
 | `VulkanPipelineManager.*` | Pipeline creation/caching by `PipelineKey` |
 | `VulkanDescriptorLayouts.*` | Set layouts, pipeline layouts, descriptor pool allocation |
 | `VulkanDeferredLights.*` | Deferred lighting pass orchestration and light volume meshes |
@@ -36,22 +39,38 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 
 ## Constants
 
-- `kFramesInFlight` in `VulkanConstants.h` defines the frame-ring size and any per-frame tracking. Avoid duplicating a second frames-in-flight constant elsewhere.
+Key constants in `VulkanConstants.h`:
+- `kFramesInFlight` — frame-ring size for per-frame tracking. Do not duplicate elsewhere.
+- `kMaxBindlessTextures` — bindless descriptor array size.
+- `kBindlessTextureSlotFallback`, `kBindlessTextureSlotDefaultBase`, etc. — reserved bindless slots.
 
 ## Design Patterns in Practice
 
 This backend adheres to the [Type-Driven Design Philosophy](../../../docs/DESIGN_PHILOSOPHY.md).
 
 ### Capability Tokens & Typestates
-- **`FrameCtx`**: Proof of recording state.
+
+**Recording Phase** (`VulkanFrameFlow.h`):
+- **`RecordingFrame`**: Proof of active frame recording (unforgeable by construction).
+- **`InFlightFrame`**: Proof of submitted frame awaiting GPU completion.
+
+**Frame Context** (`VulkanFrameCaps.h`, `VulkanPhaseContexts.h`):
+- **`FrameCtx`**: Proof of recording state (derived from `RecordingFrame`).
+- **`UploadCtx`**: Proof of upload phase (no rendering active).
 - **`RenderCtx`**: Proof of active render pass.
+
+**Bound Resources** (`VulkanFrameCaps.h`):
 - **`ModelBoundFrame`**: Proof of allocated model descriptors.
-- **Deferred Lighting**: Enforces `begin` → `end` → `finish` sequence via `DeferredGeometryCtx` and `DeferredLightingCtx` tokens.
+- **`NanoVGBoundFrame`**: Proof of bound NanoVG UBO.
+- **`DecalBoundFrame`**: Proof of bound decal UBOs.
+
+**Deferred Lighting** (`VulkanPhaseContexts.h`):
+- **`DeferredGeometryCtx`** / **`DeferredLightingCtx`**: Enforces `begin` → `end` → `finish` sequence.
 
 ### State as Location
 - **Frames**: Managed by moving between `m_availableFrames` and `m_inFlightFrames` containers.
 - **Render Targets**: Represented by the active `RenderTargetState` subclass instance in `VulkanRenderingSession`.
-- **Texture Residency**: Textures move between `m_residentTextures`, `m_pendingUploads`, and `m_unavailableTextures`.
+- **Texture Residency**: Resident textures exist in `m_bitmaps`/`m_targets`; pending uploads are tracked by `m_pendingUploads`; domain-invalid inputs may be cached in `m_permanentlyRejected`.
 
 ### Boundary / Adapter
 `VulkanGraphics.cpp` bridges the legacy engine's implicit global state to the backend's explicit token requirements.
@@ -131,10 +150,10 @@ Handles buffer creation and updates.
 ### `VulkanTextureManager` (Textures)
 
 Split responsibilities:
-- **Residency:** Tracks which textures are GPU-resident, queued for upload, or unavailable.
-- **Uploads:** `queueTextureUpload` stages data. `flushPendingUploads` (called at `beginFrame`) executes copies.
-- **Bindings:** `getBindlessSlotIndex` returns a valid slot (fallback if non-resident).
-- **Render Targets:** `createRenderTarget` / `transitionRenderTargetToAttachment` manage GPU-backed bitmaps.
+- **Residency (state as location):** Resident bitmap textures live in `m_bitmaps`; resident render targets live in `m_targets`. Non-resident textures are absent.
+- **Uploads:** `queueTextureUpload` enqueues CPU-side requests. `flushPendingUploads(const UploadCtx&)` performs transfers and assigns bindless slots at upload-phase safe points.
+- **Bindings (boundary):** `VulkanTextureBindings` owns fallback policy and uses lookup-only manager APIs (`tryGetResidentDescriptor`, `tryGetBindlessSlot`) plus explicit requests (`queueTextureUpload`, `requestBindlessSlot`).
+- **Render Targets:** `createRenderTarget` / render-target transitions operate on `m_targets` (unified ownership of image + metadata).
 
 ### `VulkanMovieManager` (YCbCr Movie Path)
 
@@ -163,7 +182,7 @@ Pipelines are "contract-driven" and cached by `PipelineKey`:
   - which pipeline layout to use (`Standard`, `Model`, `Deferred`)
   - which vertex input mode to use (`VertexAttributes` vs. `VertexPulling`)
 
-**Documentation**: See `docs/vulkan/pipeline_management.md` for architecture details and `docs/vulkan/VULKAN_PIPELINE_USAGE.md` for practical usage patterns, common mistakes, and debugging guidance.
+**Documentation**: See `docs/VULKAN_PIPELINE_MANAGEMENT.md` for architecture details and `docs/VULKAN_PIPELINE_USAGE.md` for practical usage patterns, common mistakes, and debugging guidance.
 
 ## Synchronization Primitives
 
@@ -182,12 +201,12 @@ flip()
 ├── VulkanFrame::wait_for_gpu()           # fence wait
 ├── managers: collect(completedSerial)    # recycle buffers/textures
 ├── acquireNextImage()                    # recreate swapchain if needed
-		└── beginFrame()
-		    ├── reset command pool
-		    ├── begin command buffer
-	    ├── flushPendingUploads()             # texture staging
-	    ├── beginModelDescriptorSync()        # descriptor writes (after upload flush)
-	    └── VulkanRenderingSession::beginFrame()
+└── beginFrame()
+    ├── reset command pool
+    ├── begin command buffer
+    ├── flushPendingUploads()             # texture staging
+    ├── beginModelDescriptorSync()        # descriptor writes
+    └── VulkanRenderingSession::beginFrame()
 
 gr_vulkan_setup_frame()
 └── set viewport/scissor (stored for next pass)
@@ -208,4 +227,18 @@ gr_vulkan_setup_frame()
 - **Movie uploads can be mid-recording.** The movie path records transfer commands after `beginFrame()`, so always suspend dynamic rendering before uploading.
 - **Y-flip changes winding.** Negative viewport height → clockwise front-face.
 - **Alignment matters.** Uniform offsets must respect `minUniformBufferOffsetAlignment`.
-- **Pipeline layout compatibility matters.** “Deferred” pipelines use a different set-0 layout than “Standard”; bind the global set using the matching pipeline layout when mixing pipeline families.
+- **Pipeline layout compatibility matters.** "Deferred" pipelines use a different set-0 layout than "Standard"; bind the global set using the matching pipeline layout when mixing pipeline families.
+
+## Extended Documentation
+
+Detailed docs in `docs/`:
+- `VULKAN_ARCHITECTURE_OVERVIEW.md` — high-level system design
+- `VULKAN_FRAME_LIFECYCLE.md` — frame recording/submission flow
+- `VULKAN_CAPABILITY_TOKENS.md` — typestate token design
+- `VULKAN_PIPELINE_MANAGEMENT.md` — pipeline architecture
+- `VULKAN_PIPELINE_USAGE.md` — practical usage patterns
+- `VULKAN_TEXTURE_BINDING.md` — texture/bindless system
+- `VULKAN_DESCRIPTOR_SETS.md` — descriptor layout strategy
+- `VULKAN_SYNCHRONIZATION.md` — barriers, semaphores, fences
+- `VULKAN_MEMORY_ALLOCATION.md` — VMA integration
+- `VULKAN_DEFERRED_LIGHTING_FLOW.md` — G-buffer / lighting passes

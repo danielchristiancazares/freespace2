@@ -7,6 +7,7 @@
 #include "graphics/2d.h"
 
 #include <cstdint>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.hpp>
@@ -95,7 +96,6 @@ class VulkanPipelineManager {
 public:
   VulkanPipelineManager(vk::Device device, vk::PipelineLayout pipelineLayout, vk::PipelineLayout modelPipelineLayout,
                         vk::PipelineLayout deferredPipelineLayout, vk::PipelineCache pipelineCache,
-                        bool supportsExtendedDynamicState, bool supportsExtendedDynamicState2,
                         bool supportsExtendedDynamicState3, const ExtendedDynamicState3Caps &extDyn3Caps,
                         bool supportsVertexAttributeDivisor, bool dynamicRenderingEnabled);
 
@@ -109,8 +109,7 @@ private:
   vk::PipelineLayout m_modelPipelineLayout;
   vk::PipelineLayout m_deferredPipelineLayout;
   vk::PipelineCache m_pipelineCache;
-  bool m_supportsExtendedDynamicState = false;
-  bool m_supportsExtendedDynamicState2 = false;
+  std::mutex m_mutex;
   bool m_supportsExtendedDynamicState3 = false;
   ExtendedDynamicState3Caps m_extDyn3Caps{};
   bool m_supportsVertexAttributeDivisor = false;
