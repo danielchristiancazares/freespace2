@@ -85,6 +85,41 @@ inline vk::ImageSubresourceRange makeSubresourceRange(vk::ImageAspectFlags aspec
   return range;
 }
 
+inline vk::ImageMemoryBarrier2 makeImageBarrier(vk::Image image, vk::PipelineStageFlags2 srcStageMask,
+                                                vk::AccessFlags2 srcAccessMask, vk::PipelineStageFlags2 dstStageMask,
+                                                vk::AccessFlags2 dstAccessMask, vk::ImageLayout oldLayout,
+                                                vk::ImageLayout newLayout, vk::ImageSubresourceRange range) {
+  vk::ImageMemoryBarrier2 barrier{};
+  barrier.srcStageMask = srcStageMask;
+  barrier.srcAccessMask = srcAccessMask;
+  barrier.dstStageMask = dstStageMask;
+  barrier.dstAccessMask = dstAccessMask;
+  barrier.oldLayout = oldLayout;
+  barrier.newLayout = newLayout;
+  barrier.image = image;
+  barrier.subresourceRange = range;
+  return barrier;
+}
+
+inline vk::ImageMemoryBarrier2 makeImageBarrier(vk::Image image, vk::PipelineStageFlags2 srcStageMask,
+                                                vk::AccessFlags2 srcAccessMask, vk::PipelineStageFlags2 dstStageMask,
+                                                vk::AccessFlags2 dstAccessMask, vk::ImageLayout oldLayout,
+                                                vk::ImageLayout newLayout, vk::ImageAspectFlags aspectMask,
+                                                uint32_t baseMipLevel, uint32_t levelCount, uint32_t baseArrayLayer,
+                                                uint32_t layerCount) {
+  return makeImageBarrier(image, srcStageMask, srcAccessMask, dstStageMask, dstAccessMask, oldLayout, newLayout,
+                          makeSubresourceRange(aspectMask, baseMipLevel, levelCount, baseArrayLayer, layerCount));
+}
+
+inline vk::ImageMemoryBarrier2 makeImageBarrier(vk::Image image, vk::PipelineStageFlags2 srcStageMask,
+                                                vk::AccessFlags2 srcAccessMask, vk::PipelineStageFlags2 dstStageMask,
+                                                vk::AccessFlags2 dstAccessMask, vk::ImageLayout oldLayout,
+                                                vk::ImageLayout newLayout, vk::ImageAspectFlags aspectMask,
+                                                uint32_t levelCount, uint32_t layerCount) {
+  return makeImageBarrier(image, srcStageMask, srcAccessMask, dstStageMask, dstAccessMask, oldLayout, newLayout,
+                          aspectMask, 0, levelCount, 0, layerCount);
+}
+
 inline vk::ImageMemoryBarrier2 makeImageLayoutBarrier(vk::Image image, vk::ImageLayout oldLayout,
                                                       vk::ImageLayout newLayout, vk::ImageSubresourceRange range) {
   vk::ImageMemoryBarrier2 barrier{};

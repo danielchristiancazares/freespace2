@@ -5,6 +5,7 @@
 #include "VulkanDevice.h"
 #include "VulkanFrame.h"
 #include "VulkanShaderManager.h"
+#include "VulkanSync2Helpers.h"
 
 #include "graphics/2d.h"
 
@@ -587,55 +588,28 @@ void VulkanMovieManager::initMovieStagingLayout(MovieTexture &tex) {
 }
 
 void VulkanMovieManager::transitionForUpload(vk::CommandBuffer cmd, MovieTexture &tex) {
-  vk::ImageMemoryBarrier2 barrier{};
+  const bool fromShaderRead = (tex.currentLayout == vk::ImageLayout::eShaderReadOnlyOptimal);
+  auto barrier = makeImageBarrier(
+      tex.image.get(),
+      fromShaderRead ? vk::PipelineStageFlagBits2::eFragmentShader : vk::PipelineStageFlagBits2::eTopOfPipe,
+      fromShaderRead ? vk::AccessFlagBits2::eShaderRead : vk::AccessFlags2{}, vk::PipelineStageFlagBits2::eTransfer,
+      vk::AccessFlagBits2::eTransferWrite, tex.currentLayout, vk::ImageLayout::eTransferDstOptimal,
+      vk::ImageAspectFlagBits::eColor, 1, 1);
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.oldLayout = tex.currentLayout;
-  barrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
-  barrier.srcStageMask = (tex.currentLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
-                             ? vk::PipelineStageFlagBits2::eFragmentShader
-                             : vk::PipelineStageFlagBits2::eTopOfPipe;
-  barrier.srcAccessMask = (tex.currentLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
-                              ? vk::AccessFlagBits2::eShaderRead
-                              : vk::AccessFlags2{};
-  barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-  barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-  barrier.image = tex.image.get();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.baseMipLevel = 0;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.baseArrayLayer = 0;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
+  submitImageBarrier(cmd, barrier);
 
   tex.currentLayout = vk::ImageLayout::eTransferDstOptimal;
 }
 
 void VulkanMovieManager::transitionForSampling(vk::CommandBuffer cmd, MovieTexture &tex) {
-  vk::ImageMemoryBarrier2 barrier{};
+  auto barrier = makeImageBarrier(tex.image.get(), vk::PipelineStageFlagBits2::eTransfer,
+                                  vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eFragmentShader,
+                                  vk::AccessFlagBits2::eShaderRead, vk::ImageLayout::eTransferDstOptimal,
+                                  vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor, 1, 1);
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-  barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-  barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-  barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-  barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-  barrier.image = tex.image.get();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.baseMipLevel = 0;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.baseArrayLayer = 0;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
+  submitImageBarrier(cmd, barrier);
 
   tex.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 }

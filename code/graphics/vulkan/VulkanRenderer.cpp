@@ -6,6 +6,7 @@
 #include "VulkanFrameFlow.h"
 #include "VulkanGraphics.h"
 #include "VulkanMovieManager.h"
+#include "VulkanSync2Helpers.h"
 #include "VulkanTextureBindings.h"
 #include "graphics/util/uniform_structs.h"
 #include "lighting/lighting_profiles.h"
@@ -2319,48 +2320,21 @@ void VulkanRenderer::generateBloomMipmaps(vk::CommandBuffer cmd, uint32_t pingPo
 
   // Transition all mips to TRANSFER_DST (we will move each mip to SRC as we go).
   {
-    vk::ImageMemoryBarrier2 barrier{};
-    barrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-    barrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-    barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-    barrier.oldLayout = m_renderTargets->bloomLayout(pingPongIndex);
-    barrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = mipLevels;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
-    vk::DependencyInfo dep{};
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &barrier;
-    cmd.pipelineBarrier2(dep);
+    const auto oldLayout = m_renderTargets->bloomLayout(pingPongIndex);
+    submitImageBarrier(cmd, makeImageBarrier(image, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                                             vk::AccessFlagBits2::eColorAttachmentWrite,
+                                             vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
+                                             oldLayout, vk::ImageLayout::eTransferDstOptimal,
+                                             vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1));
 
     m_renderTargets->setBloomLayout(pingPongIndex, vk::ImageLayout::eTransferDstOptimal);
   }
 
   // Transition mip 0 to TRANSFER_SRC.
   {
-    vk::ImageMemoryBarrier2 barrier{};
-    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-    barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
-    barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-    barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
-    vk::DependencyInfo dep{};
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &barrier;
-    cmd.pipelineBarrier2(dep);
+    submitImageBarrier(cmd, makeImageLayoutBarrier(image, vk::ImageLayout::eTransferDstOptimal,
+                                                   vk::ImageLayout::eTransferSrcOptimal,
+                                                   vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
   }
 
   uint32_t srcW = std::max(1u, baseExtent.width);
@@ -2394,24 +2368,9 @@ void VulkanRenderer::generateBloomMipmaps(vk::CommandBuffer cmd, uint32_t pingPo
 
     // Transition destination mip to TRANSFER_SRC so it can serve as source for the next step.
     {
-      vk::ImageMemoryBarrier2 barrier{};
-      barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-      barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      barrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
-      barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-      barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
-      barrier.image = image;
-      barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-      barrier.subresourceRange.baseMipLevel = mip;
-      barrier.subresourceRange.levelCount = 1;
-      barrier.subresourceRange.baseArrayLayer = 0;
-      barrier.subresourceRange.layerCount = 1;
-
-      vk::DependencyInfo dep{};
-      dep.imageMemoryBarrierCount = 1;
-      dep.pImageMemoryBarriers = &barrier;
-      cmd.pipelineBarrier2(dep);
+      submitImageBarrier(cmd, makeImageLayoutBarrier(image, vk::ImageLayout::eTransferDstOptimal,
+                                                     vk::ImageLayout::eTransferSrcOptimal,
+                                                     vk::ImageAspectFlagBits::eColor, mip, 1, 0, 1));
     }
 
     srcW = dstW;
@@ -2420,24 +2379,12 @@ void VulkanRenderer::generateBloomMipmaps(vk::CommandBuffer cmd, uint32_t pingPo
 
   // Transition all mips to shader-read for sampling in blur passes.
   {
-    vk::ImageMemoryBarrier2 barrier{};
-    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite;
-    barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-    barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-    barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
-    barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = mipLevels;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
-    vk::DependencyInfo dep{};
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &barrier;
-    cmd.pipelineBarrier2(dep);
+    submitImageBarrier(cmd,
+                       makeImageBarrier(image, vk::PipelineStageFlagBits2::eTransfer,
+                                        vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite,
+                                        vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead,
+                                        vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+                                        vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1));
   }
 
   m_renderTargets->setBloomLayout(pingPongIndex, vk::ImageLayout::eShaderReadOnlyOptimal);
@@ -3379,22 +3326,9 @@ void VulkanRenderer::createSmaaLookupTextures(const InitCtx &init) {
 
     submitInitCommandsAndWait(init, [&](vk::CommandBuffer cmd) {
       // Undefined -> transfer dst
-      vk::ImageMemoryBarrier2 toTransfer{};
-      toTransfer.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-      toTransfer.srcAccessMask = {};
-      toTransfer.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      toTransfer.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-      toTransfer.oldLayout = vk::ImageLayout::eUndefined;
-      toTransfer.newLayout = vk::ImageLayout::eTransferDstOptimal;
-      toTransfer.image = out.image.get();
-      toTransfer.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-      toTransfer.subresourceRange.levelCount = 1;
-      toTransfer.subresourceRange.layerCount = 1;
-
-      vk::DependencyInfo depToTransfer{};
-      depToTransfer.imageMemoryBarrierCount = 1;
-      depToTransfer.pImageMemoryBarriers = &toTransfer;
-      cmd.pipelineBarrier2(depToTransfer);
+      submitImageBarrier(cmd, makeImageLayoutBarrier(out.image.get(), vk::ImageLayout::eUndefined,
+                                                     vk::ImageLayout::eTransferDstOptimal,
+                                                     vk::ImageAspectFlagBits::eColor, 1, 1));
 
       vk::BufferImageCopy region{};
       region.bufferOffset = 0;
@@ -3406,22 +3340,9 @@ void VulkanRenderer::createSmaaLookupTextures(const InitCtx &init) {
       cmd.copyBufferToImage(staging.get(), out.image.get(), vk::ImageLayout::eTransferDstOptimal, 1, &region);
 
       // Transfer dst -> shader read
-      vk::ImageMemoryBarrier2 toShader{};
-      toShader.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      toShader.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-      toShader.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-      toShader.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-      toShader.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-      toShader.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-      toShader.image = out.image.get();
-      toShader.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-      toShader.subresourceRange.levelCount = 1;
-      toShader.subresourceRange.layerCount = 1;
-
-      vk::DependencyInfo depToShader{};
-      depToShader.imageMemoryBarrierCount = 1;
-      depToShader.pImageMemoryBarriers = &toShader;
-      cmd.pipelineBarrier2(depToShader);
+      submitImageBarrier(cmd, makeImageLayoutBarrier(out.image.get(), vk::ImageLayout::eTransferDstOptimal,
+                                                     vk::ImageLayout::eShaderReadOnlyOptimal,
+                                                     vk::ImageAspectFlagBits::eColor, 1, 1));
     });
   };
 
