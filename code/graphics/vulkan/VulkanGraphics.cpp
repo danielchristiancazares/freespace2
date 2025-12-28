@@ -864,7 +864,7 @@ static void draw_decal_pass(const DecalBoundFrame &bound, const ShaderModules &m
   Assertion(pipeline, "Decal pipeline creation failed");
 
   // Bind global descriptors (set=1) for depth sampling.
-  const vk::DescriptorSet globalSet = renderer.globalDescriptorSet();
+  const vk::DescriptorSet globalSet = bound.ctx.frame().globalDescriptorSet();
   cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, renderer.getPipelineLayout(), 1, 1, &globalSet, 0, nullptr);
 
   // Push per-draw descriptors (set=0): decal globals/info + textures.
