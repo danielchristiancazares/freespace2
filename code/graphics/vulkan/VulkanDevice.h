@@ -3,6 +3,7 @@
 #include "VulkanDebug.h"
 #include "osapi/osapi.h"
 
+#include <cstdint>
 #include <memory>
 #include <vulkan/vulkan.hpp>
 
@@ -99,7 +100,11 @@ public:
   vk::Image swapchainImage(uint32_t index) const;
   vk::ImageView swapchainImageView(uint32_t index) const;
   uint32_t swapchainImageCount() const;
+  // Render-finished semaphore to use for presenting a specific swapchain image index.
+  // Indexed by the acquired swapchain image index to avoid reusing a present semaphore before reacquire.
+  vk::Semaphore swapchainRenderFinishedSemaphore(uint32_t imageIndex) const;
   vk::ImageUsageFlags swapchainUsage() const { return m_swapchainUsage; }
+  uint64_t swapchainGeneration() const { return m_swapchainGeneration; }
 
   //--------------------------------------------------------------------------
   // Device properties and capabilities
@@ -175,8 +180,10 @@ private:
   vk::Format m_swapchainFormat = vk::Format::eUndefined;
   vk::Extent2D m_swapchainExtent;
   vk::ImageUsageFlags m_swapchainUsage{};
+  uint64_t m_swapchainGeneration = 0;
   SCP_vector<vk::Image> m_swapchainImages;
   SCP_vector<vk::UniqueImageView> m_swapchainImageViews;
+  SCP_vector<vk::UniqueSemaphore> m_swapchainRenderFinishedSemaphores;
 
   // Pipeline cache
   vk::UniquePipelineCache m_pipelineCache;
