@@ -1,5 +1,6 @@
 #include "VulkanRenderingSession.h"
 #include "VulkanDebug.h"
+#include "VulkanSync2Helpers.h"
 #include "VulkanTextureManager.h"
 #include "osapi/outwnd.h"
 #include <atomic>
@@ -10,65 +11,6 @@
 
 namespace graphics {
 namespace vulkan {
-
-namespace {
-struct StageAccess {
-  vk::PipelineStageFlags2 stageMask{};
-  vk::AccessFlags2 accessMask{};
-};
-
-StageAccess stageAccessForLayout(vk::ImageLayout layout) {
-  StageAccess out{};
-  switch (layout) {
-  case vk::ImageLayout::eUndefined:
-    out.stageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-    out.accessMask = {};
-    break;
-  case vk::ImageLayout::eColorAttachmentOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-    out.accessMask = vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite;
-    break;
-  case vk::ImageLayout::eDepthAttachmentOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
-    out.accessMask =
-        vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-    break;
-  case vk::ImageLayout::eDepthStencilAttachmentOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests;
-    out.accessMask =
-        vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-    break;
-  case vk::ImageLayout::eShaderReadOnlyOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-    out.accessMask = vk::AccessFlagBits2::eShaderRead;
-    break;
-  case vk::ImageLayout::eTransferSrcOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
-    out.accessMask = vk::AccessFlagBits2::eTransferRead;
-    break;
-  case vk::ImageLayout::eTransferDstOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eTransfer;
-    out.accessMask = vk::AccessFlagBits2::eTransferWrite;
-    break;
-  case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
-    out.stageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-    out.accessMask = vk::AccessFlagBits2::eShaderRead;
-    break;
-  case vk::ImageLayout::ePresentSrcKHR:
-    // "Present" is external to the pipeline. For sync2 barriers that transition to/from present,
-    // the destination stage/access should typically be NONE/0.
-    out.stageMask = {};
-    out.accessMask = {};
-    break;
-  default:
-    out.stageMask = vk::PipelineStageFlagBits2::eAllCommands;
-    out.accessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
-    break;
-  }
-  return out;
-}
-
-} // namespace
 
 VulkanRenderingSession::VulkanRenderingSession(VulkanDevice &device, VulkanRenderTargets &targets,
                                                VulkanTextureManager &textures)
@@ -260,29 +202,7 @@ void VulkanRenderingSession::transitionMainDepthToShaderRead(vk::CommandBuffer c
   // Use the same read layout helper as deferred (depth+stencil read-only when applicable).
   const auto oldLayout = m_targets.depthLayout();
   const auto newLayout = m_targets.depthReadLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.depthImage();
-  barrier.subresourceRange.aspectMask = m_targets.depthAttachmentAspectMask();
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.depthImage(), oldLayout, newLayout, m_targets.depthAttachmentAspectMask(), 1, 1);
   m_targets.setDepthLayout(newLayout);
 }
 
@@ -921,29 +841,8 @@ void VulkanRenderingSession::transitionSwapchainToLayout(vk::CommandBuffer cmd, 
             imageIndex, m_swapchainLayouts.size());
 
   const auto oldLayout = m_swapchainLayouts[imageIndex];
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_device.swapchainImage(imageIndex);
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_device.swapchainImage(imageIndex), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor,
+                        1, 1);
   m_swapchainLayouts[imageIndex] = newLayout;
 }
 
@@ -952,26 +851,9 @@ void VulkanRenderingSession::transitionSwapchainToAttachment(vk::CommandBuffer c
 }
 
 void VulkanRenderingSession::transitionDepthToAttachment(vk::CommandBuffer cmd) {
-  vk::ImageMemoryBarrier2 toDepth{};
   const auto oldLayout = m_targets.depthLayout();
   const auto newLayout = m_targets.depthAttachmentLayout();
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  toDepth.srcStageMask = src.stageMask;
-  toDepth.srcAccessMask = src.accessMask;
-  toDepth.dstStageMask = dst.stageMask;
-  toDepth.dstAccessMask = dst.accessMask;
-  toDepth.oldLayout = oldLayout;
-  toDepth.newLayout = newLayout;
-  toDepth.image = m_targets.depthImage();
-  toDepth.subresourceRange.aspectMask = m_targets.depthAttachmentAspectMask();
-  toDepth.subresourceRange.levelCount = 1;
-  toDepth.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo depInfo{};
-  depInfo.imageMemoryBarrierCount = 1;
-  depInfo.pImageMemoryBarriers = &toDepth;
-  cmd.pipelineBarrier2(depInfo);
+  transitionImageLayout(cmd, m_targets.depthImage(), oldLayout, newLayout, m_targets.depthAttachmentAspectMask(), 1, 1);
   m_targets.setDepthLayout(newLayout);
 }
 
@@ -986,26 +868,12 @@ void VulkanRenderingSession::transitionSwapchainToPresent(vk::CommandBuffer cmd,
 void VulkanRenderingSession::transitionGBufferToAttachment(vk::CommandBuffer cmd) {
   std::array<vk::ImageMemoryBarrier2, VulkanRenderTargets::kGBufferCount> barriers{};
   for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
-    const auto oldLayout = m_targets.gbufferLayout(i);
-    const auto newLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    const auto src = stageAccessForLayout(oldLayout);
-    const auto dst = stageAccessForLayout(newLayout);
-    barriers[i].srcStageMask = src.stageMask;
-    barriers[i].srcAccessMask = src.accessMask;
-    barriers[i].dstStageMask = dst.stageMask;
-    barriers[i].dstAccessMask = dst.accessMask;
-    barriers[i].oldLayout = oldLayout;
-    barriers[i].newLayout = newLayout;
-    barriers[i].image = m_targets.gbufferImage(i);
-    barriers[i].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barriers[i].subresourceRange.levelCount = 1;
-    barriers[i].subresourceRange.layerCount = 1;
+    barriers[i] =
+        makeImageLayoutBarrier(m_targets.gbufferImage(i), m_targets.gbufferLayout(i),
+                               vk::ImageLayout::eColorAttachmentOptimal, vk::ImageAspectFlagBits::eColor, 1, 1);
   }
 
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = VulkanRenderTargets::kGBufferCount;
-  dep.pImageMemoryBarriers = barriers.data();
-  cmd.pipelineBarrier2(dep);
+  submitImageBarriers(cmd, barriers.data(), static_cast<uint32_t>(barriers.size()));
 
   for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
     m_targets.setGBufferLayout(i, vk::ImageLayout::eColorAttachmentOptimal);
@@ -1016,43 +884,18 @@ void VulkanRenderingSession::transitionGBufferToShaderRead(vk::CommandBuffer cmd
   std::array<vk::ImageMemoryBarrier2, VulkanRenderTargets::kGBufferCount + 1> barriers{};
 
   for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
-    const auto oldLayout = m_targets.gbufferLayout(i);
-    const auto newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    const auto src = stageAccessForLayout(oldLayout);
-    const auto dst = stageAccessForLayout(newLayout);
-    barriers[i].srcStageMask = src.stageMask;
-    barriers[i].srcAccessMask = src.accessMask;
-    barriers[i].dstStageMask = dst.stageMask;
-    barriers[i].dstAccessMask = dst.accessMask;
-    barriers[i].oldLayout = oldLayout;
-    barriers[i].newLayout = newLayout;
-    barriers[i].image = m_targets.gbufferImage(i);
-    barriers[i].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barriers[i].subresourceRange.levelCount = 1;
-    barriers[i].subresourceRange.layerCount = 1;
+    barriers[i] =
+        makeImageLayoutBarrier(m_targets.gbufferImage(i), m_targets.gbufferLayout(i),
+                               vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor, 1, 1);
   }
 
   // Depth transition
-  auto &bd = barriers[VulkanRenderTargets::kGBufferCount];
   const auto oldDepthLayout = m_targets.depthLayout();
   const auto newDepthLayout = m_targets.depthReadLayout();
-  const auto srcDepth = stageAccessForLayout(oldDepthLayout);
-  const auto dstDepth = stageAccessForLayout(newDepthLayout);
-  bd.srcStageMask = srcDepth.stageMask;
-  bd.srcAccessMask = srcDepth.accessMask;
-  bd.dstStageMask = dstDepth.stageMask;
-  bd.dstAccessMask = dstDepth.accessMask;
-  bd.oldLayout = oldDepthLayout;
-  bd.newLayout = newDepthLayout;
-  bd.image = m_targets.depthImage();
-  bd.subresourceRange.aspectMask = m_targets.depthAttachmentAspectMask();
-  bd.subresourceRange.levelCount = 1;
-  bd.subresourceRange.layerCount = 1;
+  barriers[VulkanRenderTargets::kGBufferCount] = makeImageLayoutBarrier(
+      m_targets.depthImage(), oldDepthLayout, newDepthLayout, m_targets.depthAttachmentAspectMask(), 1, 1);
 
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
-  dep.pImageMemoryBarriers = barriers.data();
-  cmd.pipelineBarrier2(dep);
+  submitImageBarriers(cmd, barriers.data(), static_cast<uint32_t>(barriers.size()));
 
   for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
     m_targets.setGBufferLayout(i, vk::ImageLayout::eShaderReadOnlyOptimal);
@@ -1067,253 +910,58 @@ void VulkanRenderingSession::transitionSceneCopyToLayout(vk::CommandBuffer cmd, 
             m_device.swapchainImageCount());
 
   const auto oldLayout = m_targets.sceneColorLayout(imageIndex);
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.sceneColorImage(imageIndex);
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.sceneColorImage(imageIndex), oldLayout, newLayout,
+                        vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setSceneColorLayout(imageIndex, newLayout);
 }
 
 void VulkanRenderingSession::transitionSceneHdrToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.sceneHdrLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.sceneHdrImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.sceneHdrImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setSceneHdrLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionSceneEffectToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.sceneEffectLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.sceneEffectImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.sceneEffectImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setSceneEffectLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionCockpitDepthToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.cockpitDepthLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.cockpitDepthImage();
-  barrier.subresourceRange.aspectMask = m_targets.depthAttachmentAspectMask();
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.cockpitDepthImage(), oldLayout, newLayout, m_targets.depthAttachmentAspectMask(),
+                        1, 1);
   m_targets.setCockpitDepthLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionPostLdrToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.postLdrLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.postLdrImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.postLdrImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setPostLdrLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionPostLuminanceToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.postLuminanceLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.postLuminanceImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.postLuminanceImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1,
+                        1);
   m_targets.setPostLuminanceLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionSmaaEdgesToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.smaaEdgesLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.smaaEdgesImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.smaaEdgesImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setSmaaEdgesLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionSmaaBlendToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.smaaBlendLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.smaaBlendImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.smaaBlendImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setSmaaBlendLayout(newLayout);
 }
 
 void VulkanRenderingSession::transitionSmaaOutputToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout) {
   const auto oldLayout = m_targets.smaaOutputLayout();
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.smaaOutputImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.smaaOutputImage(), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor, 1, 1);
   m_targets.setSmaaOutputLayout(newLayout);
 }
 
@@ -1323,31 +971,8 @@ void VulkanRenderingSession::transitionBloomToLayout(vk::CommandBuffer cmd, uint
             "transitionBloomToLayout pingPongIndex out of range (%u)", pingPongIndex);
 
   const auto oldLayout = m_targets.bloomLayout(pingPongIndex);
-  if (oldLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.bloomImage(pingPongIndex);
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.baseMipLevel = 0;
-  barrier.subresourceRange.levelCount = VulkanRenderTargets::kBloomMipLevels;
-  barrier.subresourceRange.baseArrayLayer = 0;
-  barrier.subresourceRange.layerCount = 1;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
+  transitionImageLayout(cmd, m_targets.bloomImage(pingPongIndex), oldLayout, newLayout, vk::ImageAspectFlagBits::eColor,
+                        0, VulkanRenderTargets::kBloomMipLevels, 0, 1);
   m_targets.setBloomLayout(pingPongIndex, newLayout);
 }
 
