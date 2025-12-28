@@ -727,6 +727,10 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues &deviceValues) {
   createInfo.imageFormat = surfaceFormat.format;
   createInfo.imageColorSpace = surfaceFormat.colorSpace;
   createInfo.imageExtent = chooseSwapExtent(deviceValues, gr_screen.max_w, gr_screen.max_h);
+  if (createInfo.imageExtent.width == 0 || createInfo.imageExtent.height == 0) {
+    vkprintf("VulkanDevice: swapchain extent is 0x0; window likely minimized; cannot create swapchain.\n");
+    return false;
+  }
   createInfo.imageArrayLayers = 1;
   {
     // We need transfer-src so the Vulkan backend can snapshot pre-deferred scene color (OpenGL parity).
@@ -767,6 +771,7 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues &deviceValues) {
   m_swapchainFormat = surfaceFormat.format;
   m_swapchainExtent = createInfo.imageExtent;
   m_swapchainUsage = createInfo.imageUsage;
+  ++m_swapchainGeneration;
 
   m_swapchainImageViews.reserve(m_swapchainImages.size());
   for (const auto &image : m_swapchainImages) {
@@ -787,6 +792,14 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues &deviceValues) {
     viewCreateInfo.subresourceRange.layerCount = 1;
 
     m_swapchainImageViews.push_back(m_device->createImageViewUnique(viewCreateInfo));
+  }
+
+  // Render-finished semaphores are indexed by swapchain image to avoid reuse hazards with presentation.
+  m_swapchainRenderFinishedSemaphores.clear();
+  m_swapchainRenderFinishedSemaphores.reserve(m_swapchainImages.size());
+  vk::SemaphoreCreateInfo semInfo{};
+  for (size_t i = 0; i < m_swapchainImages.size(); ++i) {
+    m_swapchainRenderFinishedSemaphores.push_back(m_device->createSemaphoreUnique(semInfo));
   }
 
   return true;
@@ -1014,13 +1027,20 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 }
 
 bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
+  // Re-query surface capabilities first; if the surface is minimized (0x0), a swapchain cannot be created.
+  const auto newSurfaceCaps = m_physicalDevice.getSurfaceCapabilitiesKHR(m_surface.get());
+  if (newSurfaceCaps.currentExtent.width == 0 || newSurfaceCaps.currentExtent.height == 0) {
+    return false;
+  }
+
   m_device->waitIdle();
 
   m_swapchainImageViews.clear();
+  m_swapchainRenderFinishedSemaphores.clear();
   auto oldSwapchain = std::move(m_swapchain);
 
   // Re-query surface capabilities
-  m_surfaceCapabilities = m_physicalDevice.getSurfaceCapabilitiesKHR(m_surface.get());
+  m_surfaceCapabilities = newSurfaceCaps;
   m_surfaceFormats.clear();
   auto formats = m_physicalDevice.getSurfaceFormatsKHR(m_surface.get());
   m_surfaceFormats = SCP_vector<vk::SurfaceFormatKHR>(formats.begin(), formats.end());
@@ -1050,6 +1070,10 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
   createInfo.imageFormat = surfaceFormat.format;
   createInfo.imageColorSpace = surfaceFormat.colorSpace;
   createInfo.imageExtent = chooseSwapExtent(tempValues, width, height);
+  if (createInfo.imageExtent.width == 0 || createInfo.imageExtent.height == 0) {
+    m_swapchain = std::move(oldSwapchain);
+    return false;
+  }
   createInfo.imageArrayLayers = 1;
   {
     const auto supported = m_surfaceCapabilities.supportedUsageFlags;
@@ -1095,6 +1119,7 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
   m_swapchainFormat = surfaceFormat.format;
   m_swapchainExtent = createInfo.imageExtent;
   m_swapchainUsage = createInfo.imageUsage;
+  ++m_swapchainGeneration;
 
   m_swapchainImageViews.reserve(m_swapchainImages.size());
   for (const auto &image : m_swapchainImages) {
@@ -1117,6 +1142,13 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
     m_swapchainImageViews.push_back(m_device->createImageViewUnique(viewCreateInfo));
   }
 
+  // Render-finished semaphores are indexed by swapchain image to avoid reuse hazards with presentation.
+  m_swapchainRenderFinishedSemaphores.reserve(m_swapchainImages.size());
+  vk::SemaphoreCreateInfo semInfo{};
+  for (size_t i = 0; i < m_swapchainImages.size(); ++i) {
+    m_swapchainRenderFinishedSemaphores.push_back(m_device->createSemaphoreUnique(semInfo));
+  }
+
   return true;
 }
 
@@ -1135,6 +1167,13 @@ vk::ImageView VulkanDevice::swapchainImageView(uint32_t index) const {
 }
 
 uint32_t VulkanDevice::swapchainImageCount() const { return static_cast<uint32_t>(m_swapchainImages.size()); }
+
+vk::Semaphore VulkanDevice::swapchainRenderFinishedSemaphore(uint32_t imageIndex) const {
+  if (imageIndex >= m_swapchainRenderFinishedSemaphores.size()) {
+    return vk::Semaphore{};
+  }
+  return m_swapchainRenderFinishedSemaphores[imageIndex].get();
+}
 
 uint32_t VulkanDevice::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const {
   for (uint32_t i = 0; i < m_memoryProperties.memoryTypeCount; ++i) {
