@@ -89,11 +89,11 @@ VulkanDescriptorLayouts::VulkanDescriptorLayouts(vk::Device device) : m_device(d
 
   std::array<vk::DescriptorPoolSize, 1> poolSizes{};
   poolSizes[0].type = vk::DescriptorType::eCombinedImageSampler;
-  poolSizes[0].descriptorCount = 6; // G-buffer (5) + depth (1)
+  poolSizes[0].descriptorCount = 6 * kFramesInFlight; // G-buffer (5) + depth (1), per frame-in-flight
 
   vk::DescriptorPoolCreateInfo poolInfo;
   poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-  poolInfo.maxSets = 1;
+  poolInfo.maxSets = kFramesInFlight;
   poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
   poolInfo.pPoolSizes = poolSizes.data();
 
