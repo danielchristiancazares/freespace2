@@ -156,7 +156,7 @@ For video playback, additional features are validated in `VulkanMovieManager.cpp
 
 ## 3. Descriptor Set Architecture
 
-The system defines three distinct pipeline layout kinds, each with its own descriptor set organization.
+The system defines three distinct pipeline layout kinds, each with its own descriptor set organization. All pre-allocated descriptor sets (global and model) are per-frame, with one set per frame-in-flight (2 total for each type).
 
 ### 3.1 Pipeline Layout Kinds
 
@@ -239,11 +239,11 @@ Shared by Standard and Deferred layouts for G-buffer access.
 
 Three distinct descriptor pools are maintained:
 
-**Global Pool** (for G-buffer descriptors):
+**Global Pool** (for G-buffer descriptors, per-frame):
 ```cpp
 poolSizes[0].type = vk::DescriptorType::eCombinedImageSampler;
-poolSizes[0].descriptorCount = 6; // G-buffer (5) + depth (1)
-poolInfo.maxSets = 1;
+poolSizes[0].descriptorCount = 6 * kFramesInFlight; // G-buffer (5) + depth (1), per frame
+poolInfo.maxSets = kFramesInFlight; // 2 sets (one per frame-in-flight)
 ```
 
 **Model Pool** (for bindless model rendering):
@@ -272,27 +272,29 @@ poolInfo.maxSets = maxMovieTextures;
 
 ### 4.2 Allocation Strategy
 
-The system uses a **fixed allocation model** with no per-frame descriptor allocation:
+The system uses a **fixed per-frame allocation model** with no runtime descriptor allocation:
 
-**Initialization**:
+**Initialization** (descriptor layouts and pools):
 ```cpp
 void VulkanRenderer::createDescriptorResources() {
     VulkanDescriptorLayouts::validateDeviceLimits(m_vulkanDevice->properties().limits);
     EnsurePushDescriptorSupport(m_vulkanDevice->features14());
     m_descriptorLayouts = std::make_unique<VulkanDescriptorLayouts>(m_vulkanDevice->device());
-    m_globalDescriptorSet = m_descriptorLayouts->allocateGlobalSet();
 }
 ```
 
-**Frame Creation**:
+**Frame Creation** (per-frame descriptor sets):
 ```cpp
 void VulkanRenderer::createFrames() {
     for (size_t i = 0; i < kFramesInFlight; ++i) {
+        vk::DescriptorSet globalSet = m_descriptorLayouts->allocateGlobalSet();
         vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
-        m_frames[i] = std::make_unique<VulkanFrame>(..., modelSet);
+        m_frames[i] = std::make_unique<VulkanFrame>(..., globalSet, modelSet);
     }
 }
 ```
+
+Each frame-in-flight has its own global and model descriptor sets, enabling safe concurrent GPU access without synchronization between frames.
 
 ### 4.3 Pool Flags
 
@@ -554,7 +556,8 @@ m_deferredReleases.enqueue(retireSerial, [t = std::move(tex), pool, dev]() mutab
 
 ### 8.1 Push Descriptor Updates (Standard Pipeline)
 
-Used for per-draw 2D/UI rendering:
+Used for per-draw 2D/UI rendering. Each push updates only the bindings that differ from defaults:
+
 ```cpp
 vk::WriteDescriptorSet write{};
 write.dstBinding = 2;
@@ -569,6 +572,8 @@ cmd.pushDescriptorSetKHR(
     0,      // set index
     writes);
 ```
+
+**Important**: Push descriptors are additive within a command buffer. A binding retains its last-pushed value until overwritten. Callers must ensure all required bindings are pushed before each draw. In practice, most draw paths push the full set of 6 bindings (2 UBOs + 4 samplers) to avoid stale descriptor reads.
 
 ### 8.2 Model Descriptor Binding
 
@@ -596,7 +601,35 @@ void VulkanRenderer::setModelUniformBinding(VulkanFrame& frame,
 }
 ```
 
-### 8.3 Bindless Texture Binding
+### 8.3 Draw-Path Texture Binding Abstraction
+
+The renderer separates draw-path and upload-path texture access via two wrapper classes:
+
+**VulkanTextureBindings** (draw-path, no GPU work):
+```cpp
+class VulkanTextureBindings {
+public:
+    // Returns valid descriptor (fallback if not resident); queues upload if needed.
+    vk::DescriptorImageInfo descriptor(TextureId id, uint32_t currentFrameIndex,
+                                       const SamplerKey& samplerKey);
+
+    // Returns stable bindless slot index (fallback=0 if not resident/assigned).
+    uint32_t bindlessIndex(TextureId id, uint32_t currentFrameIndex);
+};
+```
+
+**VulkanTextureUploader** (upload-phase only, records GPU work):
+```cpp
+class VulkanTextureUploader {
+public:
+    void flushPendingUploads(const UploadCtx& ctx);
+    bool updateTexture(const UploadCtx& ctx, int bitmapHandle, ...);
+};
+```
+
+This separation ensures draw-path code cannot accidentally trigger GPU work or violate phase constraints.
+
+### 8.4 Bindless Slot Management
 
 **Slot Assignment**:
 ```cpp
@@ -611,7 +644,7 @@ std::optional<uint32_t> tryGetBindlessSlot(TextureId id) const;
 - Slot 3: Default specular texture
 - Slots 4+: Dynamic texture assignments
 
-### 8.4 Global Descriptor Binding
+### 8.5 Global Descriptor Binding
 
 For deferred lighting G-buffer access:
 ```cpp
@@ -707,26 +740,31 @@ std::array<ModelBindlessDescriptorCache, kFramesInFlight> m_modelBindlessCache;
 
 ### 9.4 Global Descriptor Updates
 
-Updated before deferred lighting passes:
+Updated before deferred lighting passes or decal rendering. Each frame's global set is updated independently:
+
 ```cpp
-void VulkanRenderer::bindDeferredGlobalDescriptors() {
+void VulkanRenderer::bindDeferredGlobalDescriptors(vk::DescriptorSet dstSet) {
     std::vector<vk::WriteDescriptorSet> writes;
     std::vector<vk::DescriptorImageInfo> infos;
     writes.reserve(6);
     infos.reserve(6);
 
-    // G-buffer 0..2
+    // G-buffer 0..2 (Color, Normal, Position)
     for (uint32_t i = 0; i < 3; ++i) {
         // ... build info and write ...
     }
 
-    // Depth (binding 3)
-    // Specular (binding 4)
-    // Emissive (binding 5)
+    // Depth (binding 3) - uses nearest-filter sampler
+    // Specular (binding 4) - G-buffer attachment 3
+    // Emissive (binding 5) - G-buffer attachment 4
 
     m_vulkanDevice->device().updateDescriptorSets(writes, {});
 }
 ```
+
+Called from:
+- `deferredLightingFinish()` - before lighting pass
+- `beginDecalPass()` - decals sample scene depth
 
 ---
 
@@ -879,11 +917,12 @@ case PipelineLayoutKind::Deferred:
 
 ### 12.1 Frame Ring Buffer
 
-Descriptor sets are rotated with the frame ring buffer:
+Each frame-in-flight has its own descriptor sets, enabling safe concurrent GPU access:
 
 **Frame Storage** (`VulkanFrame.h`):
 ```cpp
-vk::DescriptorSet m_modelDescriptorSet{};
+vk::DescriptorSet m_globalDescriptorSet{}; // G-buffer bindings for deferred/decal passes
+vk::DescriptorSet m_modelDescriptorSet{};  // Bindless textures + vertex heap + uniforms
 ```
 
 **Per-Frame Bindings** (`VulkanFrame.h`):
@@ -931,11 +970,14 @@ struct ResidentTexture {
 
 ### 12.4 Global Descriptor Set Safety
 
-**Observation**: The global descriptor set is shared across both in-flight frames and updated in-place before deferred lighting.
+**Design**: Each frame-in-flight has its own global descriptor set, eliminating race conditions between frames.
 
-**Constraint**: Updates must occur only when the GPU is not reading from the descriptors.
+**Update Pattern**: The global descriptor set is updated in-place before deferred lighting or decal passes via `bindDeferredGlobalDescriptors()`. Updates occur at a safe point in the frame when:
+1. The previous pass (geometry or main rendering) has completed
+2. G-buffer textures have been transitioned to `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`
+3. No concurrent GPU reads are possible on the current frame's descriptor set
 
-**Mitigation**: Pipeline barriers ensure G-buffer textures are transitioned to `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` before the global descriptors are bound. The update happens at a safe point in the frame where no concurrent access is possible.
+**Timing**: Since each frame has its own set, the only constraint is within a single frame's command buffer recording.
 
 ### 12.5 Bindless Array Safety
 
@@ -978,13 +1020,13 @@ m_deferredReleases.enqueue(retireSerial, [...] {
 - 1024 bindless texture slots x 2 frames = 2048 descriptors allocated regardless of actual texture count
 - No dynamic growth if texture count exceeds limit
 
-### 13.2 Global Descriptor Set Sharing
+### 13.2 Per-Frame Global Descriptor Sets
 
-**Observation**: The global descriptor set is shared across both in-flight frames and updated in-place before deferred lighting.
+**Design**: Each frame-in-flight has its own global descriptor set, allocated at frame creation and stored in `VulkanFrame`.
 
-**Risk**: Concurrent frame access if descriptor updates race with GPU reads.
+**Benefit**: Eliminates synchronization concerns between frames. Each frame's global set can be updated independently during command buffer recording without affecting other in-flight frames.
 
-**Mitigation**: Pipeline barriers ensure G-buffer textures are transitioned to `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` before the global descriptors are bound.
+**Usage Pattern**: Updated via `bindDeferredGlobalDescriptors()` before deferred lighting passes or decal rendering, writing G-buffer views and depth sampler references.
 
 ### 13.3 Conditional Descriptor Updates
 
@@ -1063,8 +1105,8 @@ Scene uniforms are tracked but not yet wired to a descriptor set.
 | `VulkanPipelineManager.cpp` | Pipeline creation with layout selection |
 | `VulkanShaderManager.h` | Shader module caching |
 | `VulkanShaderManager.cpp` | Module loading and type mapping |
-| `VulkanTextureBindings.h` | Draw-path texture descriptor API |
-| `VulkanTextureManager.h` | Bindless slot management, sampler cache |
+| `VulkanTextureBindings.h` | Draw-path texture descriptor API (VulkanTextureBindings, VulkanTextureUploader) |
+| `VulkanTextureManager.h` | Texture residency, bindless slot management, sampler cache |
 | `VulkanTextureManager.cpp` | Sampler creation, texture upload |
 | `VulkanModelTypes.h` | Push constant structure |
 | `VulkanMovieManager.h` | YCbCr configuration, movie texture types |
@@ -1078,12 +1120,12 @@ Scene uniforms are tracked but not yet wired to a descriptor set.
 
 | Descriptor Type | Count/Set | Sets | Total | Location |
 |-----------------|-----------|------|-------|----------|
-| `COMBINED_IMAGE_SAMPLER` (global) | 6 | 1 | 6 | Global G-buffer |
-| `COMBINED_IMAGE_SAMPLER` (bindless) | 1024 | 2 | 2048 | Model textures |
+| `COMBINED_IMAGE_SAMPLER` (global) | 6 | 2 | 12 | Global G-buffer (per-frame) |
+| `COMBINED_IMAGE_SAMPLER` (bindless) | 1024 | 2 | 2048 | Model textures (per-frame) |
 | `COMBINED_IMAGE_SAMPLER` (movie) | Variable | N | Variable | Movie textures |
 | `UNIFORM_BUFFER` | 2 | Push | N/A | Standard per-draw |
-| `UNIFORM_BUFFER_DYNAMIC` | 1 | 2 | 2 | Model uniform |
-| `STORAGE_BUFFER` | 1 | 2 | 2 | Vertex heap |
-| `STORAGE_BUFFER_DYNAMIC` | 1 | 2 | 2 | Transform buffer |
+| `UNIFORM_BUFFER_DYNAMIC` | 1 | 2 | 2 | Model uniform (per-frame) |
+| `STORAGE_BUFFER` | 1 | 2 | 2 | Vertex heap (per-frame) |
+| `STORAGE_BUFFER_DYNAMIC` | 1 | 2 | 2 | Transform buffer (per-frame) |
 
-Total pre-allocated descriptors (excluding movie): 6 + 2048 + 2 + 2 + 2 = **2060 descriptors** across **3 descriptor sets**.
+Total pre-allocated descriptors (excluding movie): 12 + 2048 + 2 + 2 + 2 = **2066 descriptors** across **4 descriptor sets** (2 global + 2 model).

@@ -25,14 +25,14 @@ This document provides a comprehensive analysis of the Vulkan synchronization me
 
 ## Overview
 
-The Vulkan backend implements a multi-frame-in-flight rendering architecture using the Vulkan 1.3+ synchronization2 extension for fine-grained control over pipeline stages and memory access patterns. The key synchronization mechanisms are:
+The Vulkan backend implements a multi-frame-in-flight rendering architecture using Vulkan 1.4 synchronization primitives for fine-grained control over pipeline stages and memory access patterns. The key synchronization mechanisms are:
 
 | Mechanism | Purpose | Primary Location |
 |-----------|---------|------------------|
-| Binary Semaphores | GPU-GPU sync (acquire/present) | `VulkanFrame.cpp` |
+| Binary Semaphores | GPU-GPU sync (acquire/present) | `VulkanFrame.cpp`, `VulkanDevice.cpp` |
 | Timeline Semaphore | Serial-based GPU completion tracking | `VulkanRenderer.cpp` |
 | Fences | CPU-GPU sync (frame reuse) | `VulkanFrame.cpp` |
-| Pipeline Barriers | Execution/memory dependencies | `VulkanRenderingSession.cpp` |
+| Pipeline Barriers | Execution/memory dependencies | `VulkanRenderingSession.cpp`, `VulkanTextureManager.cpp` |
 | Image Layout Transitions | Access pattern changes | `VulkanRenderingSession.cpp` |
 | Queue Waits | Immediate synchronization | `VulkanBufferManager.cpp`, `VulkanTextureManager.cpp` |
 
@@ -47,11 +47,12 @@ This document assumes familiarity with:
 - **Image layouts**: Vulkan's requirement that images be in specific layouts for different operations
 - **Semaphores vs. Fences**: Semaphores synchronize GPU-GPU operations; fences synchronize CPU-GPU operations
 
-Key Vulkan 1.3 features used:
+Key Vulkan 1.4 features used:
 
-- **VK_KHR_synchronization2**: Provides `vkCmdPipelineBarrier2` with explicit stage/access masks in barrier structures
-- **VK_KHR_timeline_semaphore**: Semaphores with monotonically increasing counter values for serial tracking
-- **VK_KHR_dynamic_rendering**: Renderpass-less rendering with `vkCmdBeginRendering`
+- **VK_KHR_synchronization2** (core in 1.3): Provides `vkCmdPipelineBarrier2` with explicit stage/access masks in barrier structures
+- **VK_KHR_timeline_semaphore** (core in 1.2): Semaphores with monotonically increasing counter values for serial tracking
+- **VK_KHR_dynamic_rendering** (core in 1.3): Renderpass-less rendering with `vkCmdBeginRendering`
+- **VK_KHR_push_descriptor** (core in 1.4): Per-draw descriptor updates without pre-allocated pools
 
 ---
 
@@ -60,10 +61,10 @@ Key Vulkan 1.3 features used:
 | File | Key Synchronization Content |
 |------|----------------------------|
 | `VulkanConstants.h` | `kFramesInFlight = 2` constant |
-| `VulkanFrame.h` | Per-frame semaphore/fence accessors, timeline value tracking |
+| `VulkanFrame.h` | Per-frame fence, imageAvailable semaphore, per-frame timeline semaphore (unused) |
 | `VulkanFrame.cpp` | Sync primitive creation, `wait_for_gpu()` implementation |
+| `VulkanDevice.h/cpp` | Per-swapchain-image renderFinished semaphores, acquire/present, swapchain recreation |
 | `VulkanRenderer.cpp` | Global timeline semaphore, frame submission, frame recycling |
-| `VulkanDevice.cpp` | Swapchain acquisition/presentation, queue family sharing |
 | `VulkanRenderingSession.cpp` | `stageAccessForLayout()` helper, all image layout transitions |
 | `VulkanBufferManager.cpp` | Buffer upload with pipeline barriers and fence wait |
 | `VulkanTextureManager.cpp` | Texture upload barriers, immediate and frame-buffered |
@@ -90,6 +91,7 @@ void VulkanRenderer::createFrames() {
   const auto& props = m_vulkanDevice->properties();
   m_availableFrames.clear();
   for (size_t i = 0; i < kFramesInFlight; ++i) {
+    vk::DescriptorSet globalSet = m_descriptorLayouts->allocateGlobalDescriptorSet();
     vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
 
     m_frames[i] = std::make_unique<VulkanFrame>(
@@ -103,6 +105,7 @@ void VulkanRenderer::createFrames() {
       m_vulkanDevice->vertexBufferAlignment(),
       STAGING_RING_SIZE,
       props.limits.optimalBufferCopyOffsetAlignment,
+      globalSet,
       modelSet);
 
     m_availableFrames.push_back(AvailableFrame{ m_frames[i].get(), m_completedSerial });
@@ -142,19 +145,37 @@ void VulkanFrame::wait_for_gpu()
 }
 ```
 
-### Per-Frame Binary Semaphores
+### Binary Semaphores
 
-**File:** `VulkanFrame.cpp`
+The binary semaphores are split across two locations based on their lifecycle requirements:
+
+**Per-Frame `imageAvailable` Semaphore** (File: `VulkanFrame.cpp`)
 ```cpp
 vk::SemaphoreCreateInfo binaryInfo;
 m_imageAvailable = m_device.createSemaphoreUnique(binaryInfo);
-m_renderFinished = m_device.createSemaphoreUnique(binaryInfo);
 ```
 
-| Semaphore | Signaled By | Waited By | Purpose |
-|-----------|-------------|-----------|---------|
-| `imageAvailable` | `vkAcquireNextImageKHR` | Queue submission | Ensures swapchain image is ready for rendering |
-| `renderFinished` | Queue submission | `vkQueuePresentKHR` | Ensures rendering completes before presentation |
+**Per-Swapchain-Image `renderFinished` Semaphores** (File: `VulkanDevice.cpp`)
+```cpp
+// Render-finished semaphores are indexed by swapchain image to avoid reuse hazards with presentation.
+m_swapchainRenderFinishedSemaphores.reserve(m_swapchainImages.size());
+vk::SemaphoreCreateInfo semInfo{};
+for (size_t i = 0; i < m_swapchainImages.size(); ++i) {
+  m_swapchainRenderFinishedSemaphores.push_back(m_device->createSemaphoreUnique(semInfo));
+}
+```
+
+| Semaphore | Owned By | Indexed By | Signaled By | Waited By | Purpose |
+|-----------|----------|------------|-------------|-----------|---------|
+| `imageAvailable` | VulkanFrame | Frame index | `vkAcquireNextImageKHR` | Queue submission | Ensures swapchain image is ready for rendering |
+| `renderFinished` | VulkanDevice | Swapchain image index | Queue submission | `vkQueuePresentKHR` | Ensures rendering completes before presentation |
+
+**Design Rationale for Per-Swapchain-Image renderFinished:**
+
+The renderFinished semaphore must be indexed by swapchain image index rather than frame index because:
+1. A swapchain image may be acquired before the previous frame using that same image has presented
+2. Reusing a semaphore that is still waited on by the presentation engine causes undefined behavior
+3. By indexing on swapchain image, the semaphore lifecycle is tied to the image lifecycle, avoiding reuse hazards
 
 ### Per-Frame Timeline Semaphore (Reserved for Future Use)
 
@@ -286,6 +307,9 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 ### Frame Submission
 
 **File:** `VulkanRenderer.cpp`
+
+The engine uses `vkQueueSubmit2` (Synchronization2) for frame submission:
+
 ```cpp
 graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulkan::RecordingFrame& rec) {
   VulkanFrame& frame = rec.ref();
@@ -305,9 +329,13 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   waitSemaphore.semaphore = frame.imageAvailable();
   waitSemaphore.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 
+  // renderFinished is per-swapchain-image (not per-frame) to avoid reuse hazards
+  vk::Semaphore renderFinished = m_vulkanDevice->swapchainRenderFinishedSemaphore(imageIndex);
+  Assertion(renderFinished, "Missing render-finished semaphore for swapchain image %u", imageIndex);
+
   // Signal both renderFinished (for present) and timeline (for serial tracking)
   vk::SemaphoreSubmitInfo signalSemaphores[2];
-  signalSemaphores[0].semaphore = frame.renderFinished();
+  signalSemaphores[0].semaphore = renderFinished;
   signalSemaphores[0].stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 
   signalSemaphores[1].semaphore = m_submitTimeline.get();
@@ -337,7 +365,7 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   m_vulkanDevice->graphicsQueue().submit2(submitInfo, fence);
 
   // Present immediately after submission
-  auto presentResult = m_vulkanDevice->present(frame.renderFinished(), imageIndex);
+  auto presentResult = m_vulkanDevice->present(renderFinished, imageIndex);
   // ...
 }
 ```
@@ -597,43 +625,22 @@ void VulkanRenderingSession::transitionGBufferToAttachment(vk::CommandBuffer cmd
 
 **Batch Barrier Optimization:** All G-buffer images are transitioned in a single `pipelineBarrier2` call, allowing the driver to optimize the synchronization.
 
-### Scene HDR Transitions
+### Post-Processing Target Transitions
 
-**File:** `VulkanRenderingSession.cpp`
-```cpp
-void VulkanRenderingSession::transitionSceneHdrToLayout(vk::CommandBuffer cmd, vk::ImageLayout newLayout)
-{
-  const auto oldLayout = m_targets.sceneHdrLayout();
-  if (oldLayout == newLayout) {
-    return; // Early-out optimization: no transition needed
-  }
+The post-processing pipeline involves several intermediate render targets that cycle between attachment and shader-read layouts:
 
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(oldLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = oldLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = m_targets.sceneHdrImage();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
+| Target | Layouts Used | Purpose |
+|--------|--------------|---------|
+| Scene HDR | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | HDR scene rendering and tonemapping input |
+| Scene Effect | `eTransferDstOptimal` / `eShaderReadOnlyOptimal` | Distortion/effect snapshot |
+| Post LDR | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | Post-tonemap processing |
+| Post Luminance | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | Luminance calculation |
+| SMAA Edges | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | Edge detection output |
+| SMAA Blend | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | Blend weight calculation |
+| SMAA Output | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | Final AA output |
+| Bloom (ping-pong) | `eColorAttachmentOptimal` / `eShaderReadOnlyOptimal` | Bloom mip chain |
 
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
-  m_targets.setSceneHdrLayout(newLayout);
-}
-```
-
-The scene HDR image cycles between:
-- `eColorAttachmentOptimal` for scene rendering
-- `eShaderReadOnlyOptimal` for tonemapping/post-processing input
+Each target has a dedicated transition method following the same `stageAccessForLayout` pattern.
 
 ---
 
@@ -650,56 +657,13 @@ void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer& buffer,
     vk::DeviceSize dstOffset, vk::DeviceSize size, const void* data)
 {
   // 1. Create transient staging buffer (host-visible, coherent)
-  vk::BufferCreateInfo stagingInfo{};
-  stagingInfo.size = size;
-  stagingInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
-  stagingInfo.sharingMode = vk::SharingMode::eExclusive;
-  auto stagingBuffer = m_device.createBufferUnique(stagingInfo);
-  // ... allocate and bind memory ...
-
   // 2. Copy data to staging buffer
-  void* mapped = m_device.mapMemory(stagingMemory.get(), 0, size);
-  std::memcpy(mapped, data, static_cast<size_t>(size));
-  m_device.unmapMemory(stagingMemory.get());
-
-  // 3. Record copy command
-  vk::CommandBufferBeginInfo beginInfo{};
-  beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
-  cmd.begin(beginInfo);
-
-  vk::BufferCopy copy{};
-  copy.srcOffset = 0;
-  copy.dstOffset = dstOffset;
-  copy.size = size;
-  cmd.copyBuffer(stagingBuffer.get(), buffer.buffer.get(), 1, &copy);
-
-  // 4. Buffer memory barrier for visibility to subsequent reads
-  vk::PipelineStageFlags2 dstStage = vk::PipelineStageFlagBits2::eAllCommands;
-  vk::AccessFlags2 dstAccess = vk::AccessFlagBits2::eMemoryRead;
-
-  // Destination stage/access depends on buffer type
-  switch (buffer.type) {
-  case BufferType::Vertex:
-    dstStage = vk::PipelineStageFlagBits2::eVertexInput |
-               vk::PipelineStageFlagBits2::eVertexShader;
-    dstAccess = vk::AccessFlagBits2::eVertexAttributeRead |
-                vk::AccessFlagBits2::eShaderRead;
-    break;
-  case BufferType::Index:
-    dstStage = vk::PipelineStageFlagBits2::eVertexInput;
-    dstAccess = vk::AccessFlagBits2::eIndexRead;
-    break;
-  case BufferType::Uniform:
-    dstStage = vk::PipelineStageFlagBits2::eVertexShader |
-               vk::PipelineStageFlagBits2::eFragmentShader;
-    dstAccess = vk::AccessFlagBits2::eUniformRead;
-    break;
-  }
+  // 3. Record copy command with buffer barrier
 
   vk::BufferMemoryBarrier2 barrier{};
   barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
   barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-  barrier.dstStageMask = dstStage;
+  barrier.dstStageMask = dstStage;  // varies by buffer type
   barrier.dstAccessMask = dstAccess;
   barrier.buffer = buffer.buffer.get();
   barrier.offset = dstOffset;
@@ -711,17 +675,11 @@ void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer& buffer,
   cmd.pipelineBarrier2(depInfo);
   cmd.end();
 
-  // 5. Submit and wait synchronously
+  // 4. Submit with fence and wait synchronously
   vk::FenceCreateInfo fenceInfo{};
   auto fence = m_device.createFenceUnique(fenceInfo);
-
-  vk::SubmitInfo submit{};
-  submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &cmd;
   m_transferQueue.submit(submit, fence.get());
 
-  // 6. Blocking wait for upload completion
-  const vk::Fence fenceHandle = fence.get();
   const auto waitResult = m_device.waitForFences(1, &fenceHandle, VK_TRUE,
       std::numeric_limits<uint64_t>::max());
   Assertion(waitResult == vk::Result::eSuccess, "Failed waiting for buffer upload fence");
@@ -788,21 +746,28 @@ cmd.pipelineBarrier2(depToShader);
 - Uses per-frame staging ring buffer (recycled with frame)
 - Barriers ensure texture is ready before fragment shader reads
 
-### Movie Texture Uploads
+### Upload Phase Context Token
 
-Movie textures (YUV420 planar format) follow a similar pattern with per-plane barriers:
+The `UploadCtx` capability token proves that the frame is in the upload phase (after `beginFrame()` but before rendering starts). Texture uploads via `flushPendingUploads(const UploadCtx&)` are constrained to this phase:
 
 ```cpp
-// Transition YUV planar image to transfer destination
-vk::ImageMemoryBarrier2 barrier{};
-barrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-// ... handles 3-plane layout with separate copy per plane ...
-cmd.pipelineBarrier2(dep);
-
-// After all plane copies, transition to shader read for YCbCr sampling
+const UploadCtx uploadCtx{frame, cmd, m_frameCounter};
+m_textureUploader->flushPendingUploads(uploadCtx);
 ```
+
+This token-based design enforces that texture uploads cannot occur during active rendering, preventing mid-render-pass transfer commands.
+
+### Movie Texture Uploads
+
+Movie textures (YUV420 planar format) can upload mid-frame. The renderer must suspend dynamic rendering before issuing transfer commands:
+
+```cpp
+// VulkanRenderer::uploadMovieTexture suspends rendering before transfer
+m_renderingSession->endActivePass();  // End dynamic rendering if active
+// ... record transfer commands ...
+```
+
+This ensures transfers occur outside of dynamic rendering passes where they are invalid.
 
 ---
 
@@ -854,7 +819,6 @@ The following locations use blocking device/queue waits:
 | `VulkanDevice.cpp` | `device->waitIdle()` | Pre-swapchain recreation (ensure images not in use) |
 | `VulkanBufferManager.cpp` | `waitForFences()` | Buffer upload completion |
 | `VulkanTextureManager.cpp` | `transferQueue.waitIdle()` | Solid texture creation |
-| `VulkanTextureManager.cpp` | `transferQueue.waitIdle()` | Immediate texture upload |
 | `VulkanTextureManager.cpp` | `transferQueue.waitIdle()` | Render target clear |
 
 **Best Practices:**
@@ -889,14 +853,14 @@ Synchronization Points:
 ```
 vkAcquireNextImageKHR
          |
-         | signals imageAvailable
+         | signals imageAvailable (per-frame)
          v
 +------------------+
 | Queue Submit     |
 |   wait: imageAvailable @ COLOR_ATTACHMENT_OUTPUT
-|   signal: renderFinished @ COLOR_ATTACHMENT_OUTPUT
+|   signal: renderFinished @ COLOR_ATTACHMENT_OUTPUT (per-swapchain-image)
 |   signal: timeline @ ALL_COMMANDS (value = serial)
-|   signal: fence
+|   signal: fence (per-frame)
 +------------------+
          |
          | signals renderFinished
@@ -965,18 +929,14 @@ recycleOneInFlight()
 1. G-Buffer Pass:
    [G-Buffer: eColorAttachmentOptimal] + [Depth: eDepthAttachmentOptimal]
                      |
-                     v transitionGBufferAndDepthToShaderRead()
+                     v transitionGBufferToShaderRead()
    [G-Buffer: eShaderReadOnlyOptimal] + [Depth: eDepthStencilReadOnlyOptimal]
                      |
 2. Lighting Pass:   v (read G-buffer + depth as textures)
-   [Scene HDR: eColorAttachmentOptimal]
-                     |
-                     v transitionSceneHdrToLayout(eShaderReadOnlyOptimal)
-3. Tonemapping:
-   [Scene HDR: eShaderReadOnlyOptimal] -> [Swapchain: eColorAttachmentOptimal]
+   [Swapchain: eColorAttachmentOptimal] (no depth)
                      |
                      v transitionSwapchainToPresent()
-4. Present:
+3. Present:
    [Swapchain: ePresentSrcKHR]
 ```
 
@@ -1019,19 +979,19 @@ The engine includes RenderDoc integration (`VulkanDebug.h`, `renderdoc.cpp`) for
 
 **Location:** `VulkanRenderer.cpp`
 ```cpp
-signalSemaphores[0].semaphore = frame.renderFinished();
+signalSemaphores[0].semaphore = renderFinished;
 signalSemaphores[0].stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 ```
 
-**Analysis:** The `renderFinished` semaphore is signaled at `eColorAttachmentOutput`. This is technically correct because:
+**Analysis:** The `renderFinished` semaphore is signaled at `eColorAttachmentOutput`. This is correct because:
 1. The final swapchain transition barrier waits on `eColorAttachmentOutput`
 2. All rendering to the swapchain must complete before the transition
 
 However, if late-stage compute work (e.g., async compute for next frame) is added in the future, this would need revision.
 
-**Status:** Acceptable for current architecture. Document if async compute is introduced.
+**Status:** Correct for current architecture. Document if async compute is introduced.
 
-### Issue 2: Duplicate submit2 Calls
+### Issue 2: Identical Preprocessor Branches
 
 **Location:** `VulkanRenderer.cpp`
 ```cpp
@@ -1042,7 +1002,7 @@ However, if late-stage compute work (e.g., async compute for next frame) is adde
 #endif
 ```
 
-**Problem:** Both branches of the preprocessor conditional execute identical code. The intention was likely to differentiate error handling between exception and non-exception builds.
+**Problem:** Both branches execute identical code. The intention was likely to differentiate error handling.
 
 **Recommendation:** Remove the conditional or implement proper differentiation:
 ```cpp
@@ -1066,6 +1026,8 @@ Each frame creates a timeline semaphore that is currently unused. Only the globa
 1. **Remove:** Eliminate per-frame timeline semaphores if no future use is planned
 2. **Document:** Add comment explaining intended future use (e.g., parallel command buffer submission)
 3. **Utilize:** Implement per-frame tracking for more granular resource management
+
+**Current Status:** Kept for potential future per-frame dependency tracking.
 
 ### Issue 4: Frame Buffering Trade-off
 
@@ -1103,15 +1065,18 @@ Device-local buffer uploads use immediate fence waits, which stall the CPU durin
 
 The Vulkan synchronization infrastructure implements a robust 2-frame-in-flight model with:
 
-- **Binary semaphores** for GPU-GPU synchronization between acquire, render, and present operations
+- **Binary semaphores** for GPU-GPU synchronization:
+  - Per-frame `imageAvailable` for swapchain acquisition
+  - Per-swapchain-image `renderFinished` for presentation (avoids reuse hazards)
 - **Per-frame fences** for CPU-GPU synchronization during frame recycling
 - **Global timeline semaphore** for serial-based deferred resource release tracking
 - **Synchronization2 barriers** (`vkCmdPipelineBarrier2`) for all image layout transitions with explicit stage/access masks
 - **Per-image layout tracking** to specify correct source layouts in barriers
 - **Immediate staging uploads** with fence-based synchronization for device-local resources
 - **Frame-buffered uploads** with in-command-buffer barriers for streaming textures
+- **Capability tokens** (`UploadCtx`) to constrain operations to valid frame phases
 
-The implementation correctly uses the Vulkan 1.3+ synchronization2 extension (`VK_KHR_synchronization2`) and timeline semaphores (`VK_KHR_timeline_semaphore`) for modern, explicit synchronization control. All barriers use the `VkImageMemoryBarrier2` / `VkBufferMemoryBarrier2` structures with explicit pipeline stages, enabling precise dependency tracking and optimal driver scheduling.
+The implementation uses Vulkan 1.4 as the minimum required version, with `VK_KHR_synchronization2`, `VK_KHR_timeline_semaphore`, `VK_KHR_dynamic_rendering`, and `VK_KHR_push_descriptor` (all core in 1.4). All barriers use the `VkImageMemoryBarrier2` / `VkBufferMemoryBarrier2` structures with explicit pipeline stages, enabling precise dependency tracking and optimal driver scheduling.
 
 ---
 
@@ -1164,8 +1129,31 @@ auto fence = device.createFenceUnique(info);
 device.resetFences(1, &fence);
 
 // Submit with fence
-queue.submit(submitInfo, fence);
+queue.submit2(submitInfo, fence);
 
 // Wait before reuse
 device.waitForFences(1, &fence, VK_TRUE, UINT64_MAX);
+```
+
+### Timeline Semaphore Usage
+
+```cpp
+// Creation
+vk::SemaphoreTypeCreateInfo timelineType;
+timelineType.semaphoreType = vk::SemaphoreType::eTimeline;
+timelineType.initialValue = 0;
+
+vk::SemaphoreCreateInfo semInfo;
+semInfo.pNext = &timelineType;
+auto timeline = device.createSemaphoreUnique(semInfo);
+
+// Query current value
+uint64_t completed = device.getSemaphoreCounterValue(timeline.get());
+
+// Wait for specific value
+vk::SemaphoreWaitInfo waitInfo;
+waitInfo.semaphoreCount = 1;
+waitInfo.pSemaphores = &timeline.get();
+waitInfo.pValues = &targetValue;
+device.waitSemaphores(waitInfo, UINT64_MAX);
 ```

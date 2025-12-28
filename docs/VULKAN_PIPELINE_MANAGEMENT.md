@@ -4,7 +4,7 @@ This document defines the architecture, lifecycle, and usage contracts for Vulka
 
 **Audience**: Developers working on the Vulkan rendering backend or integrating new rendering features.
 
-**Prerequisites**: Familiarity with Vulkan concepts (pipelines, descriptor sets, render passes) and the FSO graphics abstraction layer.
+**Prerequisites**: Familiarity with Vulkan concepts (pipelines, descriptor sets, render passes) and the FSO graphics abstraction layer. The engine requires **Vulkan 1.4** as the minimum supported version.
 
 ---
 
@@ -35,10 +35,13 @@ The Vulkan renderer uses **dynamic state extensively** to minimize pipeline obje
 
 | Aspect | Approach | Rationale |
 |--------|----------|-----------|
+| Vulkan Version | 1.4 minimum | No fallback paths for older versions |
 | Render Pass | `VK_KHR_dynamic_rendering` | Eliminates `VkRenderPass`/`VkFramebuffer` management overhead |
 | State Model | Maximally dynamic | Fewer pipeline variants, late binding of per-draw state |
 | Cache Strategy | In-memory only | Disk persistence not yet implemented |
 | Warm-up | None (lazy compile) | Pipelines created on first use; may cause hitches |
+| EDS1/EDS2 | Always enabled | Core on Vulkan 1.3+; no conditional gating |
+| EDS3 | Optional, per-feature | Gated by `supportsExtendedDynamicState3` + `ExtendedDynamicState3Caps` |
 
 ### Pipeline Layout Kinds
 
@@ -141,9 +144,9 @@ These values are immutable once the pipeline is created:
 | Color write mask | `color_write_mask` | RGBA write enable bits |
 | Stencil state | Multiple fields | See stencil section below |
 
-### Dynamic State (Vulkan 1.3 Core)
+### Dynamic State (Vulkan 1.3+ Core / EDS1/EDS2)
 
-These states are set per-draw via command buffer commands and do not affect pipeline identity:
+These states are set per-draw via command buffer commands and do not affect pipeline identity. All are available unconditionally on the engine's minimum Vulkan 1.4:
 
 | State | Command | Default Baked Value |
 |-------|---------|---------------------|
@@ -569,7 +572,7 @@ if (useVertexPulling) {
 
 ## 7. Dynamic Rendering Compatibility
 
-The renderer uses `VK_KHR_dynamic_rendering` (core in Vulkan 1.3), eliminating traditional `VkRenderPass` and `VkFramebuffer` objects. Pipeline compatibility is determined by matching `VkPipelineRenderingCreateInfo` at bind time.
+The renderer uses `VK_KHR_dynamic_rendering` (core since Vulkan 1.3, required by the engine's Vulkan 1.4 minimum), eliminating traditional `VkRenderPass` and `VkFramebuffer` objects. Pipeline compatibility is determined by matching `VkPipelineRenderingCreateInfo` at bind time.
 
 ### Compatibility Contract
 
@@ -689,25 +692,27 @@ vk::Pipeline VulkanPipelineManager::getPipeline(
     const ShaderModules& modules,
     const vertex_layout& layout)
 {
-    PipelineKey adjustedKey = key;
+    // Enforce layout contract: for VertexAttributes shaders, the key's
+    // layout_hash must match the supplied layout (mismatches are a hard error).
     const auto& layoutSpec = getShaderLayoutSpec(key.type);
-
     if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
         const size_t expectedHash = layout.hash();
-        if (adjustedKey.layout_hash != expectedHash) {
-            adjustedKey.layout_hash = expectedHash;
+        if (key.layout_hash != expectedHash) {
             throw std::runtime_error(
                 "PipelineKey.layout_hash mismatches provided vertex_layout");
         }
     }
 
+    std::lock_guard<std::mutex> guard(m_mutex);
     auto it = m_pipelines.find(key);
     if (it != m_pipelines.end()) {
         return it->second.get();
     }
 
-    auto pipeline = createPipeline(adjustedKey, modules, layout);
-    // ... cache and return ...
+    auto pipeline = createPipeline(key, modules, layout);
+    auto handle = pipeline.get();
+    m_pipelines.emplace(key, std::move(pipeline));
+    return handle;
 }
 ```
 
@@ -752,7 +757,19 @@ std::vector<vk::DynamicState> BuildDynamicStateList(
 
 ### Thread Safety
 
-Pipeline creation occurs on the **main rendering thread only**. No synchronization is required for the cache.
+Pipeline creation is protected by an internal mutex (`m_mutex`). The `getPipeline()` method acquires a lock before checking the cache or creating new pipelines. This allows safe access from multiple threads, though in practice the Vulkan backend operates single-threaded.
+
+### Internal Cache Structure
+
+The pipeline cache is implemented as:
+
+```cpp
+std::unordered_map<PipelineKey, vk::UniquePipeline, PipelineKeyHasher> m_pipelines;
+std::unordered_map<size_t, VertexInputState> m_vertexInputCache;
+```
+
+- `m_pipelines`: Maps `PipelineKey` to `vk::UniquePipeline` (RAII handle)
+- `m_vertexInputCache`: Caches converted `VertexInputState` by `vertex_layout.hash()` to avoid repeated conversion
 
 ### Cache Invalidation
 
@@ -903,20 +920,26 @@ void setModelUniformBinding(VulkanFrame& frame, gr_buffer_handle handle, ...)
 
 ## 11. Feature and Extension Requirements
 
-### Required (Vulkan 1.3 Core)
+### Required (Vulkan 1.4 Minimum)
+
+The engine requires Vulkan 1.4 as the minimum supported version. There are no fallback paths for older versions.
 
 | Feature/Extension | Version | Purpose |
 |-------------------|---------|---------|
-| Vulkan 1.3 | Core | Base requirement |
-| `VK_KHR_dynamic_rendering` | Core 1.3 | No render pass objects |
-| `VK_KHR_synchronization2` | Core 1.3 | 64-bit stage/access masks |
-| `VK_EXT_extended_dynamic_state` | Core 1.3 | Cull mode, front face, depth test, etc. |
+| Vulkan 1.4 | Core | Base requirement |
+| `VK_KHR_dynamic_rendering` | Core 1.3+ | No render pass objects |
+| `VK_KHR_synchronization2` | Core 1.3+ | 64-bit stage/access masks |
+| `VK_EXT_extended_dynamic_state` | Core 1.3+ | Cull mode, front face, depth test, etc. (legacy; always available) |
+| `VK_EXT_extended_dynamic_state2` | Core 1.3+ | Primitive restart, depth bias, rasterizer discard (legacy; always available) |
+| `VK_KHR_push_descriptor` | Core 1.4 | Per-draw push descriptors |
+
+**Note on EDS1/EDS2**: Extended Dynamic State 1 and 2 are treated as legacy API surface. On Vulkan 1.4, these features are always available and the engine does not conditionally gate them. Only Extended Dynamic State 3 features remain optional.
 
 ### Required Features (Hard Checks)
 
 | Feature | Source | Failure Mode |
 |---------|--------|--------------|
-| `dynamicRendering` | Vulkan 1.3 | Constructor throws exception |
+| `dynamicRendering` | Vulkan 1.3+ | Constructor throws exception |
 | `pushDescriptor` | Vulkan 1.4 | Throws exception |
 | `shaderSampledImageArrayNonUniformIndexing` | Descriptor indexing | Throws exception |
 | `runtimeDescriptorArray` | Descriptor indexing | Throws exception |
@@ -1074,17 +1097,17 @@ mprintf(("Creating pipeline: type=%d variant=0x%x color=%d depth=%d blend=%d\n",
 ```cpp
 VulkanPipelineManager(
     vk::Device device,
-    vk::PipelineLayout pipelineLayout,        // Standard layout
-    vk::PipelineLayout modelPipelineLayout,   // Model layout
-    vk::PipelineLayout deferredPipelineLayout,// Deferred layout
+    vk::PipelineLayout pipelineLayout,         // Standard layout
+    vk::PipelineLayout modelPipelineLayout,    // Model layout
+    vk::PipelineLayout deferredPipelineLayout, // Deferred layout
     vk::PipelineCache pipelineCache,
-    bool supportsExtendedDynamicState,
-    bool supportsExtendedDynamicState2,
-    bool supportsExtendedDynamicState3,
+    bool supportsExtendedDynamicState3,        // EDS3 is optional; EDS1/2 are always available on Vulkan 1.4
     const ExtendedDynamicState3Caps& extDyn3Caps,
     bool supportsVertexAttributeDivisor,
     bool dynamicRenderingEnabled);
 ```
+
+**Note**: Extended Dynamic State 1 and 2 parameters were removed because these features are core in Vulkan 1.3+ and are always available on the engine's minimum Vulkan 1.4. Only EDS3 features require explicit capability checks.
 
 ### Pipeline Acquisition
 

@@ -9,6 +9,9 @@ This document provides a practical guide to using capability tokens (`FrameCtx`,
 1. [Overview](#1-overview)
 2. [Quick Reference](#2-quick-reference)
 3. [Token Types](#3-token-types)
+   - 3.1-3.8: Core tokens (RecordingFrame, SubmitInfo, InFlightFrame, FrameCtx, Bound Frames, RenderCtx, UploadCtx, Deferred tokens)
+   - 3.9: [InitCtx](#39-initctx) - Initialization phase token
+   - 3.10: [RenderTargetInfo](#310-rendertargetinfo) - Pipeline compatibility data
 4. [Token Creation](#4-token-creation)
 5. [Token Consumption](#5-token-consumption)
 6. [Token Lifetime](#6-token-lifetime)
@@ -65,11 +68,19 @@ See `docs/DESIGN_PHILOSOPHY.md` for the underlying principles, particularly the 
 
 **Key Principle**: If you hold a token, you have proof that the corresponding phase is active. No token, no operation.
 
+**State as Type**: The token pattern encodes state in the type system rather than runtime flags:
+- Wrong: `assert(is_rendering_active)` - runtime check, fails in production
+- Right: `void draw(const RenderCtx& ctx)` - if you have a `RenderCtx`, rendering is active by construction
+
+The token's existence on the call stack IS the proof of phase validity. This shifts errors from runtime crashes to compile-time failures.
+
 ### 1.4 Source Files
 
 - `code/graphics/vulkan/VulkanFrameCaps.h` - Frame capability tokens and bound-frame wrappers
 - `code/graphics/vulkan/VulkanPhaseContexts.h` - Phase-specific tokens (upload, render, deferred)
 - `code/graphics/vulkan/VulkanFrameFlow.h` - Frame lifecycle tokens
+- `code/graphics/vulkan/VulkanRenderTargetInfo.h` - Render target format information (part of RenderCtx)
+- `code/graphics/vulkan/VulkanRenderer.h` - InitCtx (private), token-consuming APIs
 
 ---
 
@@ -80,19 +91,25 @@ See `docs/DESIGN_PHILOSOPHY.md` for the underlying principles, particularly the 
 | Token | Purpose | Move-Only | Created By | Typical Usage |
 |-------|---------|-----------|------------|---------------|
 | `RecordingFrame` | Frame is recording commands | Yes | `beginRecording()` | Internal frame management |
-| `InFlightFrame` | Frame submitted, awaiting GPU | Yes | `submitRecordedFrame()` | GPU synchronization |
+| `InFlightFrame` | Frame submitted, awaiting GPU | Yes | `advanceFrame()` | GPU synchronization |
 | `FrameCtx` | Active recording + renderer ref | No (copyable) | `currentFrameCtx()` | Most rendering operations |
 | `ModelBoundFrame` | Model UBO is bound | No | `requireModelBound()` | Model rendering |
 | `NanoVGBoundFrame` | NanoVG UBO is bound | No | `requireNanoVGBound()` | NanoVG rendering |
 | `DecalBoundFrame` | Decal UBOs are bound | No | `requireDecalBound()` | Decal rendering |
 | `RenderCtx` | Dynamic rendering is active | Yes | `ensureRenderingStarted()` | Draw commands |
-| `UploadCtx` | Upload phase is active | Yes | Internal (beginFrame) | Texture uploads |
+| `UploadCtx` | Upload phase is active | Yes | Internal (inline creation) | Texture uploads |
 | `DeferredGeometryCtx` | Deferred geometry pass active | Yes | `deferredLightingBegin()` | Deferred rendering |
 | `DeferredLightingCtx` | Deferred lighting pass active | Yes | `deferredLightingEnd()` | Deferred rendering |
+| `InitCtx` | Initialization phase is active | Yes | `initialize()` | Init-only operations |
 
 ### 2.2 Token Hierarchy Diagram
 
 ```
+Initialization Token:
+    InitCtx (internal, move-only)
+        +-- Created in initialize(), gates init-only functions
+        +-- Prevents init-time-only functions from being called during rendering
+
 Frame Lifecycle Tokens:
     RecordingFrame (internal, move-only)
         |-- FrameCtx (copyable reference wrapper)
@@ -102,11 +119,12 @@ Frame Lifecycle Tokens:
         |       +-- RenderCtx (move-only, created on demand)
         |               +-- Used for draw operations
         +-- InFlightFrame (internal, move-only)
-                +-- Created after submit, tracks GPU completion
+                +-- Created after advanceFrame(), tracks GPU completion
 
 Phase-Specific Tokens:
-    UploadCtx (internal, frame start)
-        +-- Used for texture uploads
+    UploadCtx (internal, created inline)
+        +-- Used for texture uploads, movie frame uploads
+        +-- Created at point of use, not stored
 
     DeferredGeometryCtx (move-only, typestate)
         +-- DeferredLightingCtx (move-only, typestate)
@@ -150,7 +168,13 @@ private:
 - Holds reference to `VulkanFrame` via `std::reference_wrapper`
 - `imageIndex` is private (only accessible by `VulkanRenderer`)
 - Created by `VulkanRenderer::beginRecording()`
-- Consumed by `VulkanRenderer::advanceFrame()`
+- Consumed by `VulkanRenderer::advanceFrame(RecordingFrame prev)` - takes by value, moves in
+
+**Consumption Semantics**: `advanceFrame()` takes the `RecordingFrame` by value (move), then:
+1. Calls `endFrame(prev)` to end command buffer recording
+2. Calls `submitRecordedFrame(prev)` to submit to GPU
+3. Creates `InFlightFrame` from the submitted frame
+4. Returns a new `RecordingFrame` for the next frame
 
 **Usage**: Internal to renderer; not exposed directly to engine code. Bridge functions in `VulkanGraphics.cpp` access it via `currentRecording()`.
 
@@ -351,6 +375,8 @@ private:
 
 **Usage**: Required for draw operations. The `cmd` member is used directly for Vulkan commands.
 
+**See Also**: Section 3.10 for `RenderTargetInfo` documentation (the `targetInfo` member used for pipeline selection).
+
 ### 3.7 UploadCtx
 
 **Purpose**: Proof that upload phase is active.
@@ -437,6 +463,73 @@ private:
 **Typestate Enforcement**: The `frameIndex` member provides runtime validation that the token was created for the current frame, catching bugs where tokens are accidentally held across frame boundaries.
 
 **See Also**: `docs/VULKAN_DEFERRED_LIGHTING_FLOW.md` for complete deferred lighting pipeline documentation.
+
+### 3.9 InitCtx
+
+**Purpose**: Proof that the renderer is in the initialization phase (not mid-frame).
+
+**Definition** (`VulkanRenderer.h`, private to `VulkanRenderer`):
+```cpp
+struct InitCtx {
+    InitCtx(const InitCtx&) = delete;  // Move-only
+    InitCtx& operator=(const InitCtx&) = delete;
+    InitCtx(InitCtx&&) = default;
+    InitCtx& operator=(InitCtx&&) = default;
+
+private:
+    InitCtx() = default;
+    friend bool VulkanRenderer::initialize();
+};
+```
+
+**Properties**:
+- Move-only
+- Private constructor, only mintable by `VulkanRenderer::initialize()`
+- Internal to `VulkanRenderer` (not exposed to engine code)
+- Used to gate functions like `submitInitCommandsAndWait()` and `createSmaaLookupTextures()`
+
+**Purpose**: Prevents "immediate submit" style helpers from being callable during the draw/recording paths. Functions requiring `InitCtx` can only be called during initialization, ensuring one-shot setup operations cannot accidentally occur mid-frame.
+
+**Usage**: Internal to renderer initialization:
+```cpp
+bool VulkanRenderer::initialize() {
+    // ... setup code ...
+    const InitCtx initCtx{};  // Only valid here
+    createSmaaLookupTextures(initCtx);  // Requires proof of init phase
+    // ...
+}
+```
+
+### 3.10 RenderTargetInfo
+
+**Purpose**: Encapsulates render target properties needed for pipeline compatibility.
+
+**Definition** (`VulkanRenderTargetInfo.h`):
+```cpp
+struct RenderTargetInfo {
+    vk::Format colorFormat = vk::Format::eUndefined;
+    uint32_t colorAttachmentCount = 1;
+    vk::Format depthFormat = vk::Format::eUndefined;  // eUndefined => no depth attachment
+};
+```
+
+**Properties**:
+- Plain data struct (copyable)
+- Part of `RenderCtx` (accessed via `renderCtx.targetInfo`)
+- Used as part of pipeline cache key (`PipelineKey`)
+- Must be recomputed after any target switch
+
+**Usage**: Pipeline selection based on current render target:
+```cpp
+void drawSomething(const RenderCtx& ctx) {
+    PipelineKey key = buildPipelineKey(ctx.targetInfo);  // Uses format info
+    vk::Pipeline pipeline = getPipeline(key, modules, layout);
+    ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+    ctx.cmd.draw(...);
+}
+```
+
+**Key Point**: Pipelines are compiled for specific render target configurations. Using a stale `RenderTargetInfo` after a target switch will select the wrong pipeline.
 
 ---
 
@@ -539,11 +632,27 @@ void renderModel(const FrameCtx& frameCtx) {
 
 ### 4.5 UploadCtx Creation
 
-**Function**: Internal, created during `beginFrame()`
+**Function**: Internal, created inline at point of use
 
-**Usage**: Passed to `flushPendingUploads(UploadCtx)` at frame start
+**Creation Points**:
+- `beginFrame()`: Creates `UploadCtx` for `flushPendingUploads()`
+- `updateTexture()`: Creates `UploadCtx` for texture updates during frame
+- `uploadMovieTexture()`: Creates `UploadCtx` for movie frame uploads
 
-**Not Exposed**: Upload context is internal to texture upload system; engine code does not interact with it directly.
+**Implementation** (`VulkanRenderer.cpp`):
+```cpp
+// In beginFrame():
+const UploadCtx uploadCtx{frame, cmd, m_frameCounter};
+m_textureUploader->flushPendingUploads(uploadCtx);
+
+// In updateTexture():
+UploadCtx uploadCtx{ctx.m_recording.ref(), cmd, m_frameCounter};
+m_textureUploader->updateTexture(uploadCtx, bitmapHandle, bpp, data, width, height);
+```
+
+**Key Point**: Unlike `RecordingFrame` which is stored in `g_backend->recording`, `UploadCtx` is created inline and not stored. Each upload operation constructs its own token, which is immediately consumed.
+
+**Not Exposed**: Upload context is internal to the texture upload system; engine code does not interact with it directly.
 
 ---
 
@@ -552,29 +661,40 @@ void renderModel(const FrameCtx& frameCtx) {
 ### 5.1 Token Requirements by Function
 
 **Functions Requiring FrameCtx**:
-- `ensureRenderingStarted(FrameCtx)` - Begin render pass
-- `setViewport(FrameCtx, ...)` - Set viewport
-- `setScissor(FrameCtx, ...)` - Set scissor
-- `pushDebugGroup(FrameCtx, ...)` - Debug labels
+- `ensureRenderingStarted(FrameCtx)` - Begin render pass, return `RenderCtx`
+- `setViewport(FrameCtx, vk::Viewport)` - Set dynamic viewport state
+- `setScissor(FrameCtx, vk::Rect2D)` - Set dynamic scissor state
+- `applySetupFrameDynamicState(FrameCtx, ...)` - Apply viewport/scissor/line width
+- `pushDebugGroup(FrameCtx, const char*)` - Begin debug label
 - `popDebugGroup(FrameCtx)` - End debug label
-- `beginSceneTexture(FrameCtx, ...)` - Begin HDR scene rendering
-- `endSceneTexture(FrameCtx, ...)` - End HDR scene rendering
+- `beginSceneTexture(FrameCtx, bool)` - Begin HDR scene rendering
+- `endSceneTexture(FrameCtx, bool)` - End HDR scene rendering with post-processing
 - `copySceneEffectTexture(FrameCtx)` - Copy scene for effects
-- `getBindlessTextureIndex(FrameCtx, ...)` - Texture lookup
-- `setBitmapRenderTarget(FrameCtx, ...)` - Set render-to-texture target
+- `getBindlessTextureIndex(FrameCtx, int)` - Bindless texture slot lookup
+- `getTextureDescriptor(FrameCtx, int, SamplerKey)` - Get texture descriptor info
+- `setBitmapRenderTarget(FrameCtx, int, int)` - Set render-to-texture target
+- `beginDecalPass(FrameCtx)` - Prepare depth buffer for decal sampling
+- `updateTexture(FrameCtx, ...)` - Update texture pixel data during frame
+- `uploadMovieTexture(FrameCtx, ...)` - Upload movie frame data
+- `drawMovieTexture(FrameCtx, ...)` - Draw movie texture quad
 
 **Functions Requiring RenderCtx**:
-- Draw operations (implicit - `RenderCtx` contains `cmd`)
-- Pipeline binding (implicit - uses `RenderCtx.cmd`)
-- Descriptor binding (implicit - uses `RenderCtx.cmd`)
+- Draw operations via `renderCtx.cmd.draw*()`, `renderCtx.cmd.drawIndexed*()`
+- Pipeline binding via `renderCtx.cmd.bindPipeline()`
+- Descriptor binding via `renderCtx.cmd.bindDescriptorSets()`, `renderCtx.cmd.pushDescriptorSetKHR()`
+- Dynamic state via `renderCtx.cmd.setDepthTestEnable()`, etc.
 
-**Functions Requiring RecordingFrame**:
+**Functions Requiring RecordingFrame** (internal):
 - `advanceFrame(RecordingFrame prev)` - Ends current frame, submits, begins next (takes by value, consumes)
-- `endFrame(RecordingFrame& rec)` - End command buffer recording (takes by reference)
-- `submitRecordedFrame(RecordingFrame& rec)` - Submit to GPU (takes by reference)
+- `endFrame(RecordingFrame&)` - End command buffer recording (internal, takes by reference)
+- `submitRecordedFrame(RecordingFrame&)` - Submit to GPU (internal, takes by reference)
 - `deferredLightingBegin(RecordingFrame&, bool)` - Begin deferred geometry pass
 - `deferredLightingEnd(RecordingFrame&, DeferredGeometryCtx&&)` - Transition to lighting pass
 - `deferredLightingFinish(RecordingFrame&, DeferredLightingCtx&&, vk::Rect2D)` - Complete deferred lighting
+
+**Functions Requiring InitCtx** (internal):
+- `submitInitCommandsAndWait(InitCtx, recorder)` - One-shot init command submission
+- `createSmaaLookupTextures(InitCtx)` - Create SMAA lookup textures
 
 ### 5.2 Token Validation
 
@@ -669,7 +789,27 @@ deferredLightingFinish()--> DeferredLightingCtx consumed
                         --> Back to normal rendering
 ```
 
-### 6.5 Lifetime Pitfalls
+### 6.5 InitCtx Lifetime
+
+| Event | Description |
+|-------|-------------|
+| Created | `VulkanRenderer::initialize()` creates it locally |
+| Valid | Only during initialization phase |
+| Destroyed | When `initialize()` returns |
+
+**Key Point**: `InitCtx` is never stored; it exists only on the stack within `initialize()`. This ensures init-only functions cannot be called after initialization completes.
+
+### 6.6 UploadCtx Lifetime
+
+| Event | Description |
+|-------|-------------|
+| Created | Inline at point of use (not stored) |
+| Valid | Duration of the upload operation |
+| Destroyed | Immediately after the upload call returns |
+
+**Key Point**: Unlike other tokens, `UploadCtx` is created and consumed inline. Each upload operation gets its own short-lived token instance.
+
+### 6.7 Lifetime Pitfalls
 
 **Pitfall 1: Holding RenderCtx Across Target Switch**
 ```cpp
@@ -828,6 +968,29 @@ void gr_vulkan_deferred_lighting_finish()
 - Cannot call `deferredLightingEnd()` without `deferredLightingBegin()`
 - The deferred state is stored in `g_backend->deferred` as a `std::variant`
 - Each token is consumed (moved) when transitioning to the next phase
+
+### 7.6 Pattern: FrameCtx to UploadCtx (Internal)
+
+Some functions take `FrameCtx` at the public API but internally create `UploadCtx` for upload operations. This design hides the internal upload phase from engine code while still enforcing phase safety within the renderer:
+
+```cpp
+// Public API takes FrameCtx
+void VulkanRenderer::updateTexture(const FrameCtx& ctx, int bitmapHandle, ...) {
+    // Internal: transitions to upload context
+    vk::CommandBuffer cmd = ctx.m_recording.ref().commandBuffer();
+
+    // Create UploadCtx inline (not stored, immediately consumed)
+    UploadCtx uploadCtx{ctx.m_recording.ref(), cmd, m_frameCounter};
+
+    // Use upload-phase API
+    m_textureUploader->updateTexture(uploadCtx, bitmapHandle, ...);
+}
+```
+
+**Why This Pattern**:
+- Engine code only needs to know about `FrameCtx` (simpler API surface)
+- `UploadCtx` is an implementation detail that enforces internal phase boundaries
+- The internal `VulkanTextureUploader` API is protected from being called from draw paths
 
 ---
 
@@ -1097,11 +1260,17 @@ Over time, more code can be migrated to use tokens directly, improving compile-t
 
 ## References
 
+**Token Definitions**:
 - `code/graphics/vulkan/VulkanFrameCaps.h` - FrameCtx, ModelBoundFrame, NanoVGBoundFrame, DecalBoundFrame
 - `code/graphics/vulkan/VulkanPhaseContexts.h` - UploadCtx, RenderCtx, DeferredGeometryCtx, DeferredLightingCtx
 - `code/graphics/vulkan/VulkanFrameFlow.h` - RecordingFrame, InFlightFrame, SubmitInfo
-- `code/graphics/vulkan/VulkanRenderer.h` - Token-consuming API declarations
+- `code/graphics/vulkan/VulkanRenderTargetInfo.h` - RenderTargetInfo (part of RenderCtx)
+- `code/graphics/vulkan/VulkanRenderer.h` - Token-consuming API declarations, InitCtx (private)
+
+**Implementation**:
 - `code/graphics/vulkan/VulkanRenderer.cpp` - Token-consuming API implementations
 - `code/graphics/vulkan/VulkanGraphics.cpp` - Token creation helpers and bridge functions
+
+**Design Philosophy**:
 - `docs/DESIGN_PHILOSOPHY.md` - Capability token principles and type-driven design philosophy
 - `docs/VULKAN_DEFERRED_LIGHTING_FLOW.md` - Deferred lighting pipeline documentation
