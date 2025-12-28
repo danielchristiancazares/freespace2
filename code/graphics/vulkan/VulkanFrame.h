@@ -28,7 +28,8 @@ public:
   VulkanFrame(vk::Device device, uint32_t frameIndex, uint32_t queueFamilyIndex,
               const vk::PhysicalDeviceMemoryProperties &memoryProps, vk::DeviceSize uniformBufferSize,
               vk::DeviceSize uniformAlignment, vk::DeviceSize vertexBufferSize, vk::DeviceSize vertexAlignment,
-              vk::DeviceSize stagingBufferSize, vk::DeviceSize stagingAlignment, vk::DescriptorSet modelSet);
+              vk::DeviceSize stagingBufferSize, vk::DeviceSize stagingAlignment, vk::DescriptorSet globalSet,
+              vk::DescriptorSet modelSet);
 
   void wait_for_gpu();
   void reset();
@@ -41,13 +42,13 @@ public:
   vk::Fence inflightFence() const { return m_inflightFence.get(); }
 
   vk::Semaphore imageAvailable() const { return m_imageAvailable.get(); }
-  vk::Semaphore renderFinished() const { return m_renderFinished.get(); }
   vk::Semaphore timelineSemaphore() const { return m_timelineSemaphore.get(); }
 
   uint64_t currentTimelineValue() const { return m_timelineValue; }
   uint64_t nextTimelineValue() const { return m_timelineValue + 1; }
   void advanceTimeline() { ++m_timelineValue; }
 
+  vk::DescriptorSet globalDescriptorSet() const { return m_globalDescriptorSet; }
   vk::DescriptorSet modelDescriptorSet() const { return m_modelDescriptorSet; }
   DynamicUniformBinding modelUniformBinding{gr_buffer_handle::invalid(), 0};
   DynamicUniformBinding sceneUniformBinding{gr_buffer_handle::invalid(), 0};
@@ -82,10 +83,10 @@ private:
   vk::UniqueFence m_inflightFence;
 
   vk::UniqueSemaphore m_imageAvailable;
-  vk::UniqueSemaphore m_renderFinished;
   vk::UniqueSemaphore m_timelineSemaphore;
   uint64_t m_timelineValue = 0;
 
+  vk::DescriptorSet m_globalDescriptorSet{};
   vk::DescriptorSet m_modelDescriptorSet{};
 
   VulkanRingBuffer m_uniformRing;

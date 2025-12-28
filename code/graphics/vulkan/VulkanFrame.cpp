@@ -14,14 +14,15 @@ VulkanFrame::VulkanFrame(vk::Device device, uint32_t frameIndex, uint32_t queueF
                          const vk::PhysicalDeviceMemoryProperties &memoryProps, vk::DeviceSize uniformBufferSize,
                          vk::DeviceSize uniformAlignment, vk::DeviceSize vertexBufferSize,
                          vk::DeviceSize vertexAlignment, vk::DeviceSize stagingBufferSize,
-                         vk::DeviceSize stagingAlignment, vk::DescriptorSet modelSet)
+                         vk::DeviceSize stagingAlignment, vk::DescriptorSet globalSet, vk::DescriptorSet modelSet)
     : m_device(device), m_frameIndex(frameIndex),
       m_uniformRing(device, memoryProps, uniformBufferSize, uniformAlignment, vk::BufferUsageFlagBits::eUniformBuffer),
       m_vertexRing(device, memoryProps, vertexBufferSize, vertexAlignment,
                    vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eStorageBuffer),
       m_stagingRing(device, memoryProps, stagingBufferSize, stagingAlignment == 0 ? 1 : stagingAlignment,
                     vk::BufferUsageFlagBits::eTransferSrc),
-      m_modelDescriptorSet(modelSet) {
+      m_globalDescriptorSet(globalSet), m_modelDescriptorSet(modelSet) {
+  Assertion(m_globalDescriptorSet, "VulkanFrame requires a valid global descriptor set");
   Assertion(m_modelDescriptorSet, "VulkanFrame requires a valid model descriptor set");
 
   vk::CommandPoolCreateInfo poolInfo;
@@ -49,7 +50,6 @@ VulkanFrame::VulkanFrame(vk::Device device, uint32_t frameIndex, uint32_t queueF
 
   vk::SemaphoreCreateInfo binaryInfo;
   m_imageAvailable = m_device.createSemaphoreUnique(binaryInfo);
-  m_renderFinished = m_device.createSemaphoreUnique(binaryInfo);
 }
 
 void VulkanFrame::wait_for_gpu() {
