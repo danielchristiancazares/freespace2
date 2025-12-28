@@ -6,13 +6,15 @@ This document describes FSO's Vulkan memory allocation patterns, buffer manageme
 
 FSO's Vulkan backend uses **native Vulkan memory allocation** rather than the Vulkan Memory Allocator (VMA) library. While the `vk_mem_alloc.h` header exists in the codebase, it is not currently integrated into the allocation path. All memory allocation flows through direct Vulkan API calls (`vk::allocateMemoryUnique`, `vk::bindBufferMemory`, etc.).
 
-The memory system is organized around three primary components:
+The memory system is organized around these primary components:
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
 | `VulkanBufferManager` | `VulkanBufferManager.cpp/.h` | Long-lived buffer creation, updates, deferred deletion |
-| `VulkanRingBuffer` | `VulkanRingBuffer.cpp/.h` | Per-frame transient allocations |
+| `VulkanRingBuffer` | `VulkanRingBuffer.cpp/.h` | Per-frame transient allocations (uniform, vertex, staging) |
 | `VulkanTextureManager` | `VulkanTextureManager.cpp/.h` | Texture memory, staging uploads, render targets |
+| `VulkanMovieManager` | `VulkanMovieManager.cpp/.h` | Movie/video texture memory with deferred release |
+| `DeferredReleaseQueue` | `VulkanDeferredRelease.h` | Serial-gated resource destruction queue |
 
 ## Memory Type Selection
 
@@ -61,6 +63,22 @@ Defined in `code/graphics/2d.h`:
 
 ```cpp
 enum class BufferType { Vertex, Index, Uniform };
+```
+
+### VulkanBuffer Structure
+
+Each managed buffer is represented by `VulkanBuffer` (`VulkanBufferManager.h`):
+
+```cpp
+struct VulkanBuffer {
+    vk::UniqueBuffer buffer;       // RAII buffer handle
+    vk::UniqueDeviceMemory memory; // RAII memory handle
+    BufferType type;               // Vertex, Index, or Uniform
+    BufferUsageHint usage;         // Static, Dynamic, Streaming, or PersistentMapping
+    vk::DeviceSize size = 0;       // Current allocation size (0 = not yet allocated)
+    void* mapped = nullptr;        // Non-null for host-visible buffers
+    bool isPersistentMapped = false;
+};
 ```
 
 ### Vulkan Usage Flags
@@ -117,6 +135,24 @@ void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer& buffer,
 
 The transfer is **synchronous** (fence-wait) to ensure data is available immediately. This is acceptable for static data loaded at startup or level transitions.
 
+The `VulkanBufferManager` maintains a dedicated transfer command pool with `eTransient | eResetCommandBuffer` flags for these synchronous uploads:
+
+```cpp
+vk::CommandPoolCreateInfo poolInfo{};
+poolInfo.queueFamilyIndex = transferQueueIndex;
+poolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient |
+                 vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
+m_transferCommandPool = m_device.createCommandPoolUnique(poolInfo);
+```
+
+Memory barriers after the copy are buffer-type-aware, using the appropriate destination stage and access masks:
+
+| Buffer Type | Destination Stage | Destination Access |
+|-------------|-------------------|-------------------|
+| `Vertex` | `eVertexInput \| eVertexShader` | `eVertexAttributeRead \| eShaderRead` |
+| `Index` | `eVertexInput` | `eIndexRead` |
+| `Uniform` | `eVertexShader \| eFragmentShader` | `eUniformRead` |
+
 ## Ring Buffers for Per-Frame Data
 
 ### Purpose
@@ -168,6 +204,9 @@ Allocation allocate(vk::DeviceSize size, vk::DeviceSize alignmentOverride = 0);
 
 // Returns nullopt if allocation would exceed remaining capacity
 std::optional<Allocation> try_allocate(vk::DeviceSize size, vk::DeviceSize alignmentOverride = 0);
+
+// Returns the remaining capacity (accounting for alignment of the next allocation)
+vk::DeviceSize remaining() const;
 ```
 
 ### Alignment Enforcement
@@ -175,8 +214,20 @@ std::optional<Allocation> try_allocate(vk::DeviceSize size, vk::DeviceSize align
 The ring buffer enforces a baseline alignment (typically `minUniformBufferOffsetAlignment` for uniform rings). Callers can request stricter alignment via `alignmentOverride`, but the override cannot weaken the baseline:
 
 ```cpp
-const vk::DeviceSize align = std::max(m_alignment, alignmentOverride ? alignmentOverride : 0);
+const vk::DeviceSize align = std::max(m_alignment, alignmentOverride ? alignmentOverride : vk::DeviceSize{0});
 vk::DeviceSize alignedOffset = ((m_offset + align - 1) / align) * align;
+```
+
+The `remaining()` method accounts for alignment when reporting available capacity:
+
+```cpp
+vk::DeviceSize VulkanRingBuffer::remaining() const {
+    const vk::DeviceSize alignedOffset = ((m_offset + m_alignment - 1) / m_alignment) * m_alignment;
+    if (alignedOffset >= m_size) {
+        return 0;
+    }
+    return m_size - alignedOffset;
+}
 ```
 
 ### No Mid-Frame Wrap
@@ -201,17 +252,27 @@ This reclaims the entire buffer for the new frame's allocations.
 
 ### Ring Buffer Sizing
 
-Ring buffer sizes are configured in `VulkanFrame` construction. The staging ring is used for texture uploads and must accommodate the largest single-frame upload batch:
+Ring buffer sizes are defined as constants in `VulkanRenderer` and passed to `VulkanFrame` during construction. The staging ring must accommodate the largest single-frame upload batch:
 
 ```cpp
-VulkanFrame::VulkanFrame(vk::Device device, uint32_t frameIndex,
-    uint32_t queueFamilyIndex,
+// From VulkanRenderer.h
+static constexpr vk::DeviceSize UNIFORM_RING_SIZE = 512 * 1024;        // 512 KB
+static constexpr vk::DeviceSize VERTEX_RING_SIZE = 1024 * 1024;        // 1 MB
+static constexpr vk::DeviceSize STAGING_RING_SIZE = 12 * 1024 * 1024;  // 12 MiB
+
+// VulkanFrame constructor (VulkanFrame.h)
+VulkanFrame(vk::Device device, uint32_t frameIndex, uint32_t queueFamilyIndex,
     const vk::PhysicalDeviceMemoryProperties& memoryProps,
     vk::DeviceSize uniformBufferSize, vk::DeviceSize uniformAlignment,
     vk::DeviceSize vertexBufferSize, vk::DeviceSize vertexAlignment,
     vk::DeviceSize stagingBufferSize, vk::DeviceSize stagingAlignment,
-    vk::DescriptorSet modelSet)
+    vk::DescriptorSet globalSet, vk::DescriptorSet modelSet);
 ```
+
+Alignment parameters are derived from device limits:
+- `uniformAlignment`: `VkPhysicalDeviceLimits::minUniformBufferOffsetAlignment`
+- `vertexAlignment`: Derived from device vertex buffer alignment requirements
+- `stagingAlignment`: `VkPhysicalDeviceLimits::optimalBufferCopyOffsetAlignment`
 
 ## Texture Memory Allocation
 
@@ -305,8 +366,13 @@ public:
     void enqueue(uint64_t retireSerial, F&& releaseFn);
 
     void collect(uint64_t completedSerial);
+
+    void clear() noexcept;  // Invoke all pending releases immediately
+    size_t size() const;    // Number of pending entries
 };
 ```
+
+`MoveOnlyFunction` is a minimal type-erased callable (similar to `std::move_only_function` from C++23) that allows capturing move-only types like `vk::UniqueBuffer` in the release callback.
 
 ### Enqueue Pattern
 
@@ -331,15 +397,25 @@ The closure captures the `vk::UniqueBuffer` and `vk::UniqueDeviceMemory` by move
 
 ### Collect Pattern
 
-Each frame, after confirming the completed serial via timeline semaphore query, managers call `collect()`:
+Deferred resource collection happens at two points in the frame lifecycle:
+
+1. **Frame Recycling** (`prepareFrameForReuse`): When a frame is recycled from the in-flight queue, collect is called after the fence wait confirms GPU completion.
+
+2. **Frame Begin** (`beginFrame`): Collection is called again opportunistically at the start of each frame recording.
 
 ```cpp
-void VulkanRenderer::collectDeferredResources(uint64_t completedSerial)
-{
+// In prepareFrameForReuse() - called when recycling a frame
+void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial) {
     m_bufferManager->collect(completedSerial);
     m_textureManager->collect(completedSerial);
-    m_movieManager->collect(completedSerial);
+    frame.reset();
 }
+
+// In beginFrame() - opportunistic collection at frame start
+m_completedSerial = std::max(m_completedSerial, queryCompletedSerial());
+if (m_bufferManager) m_bufferManager->collect(m_completedSerial);
+if (m_textureManager) m_textureManager->collect(m_completedSerial);
+if (m_movieManager) m_movieManager->collect(m_completedSerial);
 ```
 
 `collect()` iterates pending entries and invokes release callbacks for entries whose retire serial is <= the completed serial:
@@ -365,24 +441,42 @@ The `m_safeRetireSerial` is set by the renderer to indicate the serial of the up
 
 ## Frame Lifecycle Integration
 
-The memory system integrates with the frame lifecycle as follows:
+The memory system integrates with the frame lifecycle through a ring of frames managed by `VulkanRenderer`. The actual flow is:
 
 ```
-flip()
-+-- [submit previous frame with timeline semaphore signal]
-+-- advance frame index
-+-- VulkanFrame::wait_for_gpu()           // fence wait
-+-- query timeline semaphore value        // get completedSerial
-+-- managers: collect(completedSerial)    // destroy safe-to-delete resources
-+-- acquireNextImage()
-    +-- beginFrame()
-        +-- VulkanFrame::reset()
-            +-- m_uniformRing.reset()     // reset ring buffer offsets
-            +-- m_vertexRing.reset()
-            +-- m_stagingRing.reset()
-        +-- flushPendingUploads()         // use staging ring for textures
-        +-- [begin recording]
+flip() -> advanceFrame(currentRecording)
+|
++-- endFrame(prev)                        // finish command buffer recording
++-- submitRecordedFrame(prev)             // submit with timeline semaphore signal
++-- add frame to m_inFlightFrames queue
+|
++-- beginRecording()
+    +-- acquireAvailableFrame()
+    |   +-- [if no frames available]:
+    |       +-- recycleOneInFlight()
+    |           +-- pop from m_inFlightFrames
+    |           +-- VulkanFrame::wait_for_gpu()       // fence wait
+    |           +-- queryCompletedSerial()            // timeline semaphore query
+    |           +-- prepareFrameForReuse()
+    |               +-- bufferManager->collect()      // destroy safe resources
+    |               +-- textureManager->collect()
+    |               +-- frame.reset()                 // reset ring buffer offsets
+    |           +-- add to m_availableFrames
+    |
+    +-- acquireImage(frame)               // swapchain image acquisition
+    +-- beginFrame(frame, imageIndex)
+        +-- frame.resetPerFrameBindings()
+        +-- cmd.begin()                   // start command buffer recording
+        +-- collect() again (opportunistic)
+        +-- setSafeRetireSerial()         // for resources retired during recording
+        +-- flushPendingUploads()         // texture uploads via staging ring
+        +-- beginModelDescriptorSync()    // sync bindless descriptors
 ```
+
+Key invariants:
+- Ring buffers are reset only after the corresponding fence signals completion
+- Collection happens both at frame recycle and opportunistically at frame begin
+- `setSafeRetireSerial(submitSerial + 1)` ensures resources deleted mid-frame survive the upcoming submission
 
 ## Key Constants
 
@@ -391,9 +485,18 @@ From `VulkanConstants.h`:
 ```cpp
 constexpr uint32_t kFramesInFlight = 2;
 constexpr uint32_t kMaxBindlessTextures = 1024;
+
+// Bindless texture slot reservations
+constexpr uint32_t kBindlessTextureSlotFallback = 0;       // Always-valid black fallback
+constexpr uint32_t kBindlessTextureSlotDefaultBase = 1;    // Default base/diffuse texture
+constexpr uint32_t kBindlessTextureSlotDefaultNormal = 2;  // Default normal map
+constexpr uint32_t kBindlessTextureSlotDefaultSpec = 3;    // Default specular map
+constexpr uint32_t kBindlessFirstDynamicTextureSlot = 4;   // First slot for dynamic textures
 ```
 
 The ring buffer system relies on `kFramesInFlight` to ensure resources from the previous frame are not overwritten while still in use.
+
+Bindless slots 0-3 are reserved defaults that are always populated with valid fallback textures, ensuring shaders never sample destroyed images or need sentinel value routing.
 
 ## Best Practices
 
@@ -406,15 +509,18 @@ The ring buffer system relies on `kFramesInFlight` to ensure resources from the 
 
 ### For Texture Users
 
-1. **Queue uploads early** - `queueTextureUpload()` at draw time; uploads flush at frame start
-2. **Expect fallback textures** - bindless sampling uses slot 0 until a texture is resident and has a slot assigned
-3. **Respect staging budget** - very large textures may be permanently rejected by the current upload algorithm
+1. **Queue uploads early** - `queueTextureUpload()` at draw time; uploads flush at frame start via `flushPendingUploads()`
+2. **Expect fallback textures** - bindless sampling uses reserved slots (0-3) until a texture is resident and has a dynamic slot assigned (slot 4+)
+3. **Respect staging budget** - textures exceeding the 12 MiB staging buffer are added to `m_permanentlyRejected` and will not be retried automatically
+4. **Use `TextureId::tryFromBaseFrame()`** - treat invalid handles as absence rather than using sentinel values
 
 ### For Memory Debugging
 
 1. **Enable Vulkan validation layers** - catch use-after-free and binding errors
 2. **Monitor memory heaps** via Vulkan device memory properties
-3. **Check ring buffer exhaustion** - `try_allocate()` returning `nullopt` indicates budget issues
+3. **Check ring buffer exhaustion** - `try_allocate()` returning `nullopt` or `remaining()` approaching zero indicates budget issues
+4. **Review deferred release queue size** - `DeferredReleaseQueue::size()` growing unbounded indicates a serial tracking issue
+5. **Use `-vk_hud_debug`** - enables diagnostic logging for texture upload rejections and deferrals
 
 ## Related Documentation
 

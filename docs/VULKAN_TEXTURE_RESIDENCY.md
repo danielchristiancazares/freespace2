@@ -14,12 +14,15 @@ This document describes the texture residency system in the Vulkan renderer, cov
 6. [Bindless Slot Assignment](#6-bindless-slot-assignment)
 7. [Fallback Texture Handling](#7-fallback-texture-handling)
 8. [Render Targets](#8-render-targets)
-9. [Texture Format Support](#9-texture-format-support)
-10. [LRU Eviction Strategy](#10-lru-eviction-strategy)
-11. [Thread Safety](#11-thread-safety)
-12. [Usage Patterns](#12-usage-patterns)
-13. [Common Issues](#13-common-issues)
-14. [Performance Considerations](#14-performance-considerations)
+9. [Dynamic Texture Updates](#9-dynamic-texture-updates)
+10. [Texture Format Support](#10-texture-format-support)
+11. [LRU Eviction Strategy](#11-lru-eviction-strategy)
+12. [Thread Safety](#12-thread-safety)
+13. [Draw-Path and Upload-Path APIs](#13-draw-path-and-upload-path-apis)
+14. [Debug Logging](#14-debug-logging)
+15. [Usage Patterns](#15-usage-patterns)
+16. [Common Issues](#16-common-issues)
+17. [Performance Considerations](#17-performance-considerations)
 
 ---
 
@@ -45,14 +48,55 @@ and only if it exists in `m_bitmaps` or `m_targets`. This eliminates state-flag 
 |------|---------|
 | `code/graphics/vulkan/VulkanTextureManager.h` | Residency tracking structures and public API |
 | `code/graphics/vulkan/VulkanTextureManager.cpp` | State transition and upload logic |
+| `code/graphics/vulkan/VulkanTextureId.h` | `TextureId` strong typedef for texture identity |
+| `code/graphics/vulkan/VulkanTextureBindings.h` | Draw-path (`VulkanTextureBindings`) and upload-path (`VulkanTextureUploader`) wrapper APIs |
 | `code/graphics/vulkan/VulkanConstants.h` | Bindless slot constants |
-| `code/graphics/vulkan/VulkanRenderer.h` | Staging buffer size constant |
+| `code/graphics/vulkan/VulkanRenderer.h` | Staging buffer size constant (`STAGING_RING_SIZE`) |
 
 ---
 
 ## 2. Core Data Structures
 
-### 2.1 VulkanTexture
+### 2.1 TextureId
+
+`TextureId` is a strong typedef wrapping a bmpman "base frame" handle. It provides type safety and makes texture identity explicit throughout the Vulkan backend.
+
+```cpp
+class TextureId {
+public:
+  // Boundary constructor: validates and converts a base-frame handle (>= 0).
+  // Returns std::nullopt for invalid handles (< 0).
+  [[nodiscard]] static std::optional<TextureId> tryFromBaseFrame(int baseFrame);
+
+  int baseFrame() const;
+
+  bool operator==(const TextureId &other) const;
+  bool operator!=(const TextureId &other) const;
+};
+```
+
+**Key Points**:
+- Only valid bmpman base frame handles (`>= 0`) can become `TextureId` values
+- Invalid handles are represented as `std::nullopt`, not sentinel values
+- Builtin textures (fallback, default base/normal/spec) are not represented as `TextureId`; they have dedicated descriptor APIs
+- The internal `fromBaseFrameUnchecked()` method is used only where handle validity is proven by construction (container membership)
+
+**Usage**:
+```cpp
+// At API boundaries: validate the handle
+auto idOpt = TextureId::tryFromBaseFrame(bitmapHandle);
+if (!idOpt.has_value()) {
+    return; // Invalid handle - treat as absence
+}
+TextureId id = *idOpt;
+
+// Within container iteration: validity is proven by membership
+for (const auto& [id, texture] : m_bitmaps) {
+    // id is valid by construction (it was inserted with a valid handle)
+}
+```
+
+### 2.2 VulkanTexture
 
 The `VulkanTexture` structure holds all GPU resources for a single texture:
 
@@ -62,7 +106,7 @@ struct VulkanTexture {
     vk::UniqueDeviceMemory memory;   // Allocated device memory
     vk::UniqueImageView imageView;   // View for shader sampling
     vk::Sampler sampler;             // Borrowed from sampler cache (not owned)
-    vk::ImageLayout currentLayout;   // Current image layout (typically eShaderReadOnlyOptimal)
+    vk::ImageLayout currentLayout;   // Current image layout (initially eUndefined, typically eShaderReadOnlyOptimal after upload)
     uint32_t width;                  // Texture width in pixels
     uint32_t height;                 // Texture height in pixels
     uint32_t layers;                 // Array layer count (1 for non-arrays)
@@ -73,7 +117,7 @@ struct VulkanTexture {
 
 **Ownership**: The `image`, `memory`, and `imageView` are owned via `vk::Unique*` wrappers. The `sampler` is borrowed from the manager's sampler cache and must not be destroyed independently.
 
-### 2.2 UsageTracking
+### 2.3 UsageTracking
 
 Wraps usage metadata used for safe LRU eviction:
 
@@ -87,13 +131,22 @@ struct UsageTracking {
 **LRU Tracking**: `lastUsedFrame` and `lastUsedSerial` enable safe eviction under bindless slot pressure. A texture is
 safe to evict when `lastUsedSerial <= completedSerial` (GPU has finished all work referencing it).
 
-### 2.3 Permanently Rejected Inputs
+### 2.4 Permanently Rejected Inputs
 
 Some failures are **domain-invalid** under the current upload algorithm (e.g. a texture too large for the per-frame
-staging buffer). These are recorded in `m_permanentlyRejected` as a `std::unordered_set<TextureId>` so they are not
+staging buffer). These are recorded in `m_permanentlyRejected` as a `std::unordered_set<TextureId, TextureIdHasher>` so they are not
 automatically retried.
 
-### 2.4 SamplerKey
+**Rejection Causes**:
+- Texture exceeds staging buffer capacity (12 MB)
+- Array texture has mismatched frame dimensions or compression settings across frames
+
+**Key Behavior**:
+- Entries are cleared on `releaseBitmap()` to prevent handle-reuse poisoning
+- Entries are cleared on `deleteTexture()` to allow re-upload attempts
+- The `queueTextureUpload()` function skips textures in this set
+
+### 2.5 SamplerKey
 
 Identifies a unique sampler configuration:
 
@@ -109,6 +162,34 @@ Samplers are cached by key in `m_samplerCache`. The `getOrCreateSampler()` metho
 - Anisotropic filtering disabled (can be enabled per-sampler if needed)
 - `VK_LOD_CLAMP_NONE` to allow full mipmap chain sampling
 
+### 2.6 PendingUploadQueue
+
+The `PendingUploadQueue` is a unique FIFO queue that prevents duplicate upload requests:
+
+```cpp
+class PendingUploadQueue {
+public:
+    // Returns true if newly enqueued; false if already present (idempotent).
+    bool enqueue(TextureId id);
+
+    // Returns true if the id was present and removed.
+    bool erase(TextureId id);
+
+    bool empty() const;
+    std::deque<TextureId> takeAll();
+
+private:
+    std::deque<TextureId> m_fifo;                           // Insertion order
+    std::unordered_set<TextureId, TextureIdHasher> m_membership;  // O(1) duplicate check
+};
+```
+
+**Key Properties**:
+- Enqueueing the same `TextureId` multiple times is idempotent (only the first enqueue succeeds)
+- The `m_membership` set provides O(1) duplicate detection
+- The `m_fifo` deque maintains insertion order for fair upload scheduling
+- `takeAll()` atomically drains both containers and returns the FIFO contents
+
 ---
 
 ## 3. Residency States
@@ -116,13 +197,15 @@ Samplers are cached by key in `m_samplerCache`. The `getOrCreateSampler()` metho
 ### 3.1 Resident Texture
 
 **Containers**:
-- `std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps`
-- `std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets`
+- `std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps` - Sampled bitmap textures
+- `std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets` - Bmpman render targets
 
 **Properties**:
-- GPU resources (`VkImage`, `VkDeviceMemory`, `VkImageView`) are allocated
-- Image layout is `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`
-- Can be bound to descriptors immediately
+- GPU resources (`VkImage`, `VkDeviceMemory`, `VkImageView`) are allocated and valid
+- Image layout is typically `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` after upload completes
+  - Render targets may transition through `COLOR_ATTACHMENT_OPTIMAL` and `TRANSFER_DST_OPTIMAL` during use
+  - The `currentLayout` field tracks the actual layout for barrier construction
+- Can be bound to descriptors immediately when in shader-read layout
 - May have a bindless slot assignment (dynamic slots only; assignment happens at upload-phase safe points)
 
 **Lifetime**: Texture remains resident until explicitly deleted (`deleteTexture()`), retired due to LRU eviction, or
@@ -173,25 +256,32 @@ These are inputs outside the supported upload domain for the current algorithm. 
                              |
                              v
                     +------------------+
-                    |  Pending Upload  |
-                    |  (m_pendingUploads)
-                    +--------+---------+
-                             |
-                    flushPendingUploads()
-                             |
-                +------------+------------------------+
-                |                                     |
-         [Upload Success]                  [Domain Invalid]
-                |                                     |
-                v                                     v
-    +------------------+                    +----------------------+
-    |   Resident       |                    | Permanently Rejected  |
-    | (m_bitmaps/m_targets)                | (m_permanentlyRejected)|
-    +--------+---------+                    +----------------------+
+                    |  Pending Upload  |<---------+
+                    |  (m_pendingUploads)         |
+                    +--------+---------+          |
+                             |                    |
+                    flushPendingUploads()         |
+                             |                    |
+                +------------+--------------------+--------+
+                |            |                             |
+         [Success]    [Staging Budget]           [Domain Invalid]
+                |       (defer to                          |
+                |        next frame)                       v
+                v                              +----------------------+
+    +------------------+                       | Permanently Rejected |
+    |   Resident       |                       | (m_permanentlyRejected)
+    | (m_bitmaps/m_targets)                    +----------------------+
+    +--------+---------+
              |
-    deleteTexture() /
-    releaseBitmap() /
-    LRU eviction
+    deleteTexture() -> m_pendingRetirements
+    releaseBitmap() -> direct retire
+    LRU eviction -> direct retire
+             |
+             v
+    +------------------+
+    |  retireTexture() |
+    | (slot released)  |
+    +--------+---------+
              |
              v
     +------------------+
@@ -208,16 +298,34 @@ These are inputs outside the supported upload domain for the current algorithm. 
     +------------------+
 ```
 
+**Notes**:
+- Staging budget exhaustion defers upload to next frame (remains in `m_pendingUploads`)
+- Transient failures (e.g., `bm_lock` fails) drop from queue without re-queue; caller may re-request
+- `deleteTexture()` uses `m_pendingRetirements` for safe slot reuse timing
+- `releaseBitmap()` and LRU eviction call `retireTexture()` directly
+
 ### 4.2 Queue Upload
 
-**Function**: `VulkanTextureManager::queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey)`
+**Function Overloads**:
 
-**Behavior**:
-1. Resolve base frame handle via `bm_get_base_frame()` (for animated textures)
-2. Check if already resident - skip if so
-3. Check if permanently rejected - skip if so
-4. Warm sampler cache for later descriptor requests
-5. Enqueue into `m_pendingUploads` (unique FIFO; duplicates are rejected by construction)
+```cpp
+// Primary: takes raw bmpman handle, resolves base frame internally
+void queueTextureUpload(int bitmapHandle, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
+
+// For callers that already have a base-frame handle
+void queueTextureUploadBaseFrame(int baseFrame, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
+
+// For callers that already have a validated TextureId
+void queueTextureUpload(TextureId id, uint32_t currentFrameIndex, const SamplerKey& samplerKey);
+```
+
+**Behavior** (all overloads converge to the `TextureId` variant):
+1. Resolve base frame handle via `bm_get_base_frame()` (if starting from raw handle)
+2. Validate handle via `TextureId::tryFromBaseFrame()` - exit early if invalid
+3. Check if already resident - skip if so
+4. Check if permanently rejected (`m_permanentlyRejected`) - skip if so
+5. Warm sampler cache for later descriptor requests via `getOrCreateSampler()`
+6. Enqueue into `m_pendingUploads` (unique FIFO; duplicates are rejected by construction)
 
 **Key Point**: Queuing is idempotent. Multiple calls for the same handle are safe and coalesce to a single upload.
 
@@ -230,24 +338,31 @@ These are inputs outside the supported upload domain for the current algorithm. 
 **Process**:
 
 1. **Process Retirements**: `processPendingRetirements()` handles textures marked for deletion in the previous frame
-2. **Iterate Pending Uploads**:
+2. **Drain Pending Queue**: `m_pendingUploads.takeAll()` atomically extracts all pending uploads for processing
+3. **Iterate Pending Uploads**:
    - Skip if already resident
    - Skip if permanently rejected (`m_permanentlyRejected`)
-   - Validate bmpman handle via `bm_get_base_frame()`
+   - Validate bmpman handle via `bm_get_base_frame()` (skip if released)
+   - Lock first frame via `bm_lock()` to determine format/dimensions
    - For array textures, validate all frames have matching dimensions/compression
-   - Check staging buffer capacity and per-frame budget
-   - Lock bitmap data via `bm_lock()`
+   - **Two-Phase Budget Check**:
+     1. Estimate total upload size before allocation
+     2. If size exceeds total staging capacity: permanently reject (domain invalid)
+     3. If size exceeds remaining budget for this frame: defer to next frame
+     4. Attempt actual staging allocation via `try_allocate()`
+   - Copy pixel data to staging buffer (with format conversion for 16/24bpp)
    - Create GPU image, memory, and view
-   - Record copy commands to transfer staging data to GPU
+   - Record pipeline barriers and copy commands
    - Transition layout: `UNDEFINED` -> `TRANSFER_DST` -> `SHADER_READ_ONLY`
-   - Move into `m_bitmaps`
-3. **Assign Bindless Slots**: `assignBindlessSlots(const UploadCtx&)` resolves pending slot requests at this upload-phase
-   safe point (after uploads/retirements, before descriptor sync).
+   - Insert into `m_bitmaps` with usage tracking
+4. **Re-queue Deferred**: Uploads that were deferred (budget/alloc failure) are placed in a new `PendingUploadQueue`
+5. **Assign Bindless Slots**: `assignBindlessSlots(const UploadCtx&)` resolves pending slot requests at this upload-phase
+   safe point (after uploads/retirements, before descriptor sync)
 
 **Failure Handling**:
-- Staging buffer exhausted: defer to next frame (remains queued in `m_pendingUploads`)
-- Domain invalid (e.g. too large for staging, invalid array): insert into `m_permanentlyRejected`
-- Transient errors (e.g. `bm_lock` failure): treat as absence (not retried automatically; callers may request later)
+- **Staging buffer exhausted (this frame)**: defer to next frame (re-queued in remaining queue)
+- **Domain invalid** (exceeds staging capacity, invalid array): insert into `m_permanentlyRejected`
+- **Transient errors** (e.g. `bm_lock` failure): not re-queued (callers may request later)
 
 ### 4.4 Permanent Rejection
 
@@ -347,8 +462,9 @@ cmd.copyBufferToImage(
 
 ### 5.3 Upload Command Recording
 
-**In-Frame Uploads** (via `flushPendingUploads()`):
-- Recorded into main command buffer (not separate transfer queue)
+**Frame-Start Uploads** (via `flushPendingUploads()`):
+- Recorded into main command buffer before rendering begins (UploadCtx)
+- Draw paths queue uploads only; they do not flush mid-frame
 - Uses `VK_PIPELINE_STAGE_2` barriers for synchronization
 - Layout transitions: `UNDEFINED` -> `TRANSFER_DST` -> `SHADER_READ_ONLY`
 
@@ -494,9 +610,61 @@ Render targets are excluded from LRU eviction. Their bindless slot mappings are 
 
 ---
 
-## 9. Texture Format Support
+## 9. Dynamic Texture Updates
 
-### 9.1 Compressed Formats
+### 9.1 Overview
+
+The `updateTexture()` function allows updating the contents of an existing resident texture without recreating GPU resources. This is used for streaming animations, NanoVG rendering, and other dynamic content.
+
+### 9.2 API
+
+**Function**: `VulkanTextureManager::updateTexture(const UploadCtx& ctx, int bitmapHandle, int bpp, const ubyte* data, int width, int height)`
+
+**Called Via**: `VulkanTextureUploader::updateTexture()` (upload-phase only)
+
+**Parameters**:
+- `ctx`: Upload context (provides staging buffer and command buffer)
+- `bitmapHandle`: Bmpman handle to update
+- `bpp`: Source bits-per-pixel (8, 16, 24, or 32)
+- `data`: Pointer to source pixel data
+- `width`, `height`: Dimensions of the update region
+
+**Returns**: `true` if update succeeded, `false` otherwise
+
+### 9.3 Constraints
+
+- **Must be resident or creatable**: If the texture is not already resident, a new GPU image is created
+- **Single-layer only**: Multi-layer texture arrays cannot be updated (the API doesn't provide a layer index)
+- **No compressed formats**: Block-compressed textures cannot be dynamically updated
+- **Render targets excluded**: Bmpman render targets (`m_targets`) cannot be overwritten via this API
+- **Staging budget**: Update must fit in the current frame's staging buffer
+
+### 9.4 Format Conversion
+
+The update path handles format conversion similar to the initial upload:
+
+| Source bpp | Texture Format | Conversion |
+|------------|----------------|------------|
+| 8 | `R8_UNORM` | Direct copy or luminance extraction |
+| 8 | `B8G8R8A8_UNORM` | Mask placed in red channel |
+| 16 | `B8G8R8A8_UNORM` | A1R5G5B5 expanded to BGRA8 |
+| 24 | `B8G8R8A8_UNORM` | RGB expanded to BGRA8 (alpha=255) |
+| 32 | `B8G8R8A8_UNORM` | Direct copy |
+
+### 9.5 Layout Transitions
+
+The update path manages layout transitions:
+1. Barrier from current layout to `TRANSFER_DST_OPTIMAL`
+2. Copy staging buffer to image
+3. Barrier back to `SHADER_READ_ONLY_OPTIMAL`
+
+The `currentLayout` field is updated to reflect the final state.
+
+---
+
+## 10. Texture Format Support
+
+### 10.1 Compressed Formats
 
 | bmpman Flag | Vulkan Format | Block Size |
 |-------------|---------------|------------|
@@ -515,7 +683,7 @@ size_t calculateCompressedSize(uint32_t w, uint32_t h, vk::Format format) {
 }
 ```
 
-### 9.2 Uncompressed Formats
+### 10.2 Uncompressed Formats
 
 | Source Format | Vulkan Format | Notes |
 |---------------|---------------|-------|
@@ -539,22 +707,22 @@ size_t calculateLayerSize(uint32_t w, uint32_t h, vk::Format format) {
 
 ---
 
-## 10. LRU Eviction Strategy
+## 11. LRU Eviction Strategy
 
-### 10.1 When Eviction Occurs
+### 11.1 When Eviction Occurs
 
 LRU eviction is triggered only during upload-phase safe points when:
 1. A resident texture needs a bindless slot (`m_bindlessRequested`)
 2. No free dynamic slots are available (`m_freeBindlessSlots` is empty)
 
-### 10.2 Eviction Criteria
+### 11.2 Eviction Criteria
 
 A texture is eligible for eviction when:
 - `lastUsedSerial <= completedSerial` (GPU has finished all work referencing it)
 - It is not a render target (render targets are pinned)
 - It is not in the reserved slot range (0-3)
 
-### 10.3 Eviction Selection
+### 11.3 Eviction Selection
 
 The oldest texture by `lastUsedFrame` is selected:
 ```cpp
@@ -579,20 +747,20 @@ for (const auto& [id, slot] : m_bindlessSlots) {
 
 ---
 
-## 11. Thread Safety
+## 12. Thread Safety
 
-### 11.1 Single-Threaded Design
+### 12.1 Single-Threaded Design
 
 The `VulkanTextureManager` is designed for single-threaded access from the render thread. All public methods assume:
 - Caller holds exclusive access during the call
 - No concurrent modifications to internal containers
 - GPU synchronization is handled via serials and deferred release
 
-### 11.2 Bmpman Interaction
+### 12.2 Bmpman Interaction
 
 Interactions with bmpman (`bm_lock()`, `bm_unlock()`, `bm_get_info()`) occur during upload and must happen on the render thread. Bmpman itself may have internal locking for multi-threaded access.
 
-### 11.3 Deferred Release Safety
+### 12.3 Deferred Release Safety
 
 The `DeferredReleaseQueue` ensures GPU resources are not destroyed while in use:
 - Resources are enqueued with a retire serial
@@ -601,9 +769,119 @@ The `DeferredReleaseQueue` ensures GPU resources are not destroyed while in use:
 
 ---
 
-## 12. Usage Patterns
+## 13. Draw-Path and Upload-Path APIs
 
-### 12.1 Queue Texture for Upload
+The texture system exposes two wrapper classes that enforce phase-appropriate access patterns.
+
+### 13.1 VulkanTextureBindings (Draw-Path)
+
+`VulkanTextureBindings` provides draw-path safe texture access. It can only query existing state and queue uploads; it cannot record GPU commands or mutate bindless slot assignments.
+
+```cpp
+class VulkanTextureBindings {
+public:
+    explicit VulkanTextureBindings(VulkanTextureManager& textures);
+
+    // Returns a valid descriptor (falls back if not resident) and queues upload if needed.
+    vk::DescriptorImageInfo descriptor(TextureId id, uint32_t currentFrameIndex,
+                                       const VulkanTextureManager::SamplerKey& samplerKey);
+
+    // Returns a stable bindless slot index for this texture id.
+    // If not resident or no slot assigned: returns fallback slot 0.
+    // Also queues an upload for missing textures.
+    uint32_t bindlessIndex(TextureId id, uint32_t currentFrameIndex);
+};
+```
+
+**Key Behaviors**:
+- `descriptor()`: Returns resident texture's descriptor or fallback; queues upload if not resident
+- `bindlessIndex()`: Calls `requestBindlessSlot()` (records intent), returns slot or fallback; queues upload if not resident
+- Both methods call `markTextureUsed()` to update LRU tracking when texture is resident
+
+### 13.2 VulkanTextureUploader (Upload-Path)
+
+`VulkanTextureUploader` provides upload-phase access. It can record GPU commands but must only be called when no rendering is active.
+
+```cpp
+class VulkanTextureUploader {
+public:
+    explicit VulkanTextureUploader(VulkanTextureManager& textures);
+
+    // Flush all pending uploads and assign bindless slots.
+    void flushPendingUploads(const UploadCtx& ctx);
+
+    // Update an existing texture's contents dynamically.
+    bool updateTexture(const UploadCtx& ctx, int bitmapHandle, int bpp,
+                       const ubyte* data, int width, int height);
+};
+```
+
+**Key Behaviors**:
+- `flushPendingUploads()`: Processes pending queue, handles retirements, assigns bindless slots
+- `updateTexture()`: Records copy commands to update existing resident texture
+
+### 13.3 Phase Separation
+
+| Operation | Draw-Path Safe? | Upload-Path Only? |
+|-----------|-----------------|-------------------|
+| Query resident descriptor | Yes | - |
+| Query bindless slot | Yes | - |
+| Queue upload request | Yes | - |
+| Mark texture used | Yes | - |
+| Flush pending uploads | No | Yes |
+| Assign bindless slots | No | Yes |
+| Update texture contents | No | Yes |
+| Record layout transitions | No | Yes |
+
+---
+
+## 14. Debug Logging
+
+### 14.1 HUD Debug Mode
+
+The `-vk_hud_debug` command-line flag enables detailed logging for HUD texture residency tracking. This helps diagnose textures that are drawn while not yet resident.
+
+### 14.2 Debug Data Structures
+
+```cpp
+std::unordered_set<int> m_hudDebugMissing;         // Base frames drawn while non-resident
+std::unordered_map<int, uint32_t> m_hudDebugLogFlags;  // One-shot log flags per base frame
+```
+
+### 14.3 Log Events
+
+When `-vk_hud_debug` is enabled, the following events are logged (once per texture):
+
+| Event | Flag | Description |
+|-------|------|-------------|
+| `VK_HUD_DEBUG: queue upload` | `kHudLogQueued` | Texture queued for upload |
+| `VK_HUD_DEBUG: upload ok` | `kHudLogUploadOk` | Upload completed successfully |
+| `VK_HUD_DEBUG: upload skipped (permanently rejected)` | `kHudLogReject` | Texture in rejection set |
+| `VK_HUD_DEBUG: upload skipped (bmpman released)` | `kHudLogReleased` | Handle released by bmpman |
+| `VK_HUD_DEBUG: upload deferred (bm_lock failed)` | `kHudLogBmLockFail` | bm_lock returned null |
+| `VK_HUD_DEBUG: upload deferred (staging budget)` | `kHudLogDeferBudget` | Budget limit hit |
+| `VK_HUD_DEBUG: upload deferred (staging alloc failed)` | `kHudLogDeferAlloc` | Allocation failed |
+| `VK_HUD_DEBUG: delete texture requested` | `kHudLogReleased` | Texture deletion requested |
+| `VK_HUD_DEBUG: release bitmap` | `kHudLogReleased` | Bmpman handle released |
+
+### 14.4 Tracking Missing Textures
+
+```cpp
+// Mark a HUD texture as drawn while non-resident (called from draw path)
+void markHudTextureMissing(TextureId id);
+
+// Internal: check if logging is enabled for this base frame
+bool shouldLogHudDebug(int baseFrame) const;
+
+// Internal: one-shot logging (returns true only on first call per flag)
+bool logHudDebugOnce(int baseFrame, uint32_t flag);
+```
+
+---
+
+## 15. Usage Patterns
+
+### 15.1 Queue Texture for Upload
 
 ```cpp
 // Queue texture for upload (will be processed at frame start)
@@ -612,7 +890,7 @@ textureManager->queueTextureUpload(bitmapHandle, currentFrameIndex, samplerKey);
 // Upload happens automatically during flushPendingUploads()
 ```
 
-### 12.2 Preload Texture Immediately
+### 15.2 Preload Texture Immediately
 
 ```cpp
 // Preload texture synchronously (blocks until complete)
@@ -624,7 +902,7 @@ if (!success) {
 // to allow preloading to continue. Only OOM returns false.
 ```
 
-### 12.3 Get Bindless Slot
+### 15.3 Get Bindless Slot
 
 ```cpp
 // Get bindless slot index (may return fallback slot 0)
@@ -636,14 +914,14 @@ uint32_t slot = slotOpt.value_or(kBindlessTextureSlotFallback);
 pushConstants.baseMapIndex = slot;
 ```
 
-### 12.4 Check Bindless Slot Assignment
+### 15.4 Check Bindless Slot Assignment
 
 ```cpp
 // Check if texture has a bindless slot assigned
 bool hasSlot = textureManager->hasBindlessSlot(id);
 ```
 
-### 12.5 Get Texture Descriptor
+### 15.5 Get Texture Descriptor
 
 ```cpp
 // Get descriptor for resident texture (for push descriptors)
@@ -651,7 +929,7 @@ auto info = textureManager->tryGetResidentDescriptor(id, samplerKey);
 vk::DescriptorImageInfo resolved = info.value_or(textureManager->fallbackDescriptor(samplerKey));
 ```
 
-### 12.6 Mark Texture Used
+### 15.6 Mark Texture Used
 
 ```cpp
 // Update LRU tracking for a texture (prevents premature eviction)
@@ -660,7 +938,7 @@ textureManager->markTextureUsed(id, currentFrameIndex);
 
 ---
 
-## 13. Common Issues
+## 16. Common Issues
 
 ### Issue 1: Texture Never Uploads
 
@@ -745,27 +1023,27 @@ if (idOpt && m_permanentlyRejected.find(*idOpt) != m_permanentlyRejected.end()) 
 
 ---
 
-## 14. Performance Considerations
+## 17. Performance Considerations
 
-### 14.1 Staging Buffer Size
+### 17.1 Staging Buffer Size
 
 The 12 MB staging buffer limits how many textures can be uploaded per frame. For texture-heavy scenes:
 - Consider increasing `STAGING_RING_SIZE`
 - Preload textures during level load
 - Use compressed formats to reduce upload size
 
-### 14.2 Bindless vs. Push Descriptors
+### 17.2 Bindless vs. Push Descriptors
 
 - **Bindless**: Lower CPU overhead for scenes with many unique textures
 - **Push Descriptors**: Better for frequently-changing single textures
 
 The current implementation prefers bindless for model textures (many materials) and push descriptors for 2D/UI rendering.
 
-### 14.3 Sampler Caching
+### 17.3 Sampler Caching
 
 Samplers are cached by `SamplerKey` to avoid redundant Vulkan object creation. The cache is never cleared during runtime (samplers are small and reused).
 
-### 14.4 LRU Overhead
+### 17.4 LRU Overhead
 
 LRU tracking (`lastUsedFrame`, `lastUsedSerial`) adds minimal overhead per texture access. Eviction scanning is O(n) over assigned slots but only occurs under slot pressure.
 
@@ -775,17 +1053,25 @@ LRU tracking (`lastUsedFrame`, `lastUsedSerial`) adds minimal overhead per textu
 
 | Function | Purpose | When Called |
 |----------|---------|-------------|
-| `queueTextureUpload()` | Queue texture for upload | When texture is needed during draw |
+| `queueTextureUpload()` | Queue texture for upload (3 overloads) | When texture is needed during draw |
 | `queueTextureUploadBaseFrame()` | Queue by base frame handle | Internal, avoids redundant base frame lookup |
-| `preloadTexture()` | Upload texture immediately | Level load / preload phase |
+| `preloadTexture()` | Upload texture immediately (sync) | Level load / preload phase |
 | `flushPendingUploads()` | Process all pending uploads | Frame start (via VulkanTextureUploader) |
-| `requestBindlessSlot()` / `tryGetBindlessSlot()` | Bindless slot ownership (lookup-only on draw path) | Model rendering (push constants) |
-| `tryGetResidentDescriptor()` | Get descriptor for push descriptor | Push descriptor binding |
+| `updateTexture()` | Update existing texture contents | Streaming animations, NanoVG (via VulkanTextureUploader) |
+| `requestBindlessSlot()` | Record bindless slot intent | Draw path (CPU-only, no allocation) |
+| `tryGetBindlessSlot()` | Lookup bindless slot mapping | Draw path (returns slot or nullopt) |
+| `assignBindlessSlots()` | Allocate/evict bindless slots | Upload phase only (frame start) |
+| `tryGetResidentDescriptor()` | Get descriptor for resident texture | Push descriptor binding |
 | `markTextureUsed()` | Update LRU tracking | When texture is referenced |
+| `markHudTextureMissing()` | Track HUD texture drawn while non-resident | HUD draw path (for debug logging) |
 | `deleteTexture()` | Mark texture for deletion | When texture no longer needed |
-| `releaseBitmap()` | Release texture (handle reuse) | When bmpman frees handle |
+| `releaseBitmap()` | Release texture (handle reuse boundary) | When bmpman frees handle |
+| `retireTexture()` | Retire texture and defer GPU destruction | Internal (called by delete/release/evict) |
+| `processPendingRetirements()` | Process deferred retirements | Frame start (before uploads) |
 | `collect()` | Clean up retired textures | Frame start, after GPU completion |
 | `createRenderTarget()` | Create GPU render target | Bitmap RTT creation |
+| `isResident()` | Check if texture is resident | Various paths |
+| `fallbackDescriptor()` | Get fallback texture descriptor | When texture unavailable |
 
 ---
 
@@ -793,11 +1079,15 @@ LRU tracking (`lastUsedFrame`, `lastUsedSerial`) adds minimal overhead per textu
 
 - `code/graphics/vulkan/VulkanTextureManager.h` - Residency structures and public API
 - `code/graphics/vulkan/VulkanTextureManager.cpp` - State transition and upload logic
-- `code/graphics/vulkan/VulkanConstants.h` - Bindless slot constants (`kMaxBindlessTextures`)
+- `code/graphics/vulkan/VulkanTextureId.h` - `TextureId` strong typedef for texture identity
+- `code/graphics/vulkan/VulkanTextureBindings.h` - `VulkanTextureBindings` (draw-path) and `VulkanTextureUploader` (upload-path) wrapper classes
+- `code/graphics/vulkan/VulkanConstants.h` - Bindless slot constants (`kMaxBindlessTextures`, `kBindlessFirstDynamicTextureSlot`)
 - `code/graphics/vulkan/VulkanRenderer.h` - Staging buffer size (`STAGING_RING_SIZE`)
 - `code/graphics/vulkan/VulkanRingBuffer.h` - Staging ring buffer implementation
 - `code/graphics/vulkan/VulkanDeferredRelease.h` - Serial-gated resource destruction
+- `code/graphics/vulkan/VulkanPhaseContexts.h` - `UploadCtx` and other phase context types
 - `docs/DESIGN_PHILOSOPHY.md` - State-as-location pattern explanation
+- `docs/VULKAN_TEXTURE_BINDING.md` - Bindless texture slot conventions
 
 ---
 

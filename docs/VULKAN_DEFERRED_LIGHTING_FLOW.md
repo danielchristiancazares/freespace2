@@ -19,6 +19,8 @@ This document describes the complete deferred lighting pipeline in the Vulkan re
 11. [Common Issues](#11-common-issues)
 12. [References](#12-references)
 
+**Related Documentation**: See `VULKAN_CAPABILITY_TOKENS.md` for detailed coverage of `DeferredGeometryCtx` and `DeferredLightingCtx` tokens.
+
 ---
 
 ## 1. Prerequisites
@@ -64,9 +66,11 @@ The pipeline consists of three phases:
 |------|---------|
 | `code/graphics/vulkan/VulkanRenderer.cpp` | Deferred lighting orchestration and command recording |
 | `code/graphics/vulkan/VulkanDeferredLights.cpp` | Light data building and per-light draw recording |
-| `code/graphics/vulkan/VulkanDeferredLights.h` | Light UBO structures and light type definitions |
+| `code/graphics/vulkan/VulkanDeferredLights.h` | Light UBO structures (`DeferredMatrixUBO`, `DeferredLightUBO`) and light variant types |
 | `code/graphics/vulkan/VulkanRenderingSession.cpp` | G-buffer target management and layout transitions |
-| `code/graphics/vulkan/VulkanRenderTargets.h` | G-buffer image/view creation and accessors |
+| `code/graphics/vulkan/VulkanRenderTargets.h` | G-buffer image/view creation and accessors (`kGBufferCount`, `kGBufferEmissiveIndex`) |
+| `code/graphics/vulkan/VulkanPhaseContexts.h` | Capability tokens (`DeferredGeometryCtx`, `DeferredLightingCtx`) |
+| `code/graphics/vulkan/VulkanGraphics.cpp` | Engine API bridge (`gr_vulkan_deferred_lighting_*`) |
 | `code/graphics/shaders/deferred.vert` | Light volume vertex transformation |
 | `code/graphics/shaders/deferred.frag` | G-buffer sampling and PBR lighting calculations |
 | `code/graphics/shaders/lighting.glsl` | Shared light type constants and BRDF functions |
@@ -92,51 +96,65 @@ The G-buffer uses 5 color attachments plus a shared depth buffer:
 
 ### High-Level Sequence
 
+The deferred lighting pipeline uses typestate tokens to enforce correct API sequencing.
+
 ```
 [Frame Start]
     |
-    +-- beginDeferredLighting()
-    |   +-- [If scene texture active] Capture HDR scene -> emissive
-    |   +-- [Else if swapchain supports TRANSFER_SRC] Capture swapchain -> emissive
-    |   +-- beginDeferredPass(clearNonColorBufs, preserveEmissive)
-    |   |   +-- Transition G-buffer -> COLOR_ATTACHMENT_OPTIMAL
-    |   |   +-- Transition depth -> DEPTH_ATTACHMENT_OPTIMAL
-    |   |   +-- Set loadOp: eClear for all G-buffer, eLoad for emissive if preserved
-    |   +-- ensureRenderingStartedRecording() -> Begin dynamic rendering
+    +-- gr_vulkan_deferred_lighting_begin(clearNonColorBufs)       [Engine API]
+    |   +-- VulkanRenderer::deferredLightingBegin()                [Public API - returns DeferredGeometryCtx]
+    |       +-- beginDeferredLighting()                            [Internal implementation]
+    |           +-- Detect current target (scene HDR or swapchain)
+    |           +-- [If scene HDR active] Capture scene HDR -> emissive G-buffer
+    |           +-- [Else if swapchain + TRANSFER_SRC] Capture swapchain -> emissive G-buffer
+    |           +-- beginDeferredPass(clearNonColorBufs, preserveEmissive)
+    |           |   +-- Set m_gbufferLoadOps: eClear for all, eLoad for emissive if preserved
+    |           |   +-- Set m_target = DeferredGBufferTarget
+    |           +-- ensureRenderingStartedRecording() -> Begin dynamic rendering
     |
-    +-- [Geometry Rendering]
+    +-- [Geometry Rendering - DeferredGeometryCtx is active]
     |   +-- Bind model pipeline (SDR_TYPE_MODEL, 5 color attachments)
     |   +-- Draw models using vertex pulling + bindless textures
     |   +-- Shader writes: albedo, normal, position, specular, emissive
+    |   +-- [Optional: Decal pass via gr_start_decal_pass()]
     |
-    +-- deferredLightingEnd()
-    |   +-- endDeferredGeometry()
-    |   |   +-- endActivePass() -> End dynamic rendering
-    |   |   +-- transitionGBufferToShaderRead(cmd)
-    |   |   +-- Select SwapchainNoDepthTarget (default)
-    |   +-- [If scene texture active] Override to SceneHdrNoDepthTarget
-    |   +-- Return DeferredLightingCtx
+    +-- gr_vulkan_deferred_lighting_end()                          [Engine API]
+    |   +-- VulkanRenderer::deferredLightingEnd()                  [Consumes DeferredGeometryCtx]
+    |       +-- endDeferredGeometry()
+    |       |   +-- endActivePass() -> End dynamic rendering
+    |       |   +-- transitionGBufferToShaderRead(cmd)
+    |       |       +-- Transition all 5 G-buffer images to SHADER_READ_ONLY_OPTIMAL
+    |       |       +-- Transition depth to DEPTH_READ_ONLY_OPTIMAL (or DEPTH_STENCIL_READ_ONLY)
+    |       |   +-- Set m_target = SwapchainNoDepthTarget (default)
+    |       +-- [If scene texture active] Override to SceneHdrNoDepthTarget
+    |       +-- Return DeferredLightingCtx
     |
-    +-- deferredLightingFinish()
-    |   +-- bindDeferredGlobalDescriptors()
-    |   |   +-- Bind G-buffer textures to set=1: albedo(0), normal(1), position(2),
-    |   |       depth(3), specular(4), emissive(5)
-    |   |
-    |   +-- buildDeferredLights()
-    |   |   +-- Build ambient light (fullscreen, blend-off, MUST be first)
-    |   |   +-- Build directional lights (fullscreen, additive)
-    |   |   +-- Build point lights (sphere volume, additive)
-    |   |   +-- Build cone lights (sphere volume, additive)
-    |   |   +-- Build tube lights (cylinder volume, additive)
-    |   |
-    |   +-- ensureRenderingStartedRecording() -> Begin lighting pass
-    |   +-- recordDeferredLighting()
-    |   |   +-- For each light: bind pipeline, push descriptors, draw volume
-    |   |
-    |   +-- Restore scissor, requestMainTargetWithDepth()
+    +-- gr_vulkan_deferred_lighting_finish()                       [Engine API]
+    |   +-- VulkanRenderer::deferredLightingFinish()               [Consumes DeferredLightingCtx]
+    |       +-- buildDeferredLights()                              [Boundary: engine lights -> variants]
+    |       |   +-- Synthetic ambient light (fullscreen, blend-off, MUST be first)
+    |       |   +-- Directional lights (fullscreen, additive)
+    |       |   +-- Point lights (sphere volume, additive)
+    |       |   +-- Cone lights (sphere volume, additive)
+    |       |   +-- Tube lights (cylinder volume, additive)
+    |       |
+    |       +-- ensureRenderingStartedRecording() -> Begin lighting pass
+    |       +-- recordDeferredLighting()
+    |       |   +-- Set fullscreen viewport/scissor, disable depth test
+    |       |   +-- Get deferred pipeline (SDR_TYPE_DEFERRED_LIGHTING)
+    |       |   +-- Bind G-buffer descriptors (set=1) from frame.globalDescriptorSet()
+    |       |   +-- For each light:
+    |       |       +-- Bind pipeline (ambient uses blend-off, others additive)
+    |       |       +-- Push UBO descriptors (set=0): matrices + light params
+    |       |       +-- Draw volume mesh (fullscreen, sphere, or cylinder)
+    |       |
+    |       +-- Restore scissor
+    |       +-- requestMainTargetWithDepth() -> Resume normal rendering
     |
-    +-- [Continue with transparent objects, HUD, UI]
+    +-- [Continue with transparent objects, HUD, UI - deferred state is std::monostate]
 ```
+
+**Typestate Enforcement**: The `std::variant<std::monostate, DeferredGeometryCtx, DeferredLightingCtx>` in `g_backend->deferred` ensures calls occur in sequence. Attempting to call `end()` without `begin()` triggers an assertion.
 
 ### Image Layout Transitions
 
@@ -172,44 +190,60 @@ Depth Buffer:
 
 ### 4.1 Beginning the Pass
 
-**Entry Point**: `VulkanRenderer::beginDeferredLighting(RecordingFrame& rec, bool clearNonColorBufs)`
+**Public Entry Point**: `VulkanRenderer::deferredLightingBegin(RecordingFrame& rec, bool clearNonColorBufs)`
+**Internal Implementation**: `VulkanRenderer::beginDeferredLighting(RecordingFrame& rec, bool clearNonColorBufs)`
 
 The geometry pass begins by:
 
-1. **Preserving scissor state** - The clip scissor is captured and restored after internal fullscreen passes.
+1. **Preserving scissor state** - The clip scissor is captured via `getClipScissorFromScreen()` and stored in `restoreScissor`. This is restored after internal fullscreen copy passes.
 
-2. **Determining emissive preservation** - Pre-deferred content (stars, nebulae) must be captured before clearing the G-buffer:
-   - If `m_sceneTexture` is active: copy from HDR scene target
-   - Else if swapchain supports `TRANSFER_SRC`: copy from swapchain
-   - Otherwise: no preservation (emissive buffer cleared)
+2. **Detecting current render target** - The code checks `m_renderingSession->targetIsSceneHdr()` and `targetIsSwapchain()` to determine the capture source for emissive preservation.
 
-3. **Beginning the deferred pass**:
+3. **Determining emissive preservation** - Pre-deferred content (stars, nebulae) must be captured before clearing the G-buffer:
+   - If scene HDR target is active: suspend rendering, transition scene HDR to shader-read, copy to emissive via `recordPreDeferredSceneHdrCopy()`
+   - Else if swapchain is active and supports `TRANSFER_SRC`: capture swapchain via `captureSwapchainColorToSceneCopy()`, then copy to emissive via `recordPreDeferredSceneColorCopy()`
+   - Otherwise: `preserveEmissive = false` (emissive buffer cleared)
+
+4. **Beginning the deferred pass**:
    ```cpp
    m_renderingSession->beginDeferredPass(clearNonColorBufs, preserveEmissive);
    ```
 
-4. **Starting dynamic rendering** - Even if no geometry draws occur, this ensures clear operations execute.
+5. **Starting dynamic rendering** - Even if no geometry draws occur, this ensures clear operations execute:
+   ```cpp
+   (void)ensureRenderingStartedRecording(rec);
+   ```
+
+6. **Returning the geometry token**:
+   ```cpp
+   return DeferredGeometryCtx{m_frameCounter};
+   ```
 
 ### 4.2 G-Buffer Target Setup
 
 **Function**: `VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive)`
 
 ```cpp
-// Depth is always cleared when entering deferred geometry
-m_clearOps = m_clearOps.withDepthStencilClear();
+void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs, bool preserveEmissive) {
+  endActivePass();
+  // Vulkan mirrors OpenGL's deferred begin semantics:
+  // - pre-deferred swapchain color is captured and copied into the emissive buffer (handled by VulkanRenderer)
+  // - the remaining G-buffer attachments are cleared here by loadOp=CLEAR
+  (void)clearNonColorBufs; // parameter retained for API parity; Vulkan always clears non-emissive G-buffer attachments.
 
-// All G-buffer attachments clear by default
-m_gbufferLoadOps.fill(vk::AttachmentLoadOp::eClear);
+  // Depth is shared across swapchain and deferred targets. Always clear it when entering deferred geometry so
+  // pre-deferred draws (treated as emissive background) cannot occlude deferred geometry.
+  m_clearOps = m_clearOps.withDepthStencilClear();
 
-// Emissive attachment: preserve if pre-deferred content was captured
-if (preserveEmissive) {
+  m_gbufferLoadOps.fill(vk::AttachmentLoadOp::eClear);
+  if (preserveEmissive) {
     m_gbufferLoadOps[VulkanRenderTargets::kGBufferEmissiveIndex] = vk::AttachmentLoadOp::eLoad;
+  }
+  m_target = std::make_unique<DeferredGBufferTarget>();
 }
-
-m_target = std::make_unique<DeferredGBufferTarget>();
 ```
 
-**Note**: The `clearNonColorBufs` parameter is retained for API parity with OpenGL but Vulkan always clears non-emissive G-buffer attachments.
+**Note**: The `clearNonColorBufs` parameter is retained for API parity with OpenGL but Vulkan always clears non-emissive G-buffer attachments. The depth buffer is always cleared to prevent pre-deferred draws from occluding geometry.
 
 ### 4.3 Geometry Rendering
 
@@ -232,6 +266,17 @@ layout(location = 4) out vec4 outEmissive;  // Glow texture (additive with prese
 - **Vertex pulling**: Vertex data fetched from SSBO, not via vertex input bindings
 - **Bindless textures**: Material texture indices passed via push constants
 - **Dynamic uniform offsets**: Per-model transform data via uniform ring buffer
+
+### 4.4 Decal Pass (Optional)
+
+During the geometry phase, decals can be rendered via `gr_start_decal_pass()`. This prepares the depth buffer for sampling while maintaining the G-buffer as the active render target.
+
+The decal pass:
+1. Copies the current depth buffer to a cockpit depth snapshot (if needed)
+2. Binds the depth texture for shader sampling
+3. Allows decals to read depth for projection while writing to G-buffer
+
+**Precondition**: `DeferredGeometryCtx` must be active (enforced by assertion).
 
 ---
 
@@ -273,38 +318,91 @@ recordPreDeferredSceneHdrCopy(emissiveRender);  // SDR_TYPE_COPY shader
 
 ### 6.1 Ending Geometry, Beginning Lighting
 
-**Function**: `VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd)`
+**Public Entry Point**: `VulkanRenderer::deferredLightingEnd(RecordingFrame& rec, DeferredGeometryCtx&& geometry)`
+**Internal Helper**: `VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd)`
+
+The transition from geometry to lighting consumes the `DeferredGeometryCtx` token and returns a `DeferredLightingCtx`:
 
 ```cpp
-// Verify we are in G-buffer target
-Assertion(dynamic_cast<DeferredGBufferTarget*>(m_target.get()) != nullptr, ...);
+DeferredLightingCtx VulkanRenderer::deferredLightingEnd(RecordingFrame& rec, DeferredGeometryCtx&& geometry) {
+  Assertion(geometry.frameIndex == m_frameCounter, ...);  // Validate token matches current frame
+  vk::CommandBuffer cmd = rec.cmd();
 
-endActivePass();                        // End dynamic rendering
-transitionGBufferToShaderRead(cmd);     // All 5 G-buffer + depth to SHADER_READ_ONLY
-m_target = std::make_unique<SwapchainNoDepthTarget>();  // Default lighting target
-```
-
-**Target Override**: If scene texture mode is active, `deferredLightingEnd()` overrides the target:
-```cpp
-if (m_sceneTexture.has_value()) {
+  endDeferredGeometry(cmd);
+  if (m_sceneTexture.has_value()) {
+    // Deferred lighting output should land in the scene HDR target during scene texture mode.
     m_renderingSession->requestSceneHdrNoDepthTarget();
+  }
+  return DeferredLightingCtx{m_frameCounter};
 }
 ```
 
-**Important**: The lighting target has **no depth attachment**. Depth is sampled from the G-buffer position/depth textures for lighting calculations.
+**Session-Level Transition** (`VulkanRenderingSession::endDeferredGeometry`):
+
+```cpp
+void VulkanRenderingSession::endDeferredGeometry(vk::CommandBuffer cmd) {
+  Assertion(dynamic_cast<DeferredGBufferTarget*>(m_target.get()) != nullptr,
+            "endDeferredGeometry called when not in deferred gbuffer target");
+
+  endActivePass();                        // End dynamic rendering
+  transitionGBufferToShaderRead(cmd);     // All 5 G-buffer + depth to SHADER_READ_ONLY
+  m_target = std::make_unique<SwapchainNoDepthTarget>();  // Default lighting target
+}
+```
+
+**Layout Transition Details**: `transitionGBufferToShaderRead()` issues a single barrier batch for all 6 images (5 G-buffer + 1 depth):
+
+```cpp
+// Creates barriers for kGBufferCount + 1 images
+std::array<vk::ImageMemoryBarrier2, VulkanRenderTargets::kGBufferCount + 1> barriers{};
+// G-buffer: COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+// Depth: DEPTH_ATTACHMENT_OPTIMAL -> depthReadLayout() (DEPTH_READ_ONLY or DEPTH_STENCIL_READ_ONLY)
+```
+
+**Important**: The lighting target has **no depth attachment**. Depth is sampled from the G-buffer depth texture for lighting calculations if needed (currently unused by the shader).
 
 ### 6.2 Building Lights
 
 **Function**: `buildDeferredLights(VulkanFrame& frame, vk::Buffer uniformBuffer, const matrix4& viewMatrix, const matrix4& projMatrix, uint32_t uniformAlignment)`
 
-Lights are built from the engine's global `Lights` array. Each light type produces a specific light variant:
+**Location**: `code/graphics/vulkan/VulkanDeferredLights.cpp`
+
+This is a boundary function that converts engine light data to Vulkan-specific variants. Lights are built from the engine's global `Lights` array. Each light produces one of three variant types:
+
+**Light Type Constants** (from `lighting.glsl`):
+```glsl
+const int LT_DIRECTIONAL = 0;  // A light like a sun
+const int LT_POINT       = 1;  // A point light, like an explosion
+const int LT_TUBE        = 2;  // A tube light, like a fluorescent light
+const int LT_CONE        = 3;  // A cone light, like a flood light
+const int LT_AMBIENT     = 4;  // Directionless ambient light
+```
+
+**UBO Structures** (from `VulkanDeferredLights.h`):
+```cpp
+// Must match deferred.vert layout(set=0, binding=0)
+struct alignas(16) DeferredMatrixUBO {
+  matrix4 modelViewMatrix;
+  matrix4 projMatrix;
+};
+
+// Must match deferred.vert/frag layout(set=0, binding=1), std140 layout
+struct alignas(16) DeferredLightUBO {
+  float diffuseLightColor[3];  float coneAngle;
+  float lightDir[3];           float coneInnerAngle;
+  float coneDir[3];            uint32_t dualCone;
+  float scale[3];              float lightRadius;
+  int32_t lightType;           uint32_t enable_shadows;
+  float sourceRadius;          float _pad;
+};
+```
 
 **Ambient Light** (synthetic, always first):
 ```cpp
 FullscreenLight ambient{};
 ambient.isAmbient = true;
-ambient.light.lightType = LT_AMBIENT;  // Value: 4
-// Identity matrices (fullscreen quad in clip space)
+ambient.light.lightType = LT_AMBIENT_SHADER;  // Value: 4
+// Identity matrices (fullscreen quad renders in clip space)
 // Color from gr_get_ambient_light()
 ```
 
@@ -313,8 +411,8 @@ ambient.light.lightType = LT_AMBIENT;  // Value: 4
 FullscreenLight directional{};
 directional.isAmbient = false;
 directional.light.lightType = LT_DIRECTIONAL;  // Value: 0
-// Direction transformed to view space
-// Identity matrices (fullscreen quad)
+// Direction transformed to view space via viewMatrix
+// Identity model matrix (fullscreen quad)
 ```
 
 **Point Lights**:
@@ -322,6 +420,7 @@ directional.light.lightType = LT_DIRECTIONAL;  // Value: 0
 SphereLight point{};
 point.light.lightType = LT_POINT;  // Value: 1
 // Model matrix: translation to light position in world space
+// modelViewMatrix = viewMatrix * modelMatrix
 // Scale: radius * 1.05 (5% oversize ensures edge coverage)
 ```
 
@@ -329,39 +428,81 @@ point.light.lightType = LT_POINT;  // Value: 1
 ```cpp
 SphereLight cone{};
 cone.light.lightType = LT_CONE;  // Value: 3
-// Same sphere volume as point (conservative bounding)
-// Cone direction and angles passed in UBO for shader culling
+// Same sphere volume mesh as point (conservative bounding)
+// Cone direction transformed to view space and stored in coneDir
+// coneAngle, coneInnerAngle, dualCone passed in UBO for shader culling
 ```
 
 **Tube Lights**:
 ```cpp
 CylinderLight tube{};
 tube.light.lightType = LT_TUBE;  // Value: 2
-// Model matrix: translation + rotation aligning -Z with tube direction
+// Model matrix: translation to start position + rotation aligning local -Z with tube direction
 // Scale: radius * 1.05 for X/Y, full length for Z
+// Beam direction derived in shader from: modelViewMatrix * vec4(0, 0, -scale.z, 0)
 ```
 
-**Cockpit Lighting Mode**: When `Lighting_mode == lighting_mode::COCKPIT`, light intensity and radius are modified by the current lighting profile's cockpit modifiers.
+**Cockpit Lighting Mode**: When `Lighting_mode == lighting_mode::COCKPIT`, both intensity and radius are modified by the current lighting profile's cockpit modifiers via `lp->cockpit_light_intensity_modifier.handle()` and `lp->cockpit_light_radius_modifier.handle()`.
 
 ### 6.3 Rendering Lights
 
-**Function**: `VulkanRenderer::recordDeferredLighting(...)`
+**Function**: `VulkanRenderer::recordDeferredLighting(const RenderCtx& render, vk::Buffer uniformBuffer, vk::DescriptorSet globalSet, const std::vector<DeferredLight>& lights)`
 
-Each light is rendered by its `record()` method:
+**Setup Phase** (executed once before lights):
+```cpp
+// Fullscreen viewport/scissor, depth disabled
+cmd.setViewport(0, 1, &viewport);      // Negative height for Y-flip
+cmd.setScissor(0, 1, &scissor);        // Full swapchain extent
+cmd.setDepthTestEnable(VK_FALSE);
+cmd.setDepthWriteEnable(VK_FALSE);
+cmd.setCullMode(vk::CullModeFlagBits::eNone);
+
+// Get pipelines: additive blend and blend-off (for ambient)
+vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, deferredLayout);
+vk::Pipeline ambientPipeline = m_pipelineManager->getPipeline(ambientKey, modules, deferredLayout);
+
+// Bind G-buffer descriptor set (set=1) once for all lights
+cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, ctx.layout, 1, 1, &globalSet, 0, nullptr);
+```
+
+**Per-Light Rendering** via `std::visit` on `DeferredLight` variant:
 
 ```cpp
 for (const auto& light : lights) {
-    std::visit([&](const auto& l) {
-        l.record(ctx, meshVB, meshIB, indexCount);
-    }, light);
+  std::visit([&](const auto& l) {
+    using T = std::decay_t<decltype(l)>;
+    if constexpr (std::is_same_v<T, FullscreenLight>) {
+      l.record(ctx, fullscreenVB);
+    } else if constexpr (std::is_same_v<T, SphereLight>) {
+      l.record(ctx, sphereVB, sphereIB, m_sphereMesh.indexCount);
+    } else if constexpr (std::is_same_v<T, CylinderLight>) {
+      l.record(ctx, cylinderVB, cylinderIB, m_cylinderMesh.indexCount);
+    }
+  }, light);
 }
 ```
 
-**Per-Light Recording**:
-1. **Bind pipeline**: Ambient uses blend-off pipeline; others use additive blend
-2. **Set dynamic blend enable** (if `VK_EXT_extended_dynamic_state3` available)
-3. **Push descriptors**: Matrix and light UBOs via `pushDescriptorSetKHR()`
-4. **Draw**: Fullscreen triangle (3 vertices) or indexed volume mesh
+**Light Record Implementation** (e.g., `FullscreenLight::record`):
+1. **Bind pipeline**: Ambient uses `ambientPipeline` (blend-off); others use `pipeline` (additive)
+2. **Set dynamic blend enable** (if `VK_EXT_extended_dynamic_state3` available via `setColorBlendEnableEXT`)
+3. **Push descriptors (set=0)**: Matrix and light UBOs via `pushDescriptorSetKHR()`
+4. **Bind vertex buffer** and draw (fullscreen: 3 vertices; volumes: indexed)
+
+```cpp
+void FullscreenLight::record(const DeferredDrawContext& ctx, vk::Buffer fullscreenVB) const {
+  vk::Pipeline pipe = isAmbient ? ctx.ambientPipeline : ctx.pipeline;
+  ctx.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipe);
+
+  if (ctx.dynamicBlendEnable) {
+    vk::Bool32 blendEnable = isAmbient ? VK_FALSE : VK_TRUE;
+    ctx.cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+  }
+
+  pushLightDescriptors(ctx.cmd, ctx.layout, ctx.uniformBuffer, matrixOffset, lightOffset);
+  ctx.cmd.bindVertexBuffers(0, 1, &fullscreenVB, &offset);
+  ctx.cmd.draw(3, 1, 0, 0);  // Fullscreen triangle
+}
+```
 
 ---
 
@@ -527,23 +668,48 @@ vec3 ExpandLightSize(in vec3 lightDir, in vec3 reflectDir) {
 
 ### 9.1 Engine API
 
-The deferred lighting system is exposed via the graphics API:
+The deferred lighting system is exposed via the graphics API in `VulkanGraphics.cpp`:
 
 ```cpp
-// VulkanGraphics.cpp
 void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs);
 void gr_vulkan_deferred_lighting_end();
 void gr_vulkan_deferred_lighting_finish();
 ```
 
-**State Machine**:
+**Bridge Implementation** (`VulkanGraphics.cpp`):
 ```cpp
-// Stored in g_backend->deferred variant
+void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs) {
+  Assertion(std::holds_alternative<std::monostate>(g_backend->deferred), ...);
+  auto& renderer = currentRenderer();
+  g_backend->deferred = renderer.deferredLightingBegin(*g_backend->recording, clearNonColorBufs);
+}
+
+void gr_vulkan_deferred_lighting_end() {
+  auto* geometry = std::get_if<DeferredGeometryCtx>(&g_backend->deferred);
+  Assertion(geometry != nullptr, "...called without a matching begin");
+  g_backend->deferred = currentRenderer().deferredLightingEnd(*g_backend->recording, std::move(*geometry));
+}
+
+void gr_vulkan_deferred_lighting_finish() {
+  auto* lighting = std::get_if<DeferredLightingCtx>(&g_backend->deferred);
+  Assertion(lighting != nullptr, "...called without a matching end");
+  vk::Rect2D scissor = createClipScissor();
+  currentRenderer().deferredLightingFinish(*g_backend->recording, std::move(*lighting), scissor);
+  g_backend->deferred = std::monostate{};  // Reset to idle state
+}
+```
+
+**State Machine** (`g_backend->deferred`):
+```
 std::variant<std::monostate, DeferredGeometryCtx, DeferredLightingCtx>
 
-// begin -> returns DeferredGeometryCtx
-// end   -> consumes DeferredGeometryCtx, returns DeferredLightingCtx
-// finish -> consumes DeferredLightingCtx, returns std::monostate
+  monostate ──begin()──> DeferredGeometryCtx ──end()──> DeferredLightingCtx ──finish()──> monostate
+```
+
+**Decal Integration**: During the geometry phase, decals can be rendered via `gr_start_decal_pass()`, which asserts that `DeferredGeometryCtx` is active:
+```cpp
+Assertion(std::holds_alternative<DeferredGeometryCtx>(g_backend->deferred),
+          "Vulkan decal pass requires deferred geometry to be active");
 ```
 
 ### 9.2 Scene Texture Integration
@@ -563,21 +729,27 @@ if (m_sceneTexture.has_value()) {
 
 ### 9.3 Descriptor Binding Layout
 
-**Set 0** (Push Descriptors, per-light):
-| Binding | Type | Content |
-|---------|------|---------|
-| 0 | Uniform Buffer | `DeferredMatrixUBO` (modelView + projection matrices) |
-| 1 | Uniform Buffer | `DeferredLightUBO` (light parameters) |
+The deferred lighting shader uses a two-set layout with push descriptors for per-light data:
 
-**Set 1** (Global, bound once per lighting pass):
-| Binding | Type | Content |
-|---------|------|---------|
-| 0 | Combined Image Sampler | G-buffer color (albedo) |
-| 1 | Combined Image Sampler | G-buffer normal |
-| 2 | Combined Image Sampler | G-buffer position |
-| 3 | Combined Image Sampler | G-buffer depth |
-| 4 | Combined Image Sampler | G-buffer specular |
-| 5 | Combined Image Sampler | G-buffer emissive |
+**Set 0** (Push Descriptors via `pushDescriptorSetKHR`, per-light):
+
+| Binding | Type | Content | GLSL Declaration |
+|---------|------|---------|------------------|
+| 0 | Uniform Buffer | `DeferredMatrixUBO` | `layout(binding = 0, std140) uniform matrixData` |
+| 1 | Uniform Buffer | `DeferredLightUBO` | `layout(binding = 1, std140) uniform lightData` |
+
+**Set 1** (Global descriptor set `frame.globalDescriptorSet()`, bound once):
+
+| Binding | Type | Content | GLSL Declaration |
+|---------|------|---------|------------------|
+| 0 | Combined Image Sampler | G-buffer color (albedo) | `layout(set = 1, binding = 0) uniform sampler2D ColorBuffer` |
+| 1 | Combined Image Sampler | G-buffer normal | `layout(set = 1, binding = 1) uniform sampler2D NormalBuffer` |
+| 2 | Combined Image Sampler | G-buffer position | `layout(set = 1, binding = 2) uniform sampler2D PositionBuffer` |
+| 3 | Combined Image Sampler | G-buffer depth | `layout(set = 1, binding = 3) uniform sampler2D DepthBuffer` |
+| 4 | Combined Image Sampler | G-buffer specular | `layout(set = 1, binding = 4) uniform sampler2D SpecularBuffer` |
+| 5 | Combined Image Sampler | G-buffer emissive | `layout(set = 1, binding = 5) uniform sampler2D EmissiveBuffer` |
+
+**Note**: The G-buffer descriptors are populated by `bindDeferredGlobalDescriptors()` which writes to the frame's global descriptor set. This happens once per frame when deferred lighting is used.
 
 ---
 
@@ -620,20 +792,22 @@ auto alloc = frame.uniformBuffer().allocate(size, uniformAlignment);
 **Symptoms**: Previous frame's G-buffer content visible; ghosting artifacts.
 
 **Causes**:
-- `beginDeferredPass()` not called before geometry rendering
+- `deferredLightingBegin()` not called before geometry rendering
 - Emissive preserved incorrectly (stale content loaded)
+- `beginDeferredPass()` not setting `loadOp::eClear` for G-buffer attachments
 
-**Fix**: Ensure `beginDeferredLighting()` is called at the start of each deferred frame.
+**Fix**: Ensure `gr_vulkan_deferred_lighting_begin()` is called at the start of each deferred frame. Verify the `clearNonColorBufs` parameter is appropriate for the use case.
 
 ### Issue 2: Lighting Output to Wrong Target
 
 **Symptoms**: Deferred lighting renders to swapchain instead of scene HDR (or vice versa).
 
 **Causes**:
-- `scene_texture_begin()` not called before `deferredLightingBegin()`
-- Target override in `deferredLightingEnd()` not triggering
+- `scene_texture_begin()` not called before `gr_vulkan_deferred_lighting_begin()`
+- `m_sceneTexture` not set when `deferredLightingEnd()` checks it
+- Target override in `deferredLightingEnd()` not triggering due to missing scene texture state
 
-**Fix**: Verify scene texture mode is active before entering deferred lighting if HDR output is desired.
+**Fix**: Verify scene texture mode is active before entering deferred lighting if HDR output is desired. Check that `beginSceneTexture()` was called and `m_sceneTexture.has_value()` is true.
 
 ### Issue 3: Emissive Not Preserved
 
@@ -642,14 +816,18 @@ auto alloc = frame.uniformBuffer().allocate(size, uniformAlignment);
 **Causes**:
 - `preserveEmissive = false` when it should be true
 - Swapchain does not support `TRANSFER_SRC` usage (check swapchain creation)
-- Capture shader (`SDR_TYPE_COPY`) not correctly bound
+- Scene HDR target not active and swapchain capture path disabled
+- Copy shader (`SDR_TYPE_COPY`) not correctly recording
 
 **Debugging**:
 ```cpp
-bool canCapture = (m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc)
-                  != vk::ImageUsageFlags{};
-Warning(LOCATION, "canCaptureSwapchain: %s, preserveEmissive: %s",
-        canCapture ? "true" : "false", preserveEmissive ? "true" : "false");
+// In beginDeferredLighting():
+bool canCaptureSwapchain = (m_vulkanDevice->swapchainUsage() & vk::ImageUsageFlagBits::eTransferSrc)
+                           != vk::ImageUsageFlags{};
+bool sceneHdrTarget = m_renderingSession->targetIsSceneHdr();
+bool swapchainTarget = m_renderingSession->targetIsSwapchain();
+mprintf(("canCaptureSwapchain=%d, sceneHdr=%d, swapchain=%d\n",
+         canCaptureSwapchain, sceneHdrTarget, swapchainTarget));
 ```
 
 ### Issue 4: Lights Not Appearing
@@ -674,13 +852,14 @@ for (const auto& light : lights) {
 
 ### Issue 5: Validation Errors on Layout Transitions
 
-**Symptoms**: Vulkan validation errors about image layout mismatches.
+**Symptoms**: Vulkan validation errors about image layout mismatches (e.g., "VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL" when shader expected "VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL").
 
 **Causes**:
-- G-buffer sampled before `transitionGBufferToShaderRead()` called
+- G-buffer sampled before `transitionGBufferToShaderRead()` was called in `endDeferredGeometry()`
 - Layout tracking out of sync after error recovery
+- `deferredLightingEnd()` skipped or early-returned without calling `endDeferredGeometry()`
 
-**Fix**: Ensure `endDeferredGeometry()` is called before `recordDeferredLighting()`. Check that no early returns skip the transition.
+**Fix**: Ensure `gr_vulkan_deferred_lighting_end()` is called before `gr_vulkan_deferred_lighting_finish()`. Check that no early returns skip the transition. The typestate tokens should prevent this at compile time, but early returns in bridge functions can bypass the enforcement.
 
 ### Issue 6: Ambient Light Trails / Undefined Swapchain
 
@@ -702,18 +881,25 @@ if (dot(position, position) < 1.0e-8 && lightType == LT_AMBIENT) {
 
 ### Source Files (Line References)
 
-| File | Function | Lines | Description |
-|------|----------|-------|-------------|
-| `VulkanRenderer.cpp` | `beginDeferredLighting()` | 593-639 | Entry point for geometry pass |
-| `VulkanRenderer.cpp` | `deferredLightingBegin/End/Finish()` | 1044-1099 | Public API wrappers |
-| `VulkanRenderer.cpp` | `bindDeferredGlobalDescriptors()` | 1101+ | G-buffer descriptor binding |
-| `VulkanDeferredLights.cpp` | `buildDeferredLights()` | 130-348 | Light construction from engine state |
-| `VulkanDeferredLights.cpp` | `FullscreenLight::record()` | 66-84 | Fullscreen light draw recording |
-| `VulkanDeferredLights.cpp` | `SphereLight::record()` | 86-104 | Point/cone light draw recording |
-| `VulkanDeferredLights.cpp` | `CylinderLight::record()` | 106-124 | Tube light draw recording |
-| `VulkanRenderingSession.cpp` | `beginDeferredPass()` | 202-218 | G-buffer target setup |
-| `VulkanRenderingSession.cpp` | `endDeferredGeometry()` | 410-417 | Transition to lighting phase |
-| `VulkanRenderTargets.h` | G-buffer constants | 15-22 | `kGBufferCount`, `kGBufferEmissiveIndex` |
+**Note**: Line numbers are approximate and may drift as the codebase evolves. Use the function names to locate the current implementation.
+
+| File | Function | Line | Description |
+|------|----------|------|-------------|
+| `VulkanRenderer.cpp` | `beginDeferredLighting()` | ~571 | Internal geometry pass setup |
+| `VulkanRenderer.cpp` | `deferredLightingBegin()` | ~1017 | Public API - returns `DeferredGeometryCtx` |
+| `VulkanRenderer.cpp` | `deferredLightingEnd()` | ~1023 | Public API - returns `DeferredLightingCtx` |
+| `VulkanRenderer.cpp` | `deferredLightingFinish()` | ~1039 | Public API - consumes `DeferredLightingCtx` |
+| `VulkanRenderer.cpp` | `bindDeferredGlobalDescriptors()` | ~1065 | G-buffer descriptor binding |
+| `VulkanRenderer.cpp` | `recordDeferredLighting()` | ~3503 | Per-light draw recording loop |
+| `VulkanDeferredLights.cpp` | `buildDeferredLights()` | ~122 | Light construction from engine state |
+| `VulkanDeferredLights.cpp` | `FullscreenLight::record()` | ~64 | Fullscreen light draw recording |
+| `VulkanDeferredLights.cpp` | `SphereLight::record()` | ~82 | Point/cone light draw recording |
+| `VulkanDeferredLights.cpp` | `CylinderLight::record()` | ~100 | Tube light draw recording |
+| `VulkanRenderingSession.cpp` | `beginDeferredPass()` | ~248 | G-buffer target setup |
+| `VulkanRenderingSession.cpp` | `endDeferredGeometry()` | ~439 | Transition to lighting phase |
+| `VulkanGraphics.cpp` | `gr_vulkan_deferred_lighting_*()` | - | Engine API bridge functions |
+| `VulkanRenderTargets.h` | G-buffer constants | ~15-22 | `kGBufferCount`, `kGBufferEmissiveIndex` |
+| `VulkanPhaseContexts.h` | `DeferredGeometryCtx`, `DeferredLightingCtx` | ~50-74 | Capability token definitions |
 
 ### Related Documentation
 

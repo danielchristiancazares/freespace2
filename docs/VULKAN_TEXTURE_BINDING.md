@@ -6,6 +6,8 @@ This document provides comprehensive documentation of the Vulkan texture binding
 
 **Prerequisites**: Familiarity with Vulkan concepts (descriptors, image layouts, samplers) and the FreeSpace 2 bmpman (bitmap manager) subsystem.
 
+**Related Documentation**: This document focuses on binding architecture and descriptor integration. For detailed coverage of the residency state machine, upload batching, and LRU eviction mechanics, see `docs/VULKAN_TEXTURE_RESIDENCY.md`.
+
 ---
 
 ## Table of Contents
@@ -19,7 +21,7 @@ This document provides comprehensive documentation of the Vulkan texture binding
 7. [Mipmap and Array Texture Handling](#7-mipmap-and-array-texture-handling)
 8. [Builtin Textures](#8-builtin-textures)
 9. [Image Layout Transitions](#9-image-layout-transitions)
-10. [Error Handling and Unavailability](#10-error-handling-and-unavailability)
+10. [Error Handling and Permanent Rejection](#10-error-handling-and-permanent-rejection)
 11. [Thread Safety Considerations](#11-thread-safety-considerations)
 12. [Debugging and Troubleshooting](#12-debugging-and-troubleshooting)
 13. [Key Files Reference](#key-files-reference)
@@ -72,12 +74,13 @@ Texture state is tracked by container membership rather than explicit state fiel
 ```cpp
 // VulkanTextureManager.h (conceptual)
 // State as location:
-// - presence in m_bitmaps            => resident sampled bitmap texture
-// - presence in m_targets            => resident bmpman render target
-// - presence in m_pendingUploads     => queued for upload (unique FIFO)
+// - presence in m_bitmaps             => resident sampled bitmap texture
+// - presence in m_targets             => resident bmpman render target
+// - presence in m_pendingUploads      => queued for upload (unique FIFO)
 // - presence in m_permanentlyRejected => domain-invalid for this upload algorithm (no auto-retry)
-// - presence in m_bindlessSlots      => has a dynamic bindless slot assigned
-// - presence in m_bindlessRequested  => slot requested (pending assignment)
+// - presence in m_bindlessSlots       => has a dynamic bindless slot assigned
+// - presence in m_bindlessRequested   => slot requested (pending assignment)
+// - presence in m_pendingRetirements  => marked for retirement at next upload-phase safe point
 
 std::unordered_map<TextureId, BitmapTexture, TextureIdHasher> m_bitmaps;
 std::unordered_map<TextureId, RenderTargetTexture, TextureIdHasher> m_targets;
@@ -298,7 +301,7 @@ cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics,
 
 ### Descriptor Binding Layout
 
-The model descriptor set layout uses the following bindings:
+The model descriptor set layout uses the following bindings (see `VulkanDescriptorLayouts.cpp` for authoritative definitions):
 
 | Binding | Type | Count | Description |
 |---------|------|-------|-------------|
@@ -306,6 +309,8 @@ The model descriptor set layout uses the following bindings:
 | 1 | `eCombinedImageSampler` | 1024 | Bindless texture array |
 | 2 | `eUniformBufferDynamic` | 1 | Per-model uniforms (matrices, material params) |
 | 3 | `eStorageBufferDynamic` | 1 | Batched transforms (instance data) |
+
+The bindless texture array (binding 1) uses `kMaxBindlessTextures` (1024) slots. Reserved slots 0-3 are always populated with builtin textures; dynamic texture assignments use slots 4-1023.
 
 ---
 
@@ -623,6 +628,9 @@ Upload Request (queueTextureUpload)
                                                    [GPU resources destroyed]
 ```
 
+Uploads are flushed at frame start (UploadCtx). Draw paths only queue requests and return fallback descriptors until the
+next upload-phase flush.
+
 ### LRU Eviction Strategy
 
 When bindless slots are exhausted, the manager evicts the least recently used texture to make room for new allocations:
@@ -908,6 +916,8 @@ Four builtin textures provide fallback and default values, ensuring shaders alwa
 | Default Normal | 2 | (128, 128, 255, 255) | Flat tangent-space normal encoding (0, 0, 1) |
 | Default Spec | 3 | (10, 10, 10, 0) | Dielectric F0 (~0.04); reasonable default for non-metals |
 
+**Format Note**: Builtin textures use `vk::Format::eR8G8B8A8Unorm` (RGBA byte order), whereas regular bitmap textures use `vk::Format::eB8G8R8A8Unorm` (BGRA) to match bmpman's native pixel layout. This distinction is internal; shaders sample both identically since the format describes how the GPU interprets the stored bytes.
+
 ```cpp
 // VulkanTextureManager.cpp (builtin texture creation - conceptual)
 void VulkanTextureManager::createFallbackTexture() {
@@ -1066,13 +1076,31 @@ This prevents handle reuse collisions where a new bitmap might be assigned the s
 
 ## 12. Debugging and Troubleshooting
 
+### HUD Debug Mode
+
+The `-vk_hud_debug` command-line flag enables detailed logging of texture binding operations during HUD/UI rendering. When enabled, the following events are logged:
+
+| Log Tag | Description |
+|---------|-------------|
+| `VK_HUD_DEBUG: upload ok` | Texture successfully uploaded to GPU |
+| `VK_HUD_DEBUG: upload skipped (permanently rejected)` | Texture rejected by upload algorithm (e.g., too large for staging) |
+| `VK_HUD_DEBUG: upload skipped (bmpman released)` | Handle was released by bmpman before upload |
+| `VK_HUD_DEBUG: upload deferred (bm_lock failed)` | Transient lock failure; will retry |
+| `VK_HUD_DEBUG: upload deferred (staging budget)` | Frame staging budget exhausted; deferred to next frame |
+| `VK_HUD_DEBUG: upload deferred (staging alloc failed)` | Staging buffer allocation failed |
+| `VK_HUD_DEBUG: upload rejected (array mismatch)` | Texture array has inconsistent frame dimensions/format |
+| `VK_HUD_DEBUG: upload rejected (staging too small)` | Texture exceeds staging buffer capacity |
+| `VK_HUD_DEBUG: ui texture not resident` | UI draw attempted with non-resident texture |
+
+Each log message includes the base frame handle, texture filename (when available), and relevant size/budget information to aid debugging.
+
 ### Common Issues
 
 **Symptom**: Black textures appear in-game
 - **Cause 1**: Texture permanently rejected as domain-invalid (check `m_permanentlyRejected`)
 - **Cause 2**: Upload not yet complete (texture in `m_pendingUploads`)
 - **Cause 3**: Staging buffer exhausted, upload deferred
-- **Diagnosis**: Enable `vkprintf` logging to see upload status and permanent rejection decisions
+- **Diagnosis**: Run with `-vk_hud_debug` to see upload status and permanent rejection decisions in the log
 
 **Symptom**: Texture corruption or visual artifacts
 - **Cause 1**: Format mismatch between bmpman and Vulkan
@@ -1125,10 +1153,16 @@ Enable `VK_LAYER_KHRONOS_validation` to catch:
 | `VulkanTextureManager.cpp` | Texture manager implementation |
 | `VulkanTextureBindings.h` | Draw-path and upload-path facade APIs |
 | `VulkanTextureId.h` | Strong-typed texture identity (base frame wrapper) |
+| `VulkanDescriptorLayouts.cpp` | Descriptor set layout creation including bindless array binding |
 | `VulkanMovieManager.h` | Movie texture manager definition |
 | `VulkanMovieManager.cpp` | YCbCr movie texture implementation |
 | `VulkanConstants.h` | Bindless slot constants, frames-in-flight |
 | `VulkanDeferredRelease.h` | GPU lifetime management (serial-gated destruction) |
+| `VulkanRenderer.h` | Contains `STAGING_RING_SIZE` constant (12 MiB) |
+
+**Related Documentation**:
+- `docs/VULKAN_TEXTURE_RESIDENCY.md` - Detailed residency state machine, upload batching, and LRU eviction
+- `docs/VULKAN_DESCRIPTOR_SETS.md` - Descriptor set architecture and update patterns
 
 ---
 

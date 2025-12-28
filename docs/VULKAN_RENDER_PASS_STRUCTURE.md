@@ -41,6 +41,7 @@ instead of traditional `VkRenderPass` objects. This design:
 | `VulkanRenderingSession.cpp` | Dynamic rendering, layout transitions, barrier logic |
 | `VulkanRenderTargets.h` | G-buffer, depth, and post-process image ownership |
 | `VulkanRenderTargetInfo.h` | Pipeline-compatible attachment format contract |
+| `VulkanPhaseContexts.h` | Capability tokens (`RenderCtx`, `UploadCtx`, `DeferredGeometryCtx`, etc.) |
 | `VulkanRenderer.cpp` | Deferred lighting pipeline, frame management |
 | `VulkanTextureManager.h/cpp` | Bitmap render target management for RTT |
 
@@ -216,6 +217,38 @@ ping-pong index.
 
 **Usage:** Cockpit displays, cubemap faces, dynamic texture generation.
 
+### Target Introspection and State Query
+
+The rendering session provides methods to query the current target state and rendering status:
+
+```cpp
+// Target introspection (used by VulkanRenderer to pick capture source)
+bool targetIsSceneHdr() const;      // True if current target is SceneHdrWithDepth or SceneHdrNoDepth
+bool targetIsSwapchain() const;     // True if current target is SwapchainWithDepth or SwapchainNoDepth
+const char* debugTargetName() const; // Returns human-readable target name for debugging
+
+// Rendering state
+bool renderingActive() const;       // True if dynamic rendering pass is currently active
+```
+
+**Usage:**
+- `targetIsSceneHdr()` / `targetIsSwapchain()`: Used by the deferred lighting system to determine
+  whether to capture from the scene HDR buffer or the swapchain for pre-deferred emissive content.
+- `debugTargetName()`: Returns strings like `"swapchain+depth"`, `"gbuffer"`, `"bloom_mip"` for
+  debug logging and validation messages.
+- `renderingActive()`: Allows checking if `suspendRendering()` is needed before transfer operations.
+
+### Additional Capture Methods
+
+```cpp
+// Capture swapchain content to a bitmap render target (RTT).
+// No-op if swapchain lacks TRANSFER_SRC usage or target dimensions mismatch.
+void captureSwapchainColorToRenderTarget(vk::CommandBuffer cmd, uint32_t imageIndex, int renderTargetHandle);
+```
+
+This method copies the current swapchain image to a bitmap render target for effects like
+saved-screen captures. The target must have matching dimensions with the swapchain.
+
 ---
 
 ## G-Buffer Specification
@@ -318,6 +351,9 @@ and for deferred lighting/post-processing sampling.
 ### Depth Layout Helpers
 
 ```cpp
+bool depthHasStencil() const;
+// Returns: true if depth format includes stencil (eD32SfloatS8Uint or eD24UnormS8Uint)
+
 vk::ImageLayout depthAttachmentLayout() const;
 // Returns: eDepthStencilAttachmentOptimal (if stencil) or eDepthAttachmentOptimal
 
@@ -329,6 +365,8 @@ vk::ImageAspectFlags depthAttachmentAspectMask() const;
 ```
 
 The layout helpers account for whether the depth format includes a stencil component.
+When the depth format has stencil, the rendering session automatically includes
+stencil attachment info in `vk::RenderingInfo` during `beginRendering()` calls.
 
 ### Depth Sampler
 
@@ -559,6 +597,7 @@ cmd.pipelineBarrier2(dep);
 ```cpp
 // VulkanRenderingSession.h
 std::vector<vk::ImageLayout> m_swapchainLayouts;  // Per swapchain image
+uint64_t m_swapchainGeneration = 0;               // Detects swapchain recreation
 
 // VulkanRenderTargets.h
 std::array<vk::ImageLayout, kGBufferCount> m_gbufferLayouts{};
@@ -569,6 +608,11 @@ SCP_vector<vk::ImageLayout> m_sceneColorLayouts;  // Per swapchain index
 std::array<vk::ImageLayout, kBloomPingPongCount> m_bloomLayouts{};
 // ... and other post-process image layouts
 ```
+
+**Swapchain Recreation Handling:** The rendering session tracks `m_swapchainGeneration`
+(obtained from `VulkanDevice::swapchainGeneration()`) to detect when the swapchain has
+been recreated (e.g., due to window resize). When the generation changes, `beginFrame()`
+resets all swapchain layout tracking to `eUndefined` since the old images are invalid.
 
 ---
 
@@ -735,7 +779,7 @@ VulkanRenderer::beginFrame()
 |
 +-- [Deferred Path - if enabled]
 |   |
-|   +-- VulkanRenderer::beginDeferredLighting(rec, clearNonColorBufs)
+|   +-- VulkanRenderer::deferredLightingBegin(rec, clearNonColorBufs) -> DeferredGeometryCtx
 |   |   |-- captureSwapchainColorToSceneCopy() (if swapchain has TRANSFER_SRC)
 |   |   |   OR transitionSceneHdrToShaderRead() (if scene texture mode)
 |   |   |-- requestGBufferEmissiveTarget() + fullscreen copy
@@ -746,7 +790,7 @@ VulkanRenderer::beginFrame()
 |   |   |-- Record geometry to G-buffer (5 MRT attachments)
 |   |   +-- Decals via requestGBufferAttachmentTarget (per-attachment blending)
 |   |
-|   +-- VulkanRenderer::endDeferredGeometry(cmd)
+|   +-- VulkanRenderer::deferredLightingEnd(rec, geometryCtx) -> DeferredLightingCtx
 |   |   |-- VulkanRenderingSession::endDeferredGeometry(cmd)
 |   |   |   |-- endActivePass()
 |   |   |   |-- transitionGBufferToShaderRead() (includes depth)
@@ -754,10 +798,10 @@ VulkanRenderer::beginFrame()
 |   |   +-- If scene texture mode: requestSceneHdrNoDepthTarget()
 |   |
 |   +-- [Lighting Pass]
-|   |   +-- VulkanRenderer::deferredLightingFinish()
+|   |   +-- VulkanRenderer::deferredLightingFinish(rec, lightingCtx, restoreScissor)
 |   |       |-- bindDeferredGlobalDescriptors() (G-buffer + depth)
 |   |       |-- buildDeferredLights() + recordDeferredLighting()
-|   |       +-- requestMainTargetWithDepth() (restore scene target)
+|   |       +-- requestSwapchainTarget() (restore scene target with depth)
 |
 +-- [Post-Processing - if enabled]
 |   |-- Scene HDR -> shader read
@@ -781,16 +825,25 @@ VulkanRenderer::beginFrame()
 The deferred lighting API uses context types to enforce correct sequencing:
 
 ```cpp
-// VulkanRenderer.h
-struct DeferredGeometryCtx { uint32_t frameIndex; };  // Geometry pass active
-struct DeferredLightingCtx { uint32_t frameIndex; };  // Lighting pass active
+// VulkanPhaseContexts.h - Context token definitions (move-only, friend-constructed)
+struct DeferredGeometryCtx {
+    uint32_t frameIndex = 0;
+    // Move-only, only constructible by VulkanRenderer
+};
+struct DeferredLightingCtx {
+    uint32_t frameIndex = 0;
+    // Move-only, only constructible by VulkanRenderer
+};
 
+// VulkanRenderer.h - Typestate API (begin -> end -> finish)
 DeferredGeometryCtx deferredLightingBegin(RecordingFrame& rec, bool clearNonColorBufs);
 DeferredLightingCtx deferredLightingEnd(RecordingFrame& rec, DeferredGeometryCtx&& geometry);
 void deferredLightingFinish(RecordingFrame& rec, DeferredLightingCtx&& lighting, const vk::Rect2D& restoreScissor);
 ```
 
-Context objects encode the frame index for validation; mismatched contexts trigger assertions.
+Context objects are move-only with private constructors (friend to `VulkanRenderer`), ensuring
+they can only be obtained through the proper API calls. Frame index validation triggers
+assertions on mismatched contexts.
 
 ---
 
@@ -800,6 +853,7 @@ Context objects encode the frame index for validation; mismatched contexts trigg
 |-----------|------|--------------|
 | Target state machine | `VulkanRenderingSession.h` | `RenderTargetState` base class, 12+ target types |
 | Pipeline contract | `VulkanRenderTargetInfo.h` | `RenderTargetInfo` struct |
+| Capability tokens | `VulkanPhaseContexts.h` | `RenderCtx`, `UploadCtx`, `DeferredGeometryCtx`, `DeferredLightingCtx` |
 | RAII pass guard | `VulkanRenderingSession.h` | `ActivePass` struct |
 | Clear operations | `VulkanRenderingSession.h` | `ClearOps` struct |
 | Dynamic rendering | `VulkanRenderingSession.cpp` | `begin*RenderingInternal()` methods |
@@ -807,9 +861,9 @@ Context objects encode the frame index for validation; mismatched contexts trigg
 | Dynamic state | `VulkanRenderingSession.cpp` | `applyDynamicState()` |
 | G-buffer constants | `VulkanRenderTargets.h` | `kGBufferCount`, `kGBufferEmissiveIndex` |
 | Bloom constants | `VulkanRenderTargets.h` | `kBloomPingPongCount`, `kBloomMipLevels` |
-| Depth format selection | `VulkanRenderTargets.cpp` | `findDepthFormat()` |
+| Depth format selection | `VulkanRenderTargets.cpp` | `findDepthFormat()`, `depthHasStencil()` |
 | Image ownership | `VulkanRenderTargets.h` | Memory allocation, layout tracking |
-| Deferred lighting | `VulkanRenderer.cpp` | `deferredLighting*()`, `beginDeferredLighting()` |
+| Deferred lighting | `VulkanRenderer.cpp` | `deferredLightingBegin()`, `deferredLightingEnd()`, `deferredLightingFinish()` |
 | Bitmap RTT | `VulkanTextureManager.h` | Render target management |
 
 ---
