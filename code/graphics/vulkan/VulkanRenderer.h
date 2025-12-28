@@ -59,8 +59,8 @@ public:
   void shutdown();
 
   // New frame flow API - Phase 1
-  graphics::vulkan::RecordingFrame beginRecording();
-  graphics::vulkan::RecordingFrame advanceFrame(graphics::vulkan::RecordingFrame prev);
+  std::optional<graphics::vulkan::RecordingFrame> beginRecording();
+  std::optional<graphics::vulkan::RecordingFrame> advanceFrame(graphics::vulkan::RecordingFrame prev);
 
   void setClearColor(int r, int g, int b);
   int setCullMode(int cull);
@@ -149,9 +149,6 @@ public:
   vk::Pipeline getPipeline(const PipelineKey &key, const ShaderModules &modules, const vertex_layout &layout) const {
     return m_pipelineManager->getPipeline(key, modules, layout);
   }
-  vk::DescriptorSet globalDescriptorSet() const { return m_globalDescriptorSet; }
-  // Updates the global (set=1) descriptor set to point at current G-buffer/depth views.
-  void refreshGlobalDescriptorSet() { bindDeferredGlobalDescriptors(); }
   vk::Buffer getBuffer(gr_buffer_handle handle) const;
   const ExtendedDynamicState3Caps &getExtendedDynamicState3Caps() const { return m_vulkanDevice->extDyn3Caps(); }
   bool supportsExtendedDynamicState3() const { return m_vulkanDevice->supportsExtendedDynamicState3(); }
@@ -207,17 +204,14 @@ private:
   };
 
   RenderCtx ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame &rec); // Recording-only (internal)
-  // Recording-only: flushes any queued bitmap uploads into the current command buffer.
-  // If rendering was active, this will suspend and then resume dynamic rendering to make transfer ops legal.
-  void flushQueuedTextureUploads(const FrameCtx &ctx, bool syncModelDescriptors);
 
   // Deferred implementation details (called by typestate wrapper API)
   void beginDeferredLighting(graphics::vulkan::RecordingFrame &rec, bool clearNonColorBufs); // Recording-only
   void endDeferredGeometry(vk::CommandBuffer cmd);
-  void bindDeferredGlobalDescriptors();
+  void bindDeferredGlobalDescriptors(vk::DescriptorSet dstSet);
   void recordPreDeferredSceneColorCopy(const RenderCtx &render, uint32_t imageIndex);
   void recordPreDeferredSceneHdrCopy(const RenderCtx &render);
-  void recordDeferredLighting(const RenderCtx &render, vk::Buffer uniformBuffer,
+  void recordDeferredLighting(const RenderCtx &render, vk::Buffer uniformBuffer, vk::DescriptorSet globalSet,
                               const std::vector<DeferredLight> &lights);
   void recordTonemappingToSwapchain(const RenderCtx &render, VulkanFrame &frame, bool hdrEnabled);
   void recordBloomBrightPass(const RenderCtx &render, VulkanFrame &frame);
@@ -257,7 +251,6 @@ private:
   void createSmaaLookupTextures(const InitCtx &init);
 
   uint32_t acquireImage(VulkanFrame &frame);
-  uint32_t acquireImageOrThrow(VulkanFrame &frame); // Throws on failure, no sentinels
   void beginFrame(VulkanFrame &frame, uint32_t imageIndex);
   void endFrame(graphics::vulkan::RecordingFrame &rec);              // Recording-only
   void updateSavedScreenCopy(graphics::vulkan::RecordingFrame &rec); // Recording-only
@@ -291,7 +284,6 @@ private:
   std::unique_ptr<VulkanRenderingSession> m_renderingSession;
 
   std::unique_ptr<VulkanDescriptorLayouts> m_descriptorLayouts;
-  vk::DescriptorSet m_globalDescriptorSet{};
 
   std::unique_ptr<VulkanShaderManager> m_shaderManager;
   std::unique_ptr<VulkanPipelineManager> m_pipelineManager;

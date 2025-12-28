@@ -2,6 +2,9 @@
 
 #include "VulkanRenderer.h"
 #include "def_files/def_files.h"
+#define MODEL_SDR_FLAG_MODE_CPP
+#include "def_files/data/effects/model_shader_flags.h"
+#undef MODEL_SDR_FLAG_MODE_CPP
 #include "globalincs/pstypes.h"
 
 #include <atomic>
@@ -39,11 +42,23 @@ ShaderModules VulkanShaderManager::getModules(shader_type type, uint32_t variant
 
   switch (type) {
   case shader_type::SDR_TYPE_MODEL: {
-    // Model path uses a unified shader pair; ignore variant flags for module lookup/cache.
-    key.flags = 0;
+    // Model path uses a unified vertex shader but has two fragment variants:
+    // - Forward/single-attachment: model_forward.frag.spv (location 0 only)
+    // - Deferred/G-buffer: model.frag.spv (locations 0..4)
     const auto vertPath = fs::path(m_shaderRoot) / "model.vert.spv";
-    const auto fragPath = fs::path(m_shaderRoot) / "model.frag.spv";
-    return {loadIfMissing(m_vertexModules, vertPath.string()), loadIfMissing(m_fragmentModules, fragPath.string())};
+
+    // Vertex module is shared.
+    key.flags = 0;
+    const auto vert = loadIfMissing(m_vertexModules, vertPath.string());
+
+    const bool deferred = (variantFlags & MODEL_SDR_FLAG_DEFERRED) != 0;
+    const auto fragPath = fs::path(m_shaderRoot) / (deferred ? "model.frag.spv" : "model_forward.frag.spv");
+
+    // Cache the fragment module by deferred-vs-forward only.
+    key.flags = deferred ? MODEL_SDR_FLAG_DEFERRED : 0;
+    const auto frag = loadIfMissing(m_fragmentModules, fragPath.string());
+
+    return {vert, frag};
   }
   case shader_type::SDR_TYPE_DEFAULT_MATERIAL: {
     const auto vertPath = fs::path(m_shaderRoot) / "default-material.vert.spv";

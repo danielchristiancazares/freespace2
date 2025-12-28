@@ -27,6 +27,8 @@
 #include "graphics/opengl/SmaaAreaTex.h"
 #include "graphics/opengl/SmaaSearchTex.h"
 
+#include <SDL_video.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -38,6 +40,24 @@
 
 namespace graphics {
 namespace vulkan {
+
+namespace {
+vk::Extent2D querySwapchainRecreateExtent(const VulkanDevice &device) {
+  auto extent = device.swapchainExtent();
+  SDL_Window *window = os::getSDLMainWindow();
+  if (!window) {
+    return extent;
+  }
+  int width = 0;
+  int height = 0;
+  SDL_GetWindowSize(window, &width, &height);
+  if (width > 0 && height > 0) {
+    extent.width = static_cast<uint32_t>(width);
+    extent.height = static_cast<uint32_t>(height);
+  }
+  return extent;
+}
+} // namespace
 
 VulkanRenderer::VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsOps)
     : m_vulkanDevice(std::make_unique<VulkanDevice>(std::move(graphicsOps))) {}
@@ -97,13 +117,15 @@ void VulkanRenderer::createDescriptorResources() {
   EnsurePushDescriptorSupport(m_vulkanDevice->features14());
 
   m_descriptorLayouts = std::make_unique<VulkanDescriptorLayouts>(m_vulkanDevice->device());
-  m_globalDescriptorSet = m_descriptorLayouts->allocateGlobalSet();
 }
 
 void VulkanRenderer::createFrames() {
   const auto &props = m_vulkanDevice->properties();
   m_availableFrames.clear();
   for (size_t i = 0; i < kFramesInFlight; ++i) {
+    vk::DescriptorSet globalSet = m_descriptorLayouts->allocateGlobalSet();
+    Assertion(globalSet, "Failed to allocate global descriptor set for frame %zu", i);
+
     vk::DescriptorSet modelSet = m_descriptorLayouts->allocateModelDescriptorSet();
     Assertion(modelSet, "Failed to allocate model descriptor set for frame %zu", i);
 
@@ -111,7 +133,7 @@ void VulkanRenderer::createFrames() {
         m_vulkanDevice->device(), static_cast<uint32_t>(i), m_vulkanDevice->graphicsQueueIndex(),
         m_vulkanDevice->memoryProperties(), UNIFORM_RING_SIZE, props.limits.minUniformBufferOffsetAlignment,
         VERTEX_RING_SIZE, m_vulkanDevice->vertexBufferAlignment(), STAGING_RING_SIZE,
-        props.limits.optimalBufferCopyOffsetAlignment, modelSet);
+        props.limits.optimalBufferCopyOffsetAlignment, globalSet, modelSet);
 
     // Newly created frames haven't been submitted yet; completedSerial is whatever we last observed.
     m_availableFrames.push_back(AvailableFrame{m_frames[i].get(), m_completedSerial});
@@ -207,7 +229,7 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame &frame) {
   auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
 
   if (result.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
+    const auto extent = querySwapchainRecreateExtent(*m_vulkanDevice);
     if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
       // Swapchain recreation failed - cannot recover
       return std::numeric_limits<uint32_t>::max();
@@ -225,32 +247,6 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame &frame) {
 
   if (!result.success) {
     return std::numeric_limits<uint32_t>::max();
-  }
-
-  return result.imageIndex;
-}
-
-uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame &frame) {
-  auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-
-  if (result.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
-    if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      throw std::runtime_error("acquireImageOrThrow: swapchain recreation failed");
-    }
-    // Recreate render targets that depend on swapchain size
-    m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
-
-    // Retry acquire after successful recreation
-    result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
-    if (!result.success) {
-      throw std::runtime_error("acquireImageOrThrow: acquire failed after swapchain recreation");
-    }
-    return result.imageIndex;
-  }
-
-  if (!result.success) {
-    throw std::runtime_error("acquireImageOrThrow: acquire failed");
   }
 
   return result.imageIndex;
@@ -307,6 +303,10 @@ void VulkanRenderer::beginFrame(VulkanFrame &frame, uint32_t imageIndex) {
   // Ensure vertex heap buffer exists and sync descriptors
   vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
   beginModelDescriptorSync(frame, frame.frameIndex(), vertexHeapBuffer);
+
+  // Update the per-frame global descriptor set once at the frame boundary.
+  // Do not mutate it again mid-frame (descriptor sets are not UPDATE_AFTER_BIND).
+  bindDeferredGlobalDescriptors(frame.globalDescriptorSet());
 
   // Setup swapchain/depth barriers and reset render state for the new frame
   m_renderingSession->beginFrame(cmd, imageIndex);
@@ -392,8 +392,11 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   waitSemaphore.semaphore = frame.imageAvailable();
   waitSemaphore.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 
+  vk::Semaphore renderFinished = m_vulkanDevice->swapchainRenderFinishedSemaphore(imageIndex);
+  Assertion(renderFinished, "Missing render-finished semaphore for swapchain image %u", imageIndex);
+
   vk::SemaphoreSubmitInfo signalSemaphores[2];
-  signalSemaphores[0].semaphore = frame.renderFinished();
+  signalSemaphores[0].semaphore = renderFinished;
   signalSemaphores[0].stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 
   signalSemaphores[1].semaphore = m_submitTimeline.get();
@@ -425,10 +428,10 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
 #endif
 
   // Present the frame
-  auto presentResult = m_vulkanDevice->present(frame.renderFinished(), imageIndex);
+  auto presentResult = m_vulkanDevice->present(renderFinished, imageIndex);
 
   if (presentResult.needsRecreate) {
-    const auto extent = m_vulkanDevice->swapchainExtent();
+    const auto extent = querySwapchainRecreateExtent(*m_vulkanDevice);
     if (m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
       m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
     }
@@ -487,16 +490,21 @@ VulkanRenderer::AvailableFrame VulkanRenderer::acquireAvailableFrame() {
   return af;
 }
 
-graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording() {
+std::optional<graphics::vulkan::RecordingFrame> VulkanRenderer::beginRecording() {
   auto af = acquireAvailableFrame();
 
-  const uint32_t imageIndex = acquireImageOrThrow(*af.frame);
+  const uint32_t imageIndex = acquireImage(*af.frame);
+  if (imageIndex == std::numeric_limits<uint32_t>::max()) {
+    // Swapchain not ready (minimized/out-of-date) or acquisition failed; keep the frame available.
+    m_availableFrames.push_front(af);
+    return std::nullopt;
+  }
   beginFrame(*af.frame, imageIndex);
 
   return graphics::vulkan::RecordingFrame{*af.frame, imageIndex};
 }
 
-graphics::vulkan::RecordingFrame VulkanRenderer::advanceFrame(graphics::vulkan::RecordingFrame prev) {
+std::optional<graphics::vulkan::RecordingFrame> VulkanRenderer::advanceFrame(graphics::vulkan::RecordingFrame prev) {
   endFrame(prev);
   auto submit = submitRecordedFrame(prev);
 
@@ -558,42 +566,6 @@ void VulkanRenderer::popDebugGroup(const FrameCtx &ctx) {
 RenderCtx VulkanRenderer::ensureRenderingStartedRecording(graphics::vulkan::RecordingFrame &rec) {
   auto info = m_renderingSession->ensureRendering(rec.cmd(), rec.imageIndex);
   return RenderCtx{rec.cmd(), info};
-}
-
-void VulkanRenderer::flushQueuedTextureUploads(const FrameCtx &ctx, bool syncModelDescriptors) {
-  if (!m_textureUploader || !m_textureManager) {
-    return;
-  }
-
-  vk::CommandBuffer cmd = ctx.m_recording.cmd();
-  if (!cmd) {
-    return;
-  }
-
-  const bool wasRenderingActive = (m_renderingSession && m_renderingSession->renderingActive());
-
-  // Transfer operations are invalid inside dynamic rendering.
-  if (m_renderingSession) {
-    m_renderingSession->suspendRendering();
-  }
-
-  const UploadCtx uploadCtx{ctx.m_recording.ref(), cmd, m_frameCounter};
-  m_textureUploader->flushPendingUploads(uploadCtx);
-
-  if (syncModelDescriptors) {
-    // Newly resident textures and/or new bindless slot assignments must be visible this frame.
-    Assertion(m_bufferManager != nullptr, "flushQueuedTextureUploads requires buffer manager");
-    Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
-    vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
-    if (static_cast<VkBuffer>(vertexHeapBuffer) != VK_NULL_HANDLE) {
-      beginModelDescriptorSync(ctx.m_recording.ref(), ctx.m_recording.ref().frameIndex(), vertexHeapBuffer);
-    }
-  }
-
-  // Restore rendering state if we suspended an active pass; this preserves existing RenderCtx tokens.
-  if (wasRenderingActive) {
-    (void)ensureRenderingStartedRecording(ctx.m_recording);
-  }
 }
 
 void VulkanRenderer::beginDeferredLighting(graphics::vulkan::RecordingFrame &rec, bool clearNonColorBufs) {
@@ -1070,7 +1042,6 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame &re
             "deferredLightingFinish called with mismatched frameIndex (got %u, expected %u)", lighting.frameIndex,
             m_frameCounter);
 
-  bindDeferredGlobalDescriptors();
   VulkanFrame &frame = rec.ref();
   vk::Buffer uniformBuffer = frame.uniformBuffer().buffer();
 
@@ -1081,7 +1052,7 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame &re
   if (!lights.empty()) {
     // Activate swapchain rendering without depth (target set by endDeferredGeometry).
     auto render = ensureRenderingStartedRecording(rec);
-    recordDeferredLighting(render, uniformBuffer, lights);
+    recordDeferredLighting(render, uniformBuffer, rec.ref().globalDescriptorSet(), lights);
   }
 
   vk::CommandBuffer cmd = rec.cmd();
@@ -1091,7 +1062,8 @@ void VulkanRenderer::deferredLightingFinish(graphics::vulkan::RecordingFrame &re
   requestMainTargetWithDepth();
 }
 
-void VulkanRenderer::bindDeferredGlobalDescriptors() {
+void VulkanRenderer::bindDeferredGlobalDescriptors(vk::DescriptorSet dstSet) {
+  Assertion(dstSet, "bindDeferredGlobalDescriptors called with null descriptor set");
   std::vector<vk::WriteDescriptorSet> writes;
   std::vector<vk::DescriptorImageInfo> infos;
   writes.reserve(6);
@@ -1107,7 +1079,7 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
     infos.push_back(info);
 
     vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
+    write.dstSet = dstSet;
     write.dstBinding = i;
     write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
     write.descriptorCount = 1;
@@ -1123,7 +1095,7 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
   infos.push_back(depthInfo);
 
   vk::WriteDescriptorSet depthWrite{};
-  depthWrite.dstSet = m_globalDescriptorSet;
+  depthWrite.dstSet = dstSet;
   depthWrite.dstBinding = 3;
   depthWrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
   depthWrite.descriptorCount = 1;
@@ -1140,7 +1112,7 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
     infos.push_back(info);
 
     vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
+    write.dstSet = dstSet;
     write.dstBinding = 4;
     write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
     write.descriptorCount = 1;
@@ -1158,7 +1130,7 @@ void VulkanRenderer::bindDeferredGlobalDescriptors() {
     infos.push_back(info);
 
     vk::WriteDescriptorSet write{};
-    write.dstSet = m_globalDescriptorSet;
+    write.dstSet = dstSet;
     write.dstBinding = 5;
     write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
     write.descriptorCount = 1;
@@ -2413,41 +2385,9 @@ void VulkanRenderer::generateBloomMipmaps(vk::CommandBuffer cmd, uint32_t pingPo
     blit.dstOffsets[0] = vk::Offset3D{0, 0, 0};
     blit.dstOffsets[1] = vk::Offset3D{static_cast<int32_t>(dstW), static_cast<int32_t>(dstH), 1};
 
-    // Make sure destination mip is TRANSFER_DST and source mip is TRANSFER_SRC.
-    {
-      vk::ImageMemoryBarrier2 barriers[2]{};
-
-      barriers[0].srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      barriers[0].srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-      barriers[0].dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      barriers[0].dstAccessMask = vk::AccessFlagBits2::eTransferRead;
-      barriers[0].oldLayout = vk::ImageLayout::eTransferDstOptimal;
-      barriers[0].newLayout = vk::ImageLayout::eTransferSrcOptimal;
-      barriers[0].image = image;
-      barriers[0].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-      barriers[0].subresourceRange.baseMipLevel = mip - 1;
-      barriers[0].subresourceRange.levelCount = 1;
-      barriers[0].subresourceRange.baseArrayLayer = 0;
-      barriers[0].subresourceRange.layerCount = 1;
-
-      barriers[1].srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      barriers[1].srcAccessMask = {};
-      barriers[1].dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-      barriers[1].dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-      barriers[1].oldLayout = vk::ImageLayout::eTransferDstOptimal;
-      barriers[1].newLayout = vk::ImageLayout::eTransferDstOptimal;
-      barriers[1].image = image;
-      barriers[1].subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-      barriers[1].subresourceRange.baseMipLevel = mip;
-      barriers[1].subresourceRange.levelCount = 1;
-      barriers[1].subresourceRange.baseArrayLayer = 0;
-      barriers[1].subresourceRange.layerCount = 1;
-
-      vk::DependencyInfo dep{};
-      dep.imageMemoryBarrierCount = 2;
-      dep.pImageMemoryBarriers = barriers;
-      cmd.pipelineBarrier2(dep);
-    }
+    // Layout invariants for this loop:
+    // - Source mip (mip-1) is already TRANSFER_SRC (mip0 pre-transition, subsequent mips become SRC below)
+    // - Destination mip (mip) is still TRANSFER_DST from the initial "all mips to DST" transition.
 
     cmd.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, image, vk::ImageLayout::eTransferDstOptimal, 1, &blit,
                   filter);
@@ -2634,17 +2574,6 @@ vk::DescriptorImageInfo VulkanRenderer::getTextureDescriptor(const FrameCtx &ctx
   const auto id = TextureId::tryFromBaseFrame(baseFrame);
   Assertion(id.has_value(), "Invalid base frame %d in getTextureDescriptor", baseFrame);
 
-  // Fast path: already resident.
-  auto info = m_textureManager->tryGetResidentDescriptor(*id, samplerKey);
-  if (info.has_value()) {
-    m_textureManager->markTextureUsed(*id, m_frameCounter);
-    return *info;
-  }
-
-  // Slow path: queue the upload and flush immediately so this draw doesn't sample fallback forever
-  // (critical for animations that advance every frame).
-  m_textureManager->queueTextureUpload(*id, m_frameCounter, samplerKey);
-  flushQueuedTextureUploads(ctx, /*syncModelDescriptors=*/false);
   return m_textureBindings->descriptor(*id, m_frameCounter, samplerKey);
 }
 
@@ -2658,9 +2587,6 @@ void VulkanRenderer::beginDecalPass(const FrameCtx &ctx) {
   // Decals sample depth; transitions are invalid inside dynamic rendering.
   m_renderingSession->suspendRendering();
   m_renderingSession->transitionMainDepthToShaderRead(cmd);
-
-  // Decal shaders sample the scene depth via the global (set=1) descriptor set.
-  bindDeferredGlobalDescriptors();
 }
 
 void VulkanRenderer::setViewport(const FrameCtx &ctx, const vk::Viewport &viewport) {
@@ -2787,16 +2713,7 @@ uint32_t VulkanRenderer::getBindlessTextureIndex(const FrameCtx &ctx, int bitmap
     return kBindlessTextureSlotFallback;
   }
 
-  const bool wasResident = m_textureManager->isResident(*id);
-  const uint32_t slot = m_textureBindings->bindlessIndex(*id, m_frameCounter);
-
-  if (!wasResident) {
-    // Critical for animated textures: upload + re-sync descriptors now so this draw doesn't sample fallback forever.
-    flushQueuedTextureUploads(ctx, /*syncModelDescriptors=*/true);
-    return m_textureBindings->bindlessIndex(*id, m_frameCounter);
-  }
-
-  return slot;
+  return m_textureBindings->bindlessIndex(*id, m_frameCounter);
 }
 
 void VulkanRenderer::setModelUniformBinding(VulkanFrame &frame, gr_buffer_handle handle, size_t offset, size_t size) {
@@ -2884,7 +2801,9 @@ void VulkanRenderer::updateModelDescriptors(uint32_t frameIndex, vk::DescriptorS
   vk::DescriptorBufferInfo transformInfo{};
   transformInfo.buffer = transformBuffer;
   transformInfo.offset = 0;
-  transformInfo.range = VK_WHOLE_SIZE;
+  // Dynamic offsets are only valid when the descriptor range is not VK_WHOLE_SIZE.
+  // This binding is indexed via per-draw dynamic offsets into the per-frame vertex ring.
+  transformInfo.range = VERTEX_RING_SIZE;
 
   vk::WriteDescriptorSet transformWrite{};
   transformWrite.dstSet = set;
@@ -3516,9 +3435,10 @@ void VulkanRenderer::createSmaaLookupTextures(const InitCtx &init) {
 }
 
 void VulkanRenderer::recordDeferredLighting(const RenderCtx &render, vk::Buffer uniformBuffer,
-                                            const std::vector<DeferredLight> &lights) {
+                                            vk::DescriptorSet globalSet, const std::vector<DeferredLight> &lights) {
   vk::CommandBuffer cmd = render.cmd;
   Assertion(cmd, "recordDeferredLighting called with null command buffer");
+  Assertion(globalSet, "recordDeferredLighting called with null global descriptor set");
 
   // Deferred lighting pass owns full-screen viewport/scissor and disables depth.
   {
@@ -3584,7 +3504,7 @@ void VulkanRenderer::recordDeferredLighting(const RenderCtx &render, vk::Buffer 
 
   // Bind global (set=1) deferred descriptor set using the *deferred* pipeline layout.
   // Binding via the standard pipeline layout is not descriptor-set compatible because set 0 differs.
-  cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, ctx.layout, 1, 1, &m_globalDescriptorSet, 0, nullptr);
+  cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, ctx.layout, 1, 1, &globalSet, 0, nullptr);
 
   vk::Buffer fullscreenVB = m_bufferManager->getBuffer(m_fullscreenMesh.vbo);
   vk::Buffer sphereVB = m_bufferManager->getBuffer(m_sphereMesh.vbo);

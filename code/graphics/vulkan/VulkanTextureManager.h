@@ -135,6 +135,8 @@ public:
   // Residency / usage tracking.
   [[nodiscard]] bool isResident(TextureId id) const;
   void markTextureUsed(TextureId id, uint32_t currentFrameIndex);
+  // Debug: record HUD textures that were drawn while non-resident (for -vk_hud_debug).
+  void markHudTextureMissing(TextureId id);
 
   // Get descriptor for a resident texture. Absence is represented as std::nullopt (no fake inhabitant).
   [[nodiscard]] std::optional<vk::DescriptorImageInfo> tryGetResidentDescriptor(TextureId id,
@@ -222,6 +224,8 @@ private:
   };
 
   void processPendingRetirements();
+  bool shouldLogHudDebug(int baseFrame) const;
+  bool logHudDebugOnce(int baseFrame, uint32_t flag);
 
   struct RenderTargetRecord {
     vk::Extent2D extent{};
@@ -283,6 +287,8 @@ private:
       m_pendingRetirements; // textures to retire at the next upload-phase flush (slot reuse safe point)
   mutable std::unordered_map<SamplerKey, vk::UniqueSampler, SamplerKeyHash> m_samplerCache;
   PendingUploadQueue m_pendingUploads;
+  std::unordered_set<int> m_hudDebugMissing;
+  std::unordered_map<int, uint32_t> m_hudDebugLogFlags;
 
   uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const;
   void createDefaultSampler();
@@ -290,6 +296,9 @@ private:
   vk::Sampler getOrCreateSampler(const SamplerKey &key) const;
   bool uploadImmediate(TextureId id, bool isAABitmap);
   VulkanTexture createSolidTexture(const uint8_t rgba[4]);
+  [[nodiscard]] VulkanTexture &renderTargetGpuOrAssert(int baseFrameHandle, const char *caller);
+  void transitionRenderTargetToLayout(vk::CommandBuffer cmd, int baseFrameHandle, vk::ImageLayout newLayout,
+                                      const char *caller);
   void createFallbackTexture();
   void createDefaultTexture();
   void createDefaultNormalTexture();

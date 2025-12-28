@@ -75,22 +75,25 @@ VulkanRenderer &currentRenderer() {
   return *g_backend->renderer;
 }
 
-VulkanFrame &currentFrame() {
-  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
-  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
-  return g_backend->recording->ref();
+VulkanFrame *maybeCurrentFrame() {
+  if (!g_backend || !g_backend->recording.has_value()) {
+    return nullptr;
+  }
+  return &g_backend->recording->ref();
 }
 
-RecordingFrame &currentRecording() {
-  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
-  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
-  return *g_backend->recording;
+[[maybe_unused]] RecordingFrame *maybeCurrentRecording() {
+  if (!g_backend || !g_backend->recording.has_value()) {
+    return nullptr;
+  }
+  return &(*g_backend->recording);
 }
 
-FrameCtx currentFrameCtx() {
-  Assertion(g_backend != nullptr, "Vulkan backend must be initialized before use");
-  Assertion(g_backend->recording.has_value(), "Recording not started - flip() must be called first");
-  return FrameCtx{*g_backend->renderer, currentRecording()};
+std::optional<FrameCtx> maybeCurrentFrameCtx() {
+  if (!g_backend || !g_backend->recording.has_value()) {
+    return std::nullopt;
+  }
+  return FrameCtx{*g_backend->renderer, *g_backend->recording};
 }
 
 float clampLineWidth(const VkPhysicalDeviceLimits &limits, float requestedWidth) {
@@ -254,7 +257,11 @@ gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage)
 // Begin a new frame for rendering and set initial dynamic state.
 // Called immediately after flip() via gr_setup_frame() per API contract.
 void gr_vulkan_setup_frame() {
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto &renderer = ctxBase.renderer;
 
   VulkanFrame &frame = ctxBase.frame();
@@ -287,18 +294,21 @@ void gr_vulkan_delete_buffer(gr_buffer_handle handle) { currentRenderer().delete
 static void gr_vulkan_bind_uniform_buffer(uniform_block_type type, size_t offset, size_t size,
                                           gr_buffer_handle handle) {
   auto &renderer = currentRenderer();
-  auto &frame = currentFrame();
+  auto *frame = maybeCurrentFrame();
+  if (!frame) {
+    return;
+  }
 
   if (type == uniform_block_type::ModelData) {
-    renderer.setModelUniformBinding(frame, handle, offset, size);
+    renderer.setModelUniformBinding(*frame, handle, offset, size);
   } else if (type == uniform_block_type::NanoVGData) {
-    frame.nanovgData = {handle, offset, size};
+    frame->nanovgData = {handle, offset, size};
   } else if (type == uniform_block_type::DecalGlobals) {
-    frame.decalGlobalsData = {handle, offset, size};
+    frame->decalGlobalsData = {handle, offset, size};
   } else if (type == uniform_block_type::DecalInfo) {
-    frame.decalInfoData = {handle, offset, size};
+    frame->decalInfoData = {handle, offset, size};
   } else if (type == uniform_block_type::Matrices) {
-    renderer.setSceneUniformBinding(frame, handle, offset, size);
+    renderer.setSceneUniformBinding(*frame, handle, offset, size);
   } else {
     // Keep running but make it noisy so the offending path gets fixed.
     return;
@@ -364,7 +374,11 @@ void gr_vulkan_reset_clip() {
   // Keep Vulkan dynamic scissor in sync with the engine clip state for subsequent draws (including model draws
   // which do not currently set scissor themselves).
   if (g_backend && g_backend->recording.has_value()) {
-    auto ctxBase = currentFrameCtx();
+    auto ctxBaseOpt = maybeCurrentFrameCtx();
+    if (!ctxBaseOpt.has_value()) {
+      return;
+    }
+    auto ctxBase = *ctxBaseOpt;
     vk::Rect2D scissor = createClipScissor();
     ctxBase.renderer.setScissor(ctxBase, scissor);
   }
@@ -405,12 +419,13 @@ void gr_vulkan_resize_buffer(gr_buffer_handle handle, size_t size) { currentRend
 void gr_vulkan_update_transform_buffer(void *data, size_t size) {
   // Upload batched model transforms into per-frame transient storage.
   // Shader indexing uses uModel.buffer_matrix_offset + vertModelID (see model.vert).
-  Assertion(g_backend != nullptr && g_backend->renderer != nullptr, "update_transform_buffer called without backend");
-  Assertion(g_backend->recording.has_value(),
-            "update_transform_buffer called without active recording; gr_flip/gr_setup_frame must run first");
   Assertion(data != nullptr, "update_transform_buffer called with null data");
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   VulkanFrame &frame = ctxBase.frame();
 
   frame.modelTransformDynamicOffset = 0;
@@ -452,7 +467,11 @@ void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode) {
 
   // Apply the updated clip as dynamic scissor state.
   if (g_backend && g_backend->recording.has_value()) {
-    auto ctxBase = currentFrameCtx();
+    auto ctxBaseOpt = maybeCurrentFrameCtx();
+    if (!ctxBaseOpt.has_value()) {
+      return;
+    }
+    auto ctxBase = *ctxBaseOpt;
     vk::Rect2D scissor = createClipScissor();
     ctxBase.renderer.setScissor(ctxBase, scissor);
   }
@@ -464,7 +483,11 @@ void gr_vulkan_set_viewport(int x, int y, int width, int height) {
   if (!g_backend || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
 
   vk::Viewport viewport{};
   viewport.x = static_cast<float>(x);
@@ -552,7 +575,11 @@ void gr_vulkan_post_process_save_zbuffer() {
   if (!g_backend || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
 
   // Switch to cockpit depth and clear it. Transfers are invalid inside dynamic rendering so we end any active pass.
   if (auto *session = ctxBase.renderer.renderingSession()) {
@@ -570,7 +597,11 @@ void gr_vulkan_post_process_restore_zbuffer() {
     return;
   }
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   if (auto *session = ctxBase.renderer.renderingSession()) {
     session->useMainDepthAttachment();
   }
@@ -598,7 +629,11 @@ void gr_vulkan_scene_texture_begin() {
   const bool enableHdrPipeline = Gr_post_processing_enabled && !PostProcessing_override;
   High_dynamic_range = enableHdrPipeline;
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.beginSceneTexture(ctxBase, enableHdrPipeline);
 }
 
@@ -608,7 +643,11 @@ void gr_vulkan_scene_texture_end() {
   }
 
   const bool enablePostProcessing = Gr_post_processing_enabled && !PostProcessing_override;
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.endSceneTexture(ctxBase, enablePostProcessing);
 
   // Reset per-frame HDR flag (OpenGL parity).
@@ -619,7 +658,11 @@ void gr_vulkan_copy_effect_texture() {
   if (!g_backend || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.copySceneEffectTexture(ctxBase);
 }
 
@@ -632,7 +675,9 @@ void gr_vulkan_deferred_lighting_begin(bool clearNonColorBufs) {
   Assertion(light_deferred_enabled(), "Deferred lighting begin called while deferred lighting is disabled");
 
   Assertion(g_backend != nullptr, "Deferred lighting begin called without backend");
-  Assertion(g_backend->recording.has_value(), "Deferred lighting begin called without active recording");
+  if (!g_backend->recording.has_value()) {
+    return;
+  }
   Assertion(std::holds_alternative<std::monostate>(g_backend->deferred),
             "Deferred lighting begin called while deferred lighting is already active");
 
@@ -646,7 +691,9 @@ void gr_vulkan_deferred_lighting_msaa() {
 
 void gr_vulkan_deferred_lighting_end() {
   Assertion(g_backend != nullptr, "Deferred lighting end called without backend");
-  Assertion(g_backend->recording.has_value(), "Deferred lighting end called without active recording");
+  if (!g_backend->recording.has_value()) {
+    return;
+  }
   auto *geometry = std::get_if<DeferredGeometryCtx>(&g_backend->deferred);
   Assertion(geometry != nullptr, "Deferred lighting end called without a matching begin");
 
@@ -656,7 +703,9 @@ void gr_vulkan_deferred_lighting_end() {
 
 void gr_vulkan_deferred_lighting_finish() {
   Assertion(g_backend != nullptr, "Deferred lighting finish called without backend");
-  Assertion(g_backend->recording.has_value(), "Deferred lighting finish called without active recording");
+  if (!g_backend->recording.has_value()) {
+    return;
+  }
   auto *lighting = std::get_if<DeferredLightingCtx>(&g_backend->deferred);
   Assertion(lighting != nullptr, "Deferred lighting finish called without a matching end");
 
@@ -674,7 +723,11 @@ void gr_vulkan_update_texture(int bitmap_handle, int bpp, const ubyte *data, int
   if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.updateTexture(ctxBase, bitmap_handle, bpp, data, width, height);
 }
 
@@ -691,7 +744,11 @@ void gr_vulkan_movie_texture_upload(MovieTextureHandle handle, const ubyte *y, i
   if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.uploadMovieTexture(ctxBase, handle, y, y_stride, u, u_stride, v, v_stride);
 }
 
@@ -699,7 +756,11 @@ void gr_vulkan_movie_texture_draw(MovieTextureHandle handle, float x1, float y1,
   if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.drawMovieTexture(ctxBase, handle, x1, y1, x2, y2, alpha);
 }
 
@@ -723,7 +784,11 @@ int gr_vulkan_bm_set_render_target(int n, int face) {
   if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
     return 0;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return 0;
+  }
+  auto ctxBase = *ctxBaseOpt;
   return ctxBase.renderer.setBitmapRenderTarget(ctxBase, n, face) ? 1 : 0;
 }
 
@@ -781,7 +846,11 @@ static void gr_vulkan_start_decal_pass() {
   Assertion(std::holds_alternative<DeferredGeometryCtx>(g_backend->deferred),
             "Vulkan decal pass requires deferred geometry to be active");
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.beginDecalPass(ctxBase);
 }
 
@@ -789,7 +858,11 @@ static void gr_vulkan_stop_decal_pass() {
   if (g_backend == nullptr || g_backend->renderer == nullptr || !g_backend->recording.has_value()) {
     return;
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto *session = ctxBase.renderer.renderingSession();
   if (!session) {
     return;
@@ -954,7 +1027,11 @@ static void gr_vulkan_render_decals(decal_material *material_info, primitive_typ
     return;
   }
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto bound = requireDecalBound(ctxBase);
 
   // Ensure decal shaders are available (Vulkan-only, filename-based).
@@ -1042,7 +1119,11 @@ void gr_vulkan_render_model(model_material *material_info, indexed_vertex_source
   Assertion(texi < bufferp->tex_buf.size(), "render_model called with invalid texi %zu (size=%zu)", texi,
             bufferp->tex_buf.size());
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto bound = requireModelBound(ctxBase);
   ctxBase.renderer.incrementModelDraw();
 
@@ -1217,7 +1298,11 @@ void gr_vulkan_render_shield_impact(shield_material *material_info, primitive_ty
   Assertion(n_verts > 0, "render_shield_impact called with zero vertices");
   Assertion(buffer_handle.isValid(), "render_shield_impact called with invalid buffer handle");
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto &frame = ctxBase.frame();
   ctxBase.renderer.incrementPrimDraw();
 
@@ -1398,7 +1483,11 @@ void gr_vulkan_render_primitives(material *material_info, primitive_type prim_ty
   Assertion(layout != nullptr, "render_primitives called with null vertex layout");
   Assertion(n_verts > 0, "render_primitives called with zero vertices");
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto &frame = ctxBase.frame();
   ctxBase.renderer.incrementPrimDraw();
 
@@ -1718,7 +1807,11 @@ void gr_vulkan_render_nanovg(nanovg_material *material_info, primitive_type prim
   Assertion(n_verts > 0, "render_nanovg called with zero vertices");
   Assertion(buffer_handle.isValid(), "render_nanovg called with invalid vertex buffer handle");
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto nv = requireNanoVGBound(ctxBase);
   ctxBase.renderer.incrementPrimDraw();
 
@@ -1865,7 +1958,11 @@ void gr_vulkan_render_primitives_batched(batched_bitmap_material *material_info,
   Assertion(layout != nullptr, "render_primitives_batched called with null vertex layout");
   Assertion(n_verts > 0, "render_primitives_batched called with zero vertices");
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto &frame = ctxBase.frame();
   ctxBase.renderer.incrementPrimDraw();
 
@@ -2052,7 +2149,12 @@ void gr_vulkan_render_rocket_primitives(interface_material *material_info, primi
   // RocketUI expects 2D projection in gr_projection_matrix
   gr_set_2d_matrix();
 
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    gr_end_2d_matrix();
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   auto &frame = ctxBase.frame();
   ctxBase.renderer.incrementPrimDraw();
 
@@ -2196,7 +2298,11 @@ void gr_vulkan_push_debug_group(const char *name) {
   if (!g_backend || !g_backend->recording.has_value()) {
     return; // No-op if not recording yet
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.pushDebugGroup(ctxBase, name);
 }
 
@@ -2204,7 +2310,11 @@ void gr_vulkan_pop_debug_group() {
   if (!g_backend || !g_backend->recording.has_value()) {
     return; // No-op if not recording yet
   }
-  auto ctxBase = currentFrameCtx();
+  auto ctxBaseOpt = maybeCurrentFrameCtx();
+  if (!ctxBaseOpt.has_value()) {
+    return;
+  }
+  auto ctxBase = *ctxBaseOpt;
   ctxBase.renderer.popDebugGroup(ctxBase);
 }
 
@@ -2251,7 +2361,11 @@ void init_function_pointers() {
       return;
     }
 
-    auto ctxBase = currentFrameCtx();
+    auto ctxBaseOpt = maybeCurrentFrameCtx();
+    if (!ctxBaseOpt.has_value()) {
+      return;
+    }
+    auto ctxBase = *ctxBaseOpt;
 
     // vkCmdClearAttachments is only valid inside a render pass instance / dynamic rendering.
     // ensureRenderingStarted() is the capability token that proves we're in one.
