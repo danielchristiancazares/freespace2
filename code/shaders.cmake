@@ -36,6 +36,7 @@ set(LEGACY_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/def_files/data/effects")
 			${SHADER_DIR}/movie.frag
 			${SHADER_DIR}/movie.vert
 			${SHADER_DIR}/model.frag
+			${SHADER_DIR}/model_forward.frag
 			${SHADER_DIR}/model.vert
 			${SHADER_DIR}/deferred.frag
 			${SHADER_DIR}/deferred.vert

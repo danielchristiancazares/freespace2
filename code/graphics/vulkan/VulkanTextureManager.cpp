@@ -3,6 +3,7 @@
 
 #include "bmpman/bm_internal.h"
 #include "bmpman/bmpman.h"
+#include "cmdline/cmdline.h"
 #include "osapi/outwnd.h"
 
 #include <algorithm>
@@ -14,6 +15,14 @@
 namespace graphics {
 namespace vulkan {
 namespace {
+
+constexpr uint32_t kHudLogQueued = 1u << 0u;
+constexpr uint32_t kHudLogUploadOk = 1u << 1u;
+constexpr uint32_t kHudLogReject = 1u << 2u;
+constexpr uint32_t kHudLogBmLockFail = 1u << 3u;
+constexpr uint32_t kHudLogDeferBudget = 1u << 4u;
+constexpr uint32_t kHudLogDeferAlloc = 1u << 5u;
+constexpr uint32_t kHudLogReleased = 1u << 6u;
 
 vk::Format selectFormat(const bitmap &bmp) {
   if (bmp.flags & BMP_TEX_DXT1) {
@@ -645,19 +654,28 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
 
     const auto pending = m_pendingUploads.takeAll();
     for (const TextureId id : pending) {
+      const int baseFrame = id.baseFrame();
+      const bool logHud = shouldLogHudDebug(baseFrame);
       if (isResident(id)) {
         continue;
       }
       if (m_permanentlyRejected.find(id) != m_permanentlyRejected.end()) {
+        if (logHud && logHudDebugOnce(baseFrame, kHudLogReject)) {
+          const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+          mprintf(("VK_HUD_DEBUG: upload skipped (permanently rejected) base=%d name=%s\n", baseFrame,
+                   name ? name : "unknown"));
+        }
         continue;
       }
 
-      const int baseFrame = id.baseFrame();
       int numFrames = 1;
       const int resolvedBase = bm_get_base_frame(baseFrame, &numFrames);
       if (resolvedBase < 0) {
         // bmpman released this handle; releaseBitmap() should have removed it from the queue,
         // but handle it defensively to prevent poisoning.
+        if (logHud && logHudDebugOnce(baseFrame, kHudLogReleased)) {
+          mprintf(("VK_HUD_DEBUG: upload skipped (bmpman released) base=%d\n", baseFrame));
+        }
         continue;
       }
 
@@ -670,6 +688,11 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
       auto *bmp0 = bm_lock(baseFrame, 32, flags);
       if (!bmp0) {
         // Transient failure: do not cache. Caller will re-request if needed.
+        if (logHud && logHudDebugOnce(baseFrame, kHudLogBmLockFail)) {
+          const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+          mprintf(
+              ("VK_HUD_DEBUG: upload deferred (bm_lock failed) base=%d name=%s\n", baseFrame, name ? name : "unknown"));
+        }
         continue;
       }
 
@@ -696,6 +719,11 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
 
       if (!validArray) {
         // Domain invalid under current algorithm - do not retry automatically.
+        if (logHud && logHudDebugOnce(baseFrame, kHudLogReject)) {
+          const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+          mprintf(
+              ("VK_HUD_DEBUG: upload rejected (array mismatch) base=%d name=%s\n", baseFrame, name ? name : "unknown"));
+        }
         m_permanentlyRejected.insert(id);
         continue;
       }
@@ -710,11 +738,23 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
 
       // Textures that can never fit in the staging buffer are outside the supported domain for this upload algorithm.
       if (static_cast<vk::DeviceSize>(totalUploadSize) > stagingBudget) {
+        if (logHud && logHudDebugOnce(baseFrame, kHudLogReject)) {
+          const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+          mprintf(("VK_HUD_DEBUG: upload rejected (staging too small) base=%d name=%s size=%zu budget=%llu\n",
+                   baseFrame, name ? name : "unknown", totalUploadSize,
+                   static_cast<unsigned long long>(stagingBudget)));
+        }
         m_permanentlyRejected.insert(id);
         continue;
       }
 
       if (stagingUsed + static_cast<vk::DeviceSize>(totalUploadSize) > stagingBudget) {
+        if (logHud && logHudDebugOnce(baseFrame, kHudLogDeferBudget)) {
+          const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+          mprintf(("VK_HUD_DEBUG: upload deferred (staging budget) base=%d name=%s size=%zu used=%llu budget=%llu\n",
+                   baseFrame, name ? name : "unknown", totalUploadSize, static_cast<unsigned long long>(stagingUsed),
+                   static_cast<unsigned long long>(stagingBudget)));
+        }
         (void)remaining.enqueue(id);
         continue; // defer to next frame
       }
@@ -738,6 +778,11 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
         auto allocOpt = frame.stagingBuffer().try_allocate(static_cast<vk::DeviceSize>(layerSize));
         if (!allocOpt) {
           // Staging buffer exhausted - defer to next frame.
+          if (logHud && logHudDebugOnce(baseFrame, kHudLogDeferAlloc)) {
+            const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+            mprintf(("VK_HUD_DEBUG: upload deferred (staging alloc failed) base=%d name=%s\n", baseFrame,
+                     name ? name : "unknown"));
+          }
           bm_unlock(frameHandle);
           (void)remaining.enqueue(id);
           stagingFailed = true;
@@ -877,6 +922,11 @@ void VulkanTextureManager::flushPendingUploads(const UploadCtx &ctx) {
       record.usage.lastUsedSerial = m_safeRetireSerial;
 
       m_bitmaps.emplace(id, std::move(record));
+      if (logHud && logHudDebugOnce(baseFrame, kHudLogUploadOk)) {
+        const char *name = bm_is_valid(baseFrame) ? bm_get_filename(baseFrame) : "invalid";
+        mprintf(("VK_HUD_DEBUG: upload ok base=%d name=%s layers=%u format=%d\n", baseFrame, name ? name : "unknown",
+                 layers, static_cast<int>(format)));
+      }
     }
 
     m_pendingUploads = std::move(remaining);
@@ -1244,6 +1294,21 @@ void VulkanTextureManager::markTextureUsed(TextureId id, uint32_t currentFrameIn
   }
 }
 
+void VulkanTextureManager::markHudTextureMissing(TextureId id) { m_hudDebugMissing.insert(id.baseFrame()); }
+
+bool VulkanTextureManager::shouldLogHudDebug(int baseFrame) const {
+  return Cmdline_vk_hud_debug && (m_hudDebugMissing.find(baseFrame) != m_hudDebugMissing.end());
+}
+
+bool VulkanTextureManager::logHudDebugOnce(int baseFrame, uint32_t flag) {
+  auto &mask = m_hudDebugLogFlags[baseFrame];
+  if ((mask & flag) != 0u) {
+    return false;
+  }
+  mask |= flag;
+  return true;
+}
+
 std::optional<vk::DescriptorImageInfo>
 VulkanTextureManager::tryGetResidentDescriptor(TextureId id, const SamplerKey &samplerKey) const {
   const VulkanTexture *tex = nullptr;
@@ -1414,10 +1479,17 @@ void VulkanTextureManager::deleteTexture(int bitmapHandle) {
   }
   const TextureId id = *idOpt;
 
+  if (shouldLogHudDebug(base) && logHudDebugOnce(base, kHudLogReleased)) {
+    const char *name = bm_is_valid(base) ? bm_get_filename(base) : "invalid";
+    mprintf(("VK_HUD_DEBUG: delete texture requested base=%d name=%s\n", base, name ? name : "unknown"));
+  }
+
   // Drop any boundary caches/requests immediately.
   m_permanentlyRejected.erase(id);
   m_bindlessRequested.erase(id);
   (void)m_pendingUploads.erase(id);
+  m_hudDebugMissing.erase(base);
+  m_hudDebugLogFlags.erase(base);
 
   // Defer slot reuse + resource retirement to the upload-phase flush (frame-start safe point).
   m_pendingRetirements.insert(id);
@@ -1435,12 +1507,19 @@ void VulkanTextureManager::releaseBitmap(int bitmapHandle) {
   }
   const TextureId id = *idOpt;
 
+  if (shouldLogHudDebug(base) && logHudDebugOnce(base, kHudLogReleased)) {
+    const char *name = bm_is_valid(base) ? bm_get_filename(base) : "invalid";
+    mprintf(("VK_HUD_DEBUG: release bitmap base=%d name=%s\n", base, name ? name : "unknown"));
+  }
+
   // Hard lifecycle boundary: bmpman may reuse this handle immediately after release.
   // Drop all cache state for this handle now; GPU lifetime safety is handled via deferred release.
   m_permanentlyRejected.erase(id);
   m_bindlessRequested.erase(id);
   m_pendingRetirements.erase(id);
   (void)m_pendingUploads.erase(id);
+  m_hudDebugMissing.erase(base);
+  m_hudDebugLogFlags.erase(base);
 
   // If the texture is resident, retire it immediately (releasing any bindless slot mapping).
   if (auto it = m_bitmaps.find(id); it != m_bitmaps.end()) {
@@ -1477,6 +1556,8 @@ void VulkanTextureManager::cleanup() {
   m_samplerCache.clear();
   m_defaultSampler.reset();
   m_pendingUploads = {};
+  m_hudDebugMissing.clear();
+  m_hudDebugLogFlags.clear();
 }
 
 void VulkanTextureManager::retireTexture(TextureId id, uint64_t retireSerial) {
@@ -1536,8 +1617,6 @@ void VulkanTextureManager::queueTextureUploadBaseFrame(int baseFrame, uint32_t c
 }
 
 void VulkanTextureManager::queueTextureUpload(TextureId id, uint32_t currentFrameIndex, const SamplerKey &samplerKey) {
-  (void)currentFrameIndex;
-
   if (isResident(id)) {
     return;
   }
@@ -1545,6 +1624,13 @@ void VulkanTextureManager::queueTextureUpload(TextureId id, uint32_t currentFram
   // Outside supported domain for this upload algorithm - do not retry automatically.
   if (m_permanentlyRejected.find(id) != m_permanentlyRejected.end()) {
     return;
+  }
+
+  const int baseFrame = id.baseFrame();
+  if (shouldLogHudDebug(baseFrame) && logHudDebugOnce(baseFrame, kHudLogQueued)) {
+    const char *name = bm_get_filename(baseFrame);
+    mprintf(("VK_HUD_DEBUG: queue upload (base=%d name=%s frame=%u)\n", baseFrame, name ? name : "unknown",
+             currentFrameIndex));
   }
 
   // Warm the sampler cache so descriptor requests don't allocate later.
@@ -1805,16 +1891,18 @@ vk::ImageView VulkanTextureManager::renderTargetAttachmentView(int baseFrameHand
   return rt.faceViews[static_cast<size_t>(clampedFace)].get();
 }
 
-void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer cmd, int baseFrameHandle) {
+VulkanTexture &VulkanTextureManager::renderTargetGpuOrAssert(int baseFrameHandle, const char *caller) {
+  const char *name = (caller != nullptr) ? caller : "renderTargetGpuOrAssert";
   const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
-  Assertion(idOpt.has_value(), "transitionRenderTargetToAttachment called for invalid render target handle %d",
-            baseFrameHandle);
+  Assertion(idOpt.has_value(), "%s called for invalid render target handle %d", name, baseFrameHandle);
   auto it = m_targets.find(*idOpt);
-  Assertion(it != m_targets.end(), "transitionRenderTargetToAttachment called for unknown render target handle %d",
-            baseFrameHandle);
-  auto &tex = it->second.gpu;
+  Assertion(it != m_targets.end(), "%s called for unknown render target handle %d", name, baseFrameHandle);
+  return it->second.gpu;
+}
 
-  const auto newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+void VulkanTextureManager::transitionRenderTargetToLayout(vk::CommandBuffer cmd, int baseFrameHandle,
+                                                          vk::ImageLayout newLayout, const char *caller) {
+  auto &tex = renderTargetGpuOrAssert(baseFrameHandle, caller);
   if (tex.currentLayout == newLayout) {
     return;
   }
@@ -1841,82 +1929,18 @@ void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer 
   cmd.pipelineBarrier2(dep);
 
   tex.currentLayout = newLayout;
+}
+
+void VulkanTextureManager::transitionRenderTargetToAttachment(vk::CommandBuffer cmd, int baseFrameHandle) {
+  transitionRenderTargetToLayout(cmd, baseFrameHandle, vk::ImageLayout::eColorAttachmentOptimal, __func__);
 }
 
 void VulkanTextureManager::transitionRenderTargetToTransferDst(vk::CommandBuffer cmd, int baseFrameHandle) {
-  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
-  Assertion(idOpt.has_value(), "transitionRenderTargetToTransferDst called for invalid render target handle %d",
-            baseFrameHandle);
-  auto it = m_targets.find(*idOpt);
-  Assertion(it != m_targets.end(), "transitionRenderTargetToTransferDst called for unknown render target handle %d",
-            baseFrameHandle);
-  auto &tex = it->second.gpu;
-
-  const auto newLayout = vk::ImageLayout::eTransferDstOptimal;
-  if (tex.currentLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(tex.currentLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = tex.currentLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = tex.image.get();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.baseMipLevel = 0;
-  barrier.subresourceRange.levelCount = tex.mipLevels;
-  barrier.subresourceRange.baseArrayLayer = 0;
-  barrier.subresourceRange.layerCount = tex.layers;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
-  tex.currentLayout = newLayout;
+  transitionRenderTargetToLayout(cmd, baseFrameHandle, vk::ImageLayout::eTransferDstOptimal, __func__);
 }
 
 void VulkanTextureManager::transitionRenderTargetToShaderRead(vk::CommandBuffer cmd, int baseFrameHandle) {
-  const auto idOpt = TextureId::tryFromBaseFrame(baseFrameHandle);
-  Assertion(idOpt.has_value(), "transitionRenderTargetToShaderRead called for invalid render target handle %d",
-            baseFrameHandle);
-  auto it = m_targets.find(*idOpt);
-  Assertion(it != m_targets.end(), "transitionRenderTargetToShaderRead called for unknown render target handle %d",
-            baseFrameHandle);
-  auto &tex = it->second.gpu;
-
-  const auto newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-  if (tex.currentLayout == newLayout) {
-    return;
-  }
-
-  vk::ImageMemoryBarrier2 barrier{};
-  const auto src = stageAccessForLayout(tex.currentLayout);
-  const auto dst = stageAccessForLayout(newLayout);
-  barrier.srcStageMask = src.stageMask;
-  barrier.srcAccessMask = src.accessMask;
-  barrier.dstStageMask = dst.stageMask;
-  barrier.dstAccessMask = dst.accessMask;
-  barrier.oldLayout = tex.currentLayout;
-  barrier.newLayout = newLayout;
-  barrier.image = tex.image.get();
-  barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-  barrier.subresourceRange.baseMipLevel = 0;
-  barrier.subresourceRange.levelCount = tex.mipLevels;
-  barrier.subresourceRange.baseArrayLayer = 0;
-  barrier.subresourceRange.layerCount = tex.layers;
-
-  vk::DependencyInfo dep{};
-  dep.imageMemoryBarrierCount = 1;
-  dep.pImageMemoryBarriers = &barrier;
-  cmd.pipelineBarrier2(dep);
-
-  tex.currentLayout = newLayout;
+  transitionRenderTargetToLayout(cmd, baseFrameHandle, vk::ImageLayout::eShaderReadOnlyOptimal, __func__);
 }
 
 void VulkanTextureManager::generateRenderTargetMipmaps(vk::CommandBuffer cmd, int baseFrameHandle) {

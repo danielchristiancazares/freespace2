@@ -1,14 +1,15 @@
-#include "graphics/vulkan/VulkanPipelineManager.h"
 #include "graphics/2d.h"
+#include "graphics/vulkan/VulkanPipelineManager.h"
 
 #include <gtest/gtest.h>
-#include <algorithm>
-#include <unordered_map>
-#include <type_traits>
 
+#include <algorithm>
+#include <type_traits>
+#include <unordered_map>
+
+using graphics::vulkan::convertVertexLayoutToVulkan;
 using graphics::vulkan::PipelineKey;
 using graphics::vulkan::VertexInputState;
-using graphics::vulkan::convertVertexLayoutToVulkan;
 
 namespace {
 
@@ -17,8 +18,8 @@ VertexInputState convert(const vertex_layout& layout)
 	return convertVertexLayoutToVulkan(layout);
 }
 
-const vk::VertexInputAttributeDescription* find_attr_by_location(
-	const std::vector<vk::VertexInputAttributeDescription>& attrs, uint32_t location)
+const vk::VertexInputAttributeDescription*
+find_attr_by_location(const std::vector<vk::VertexInputAttributeDescription>& attrs, uint32_t location)
 {
 	auto it = std::find_if(attrs.begin(), attrs.end(), [location](const auto& a) { return a.location == location; });
 	return it == attrs.end() ? nullptr : &(*it);
@@ -52,7 +53,11 @@ TEST(VulkanPipelineManager, Scenario_ScreenPos_UsesFloatFormat)
 {
 	// Given a layout with SCREEN_POS used for 2D vertices
 	vertex_layout layout;
-	layout.add_vertex_component(vertex_format_data::SCREEN_POS, /*stride*/ 8, /*offset*/ 0, /*divisor*/ 0, /*buffer*/ 0);
+	layout.add_vertex_component(vertex_format_data::SCREEN_POS,
+		/*stride*/ 8,
+		/*offset*/ 0,
+		/*divisor*/ 0,
+		/*buffer*/ 0);
 
 	// When converting to Vulkan
 	auto state = convert(layout);
@@ -92,10 +97,8 @@ TEST(VulkanPipelineManager, Scenario_ModelShaderType_HasCorrectEnumValue)
 	// Given the shader_type enum definition
 	// When checking SDR_TYPE_MODEL value
 	// Then it should be 0 (first value after SDR_TYPE_NONE = -1)
-	EXPECT_EQ(static_cast<int>(SDR_TYPE_MODEL), 0)
-		<< "SDR_TYPE_MODEL should have enum value 0";
-	EXPECT_EQ(static_cast<int>(SDR_TYPE_NONE), -1)
-		<< "SDR_TYPE_NONE should have enum value -1";
+	EXPECT_EQ(static_cast<int>(SDR_TYPE_MODEL), 0) << "SDR_TYPE_MODEL should have enum value 0";
+	EXPECT_EQ(static_cast<int>(SDR_TYPE_NONE), -1) << "SDR_TYPE_NONE should have enum value -1";
 }
 
 TEST(VulkanPipelineManager, Scenario_ModelPipelineKey_MatchesModelType)
@@ -115,8 +118,7 @@ TEST(VulkanPipelineManager, Scenario_ModelPipelineKey_MatchesModelType)
 	// Then the comparison should match (verifies the comparison logic used in layout selection)
 	EXPECT_TRUE(modelKey.type == SDR_TYPE_MODEL)
 		<< "PipelineKey with SDR_TYPE_MODEL should match SDR_TYPE_MODEL enum value";
-	EXPECT_EQ(static_cast<int>(modelKey.type), 0)
-		<< "PipelineKey.type should be 0 when set to SDR_TYPE_MODEL";
+	EXPECT_EQ(static_cast<int>(modelKey.type), 0) << "PipelineKey.type should be 0 when set to SDR_TYPE_MODEL";
 }
 
 TEST(VulkanPipelineManager, Scenario_NonModelPipelineKey_DoesNotMatchModelType)
@@ -148,10 +150,8 @@ TEST(VulkanPipelineManager, Scenario_UninitializedPipelineKey_DoesNotMatchModelT
 
 	// When comparing with SDR_TYPE_MODEL enum value
 	// Then it should not match SDR_TYPE_MODEL by accident
-	EXPECT_EQ(static_cast<int>(uninitKey.type), -1)
-		<< "Default PipelineKey.type should be SDR_TYPE_NONE (-1)";
-	EXPECT_FALSE(uninitKey.type == SDR_TYPE_MODEL)
-		<< "Default PipelineKey.type should not match SDR_TYPE_MODEL";
+	EXPECT_EQ(static_cast<int>(uninitKey.type), -1) << "Default PipelineKey.type should be SDR_TYPE_NONE (-1)";
+	EXPECT_FALSE(uninitKey.type == SDR_TYPE_MODEL) << "Default PipelineKey.type should not match SDR_TYPE_MODEL";
 }
 
 TEST(VulkanPipelineManager, Scenario_DynamicRenderingRequired)
@@ -164,18 +164,15 @@ TEST(VulkanPipelineManager, Scenario_DynamicRenderingRequired)
 
 	// When constructing the pipeline manager
 	// Then it should refuse to initialize because renderPass is always VK_NULL_HANDLE
-		EXPECT_THROW(
-			graphics::vulkan::VulkanPipelineManager(fakeDevice,
-				fakeLayout,
-				fakeLayout,
-				fakeLayout,
-				fakeCache,
-				/*supportsExtendedDynamicState=*/true,
-				/*supportsExtendedDynamicState2=*/true,
-				/*supportsExtendedDynamicState3=*/false,
-				caps,
-			/*supportsVertexAttributeDivisor=*/false,
-			/*dynamicRenderingEnabled=*/false),
+	EXPECT_THROW(graphics::vulkan::VulkanPipelineManager(fakeDevice,
+					 fakeLayout,
+					 fakeLayout,
+					 fakeLayout,
+					 fakeCache,
+					 /*supportsExtendedDynamicState3=*/false,
+					 caps,
+					 /*supportsVertexAttributeDivisor=*/false,
+					 /*dynamicRenderingEnabled=*/false),
 		std::runtime_error);
 }
 
