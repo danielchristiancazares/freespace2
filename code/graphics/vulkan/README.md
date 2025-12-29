@@ -1,4 +1,4 @@
-# Vulkan Backend (FSO) — `code/graphics/vulkan`
+# Vulkan Backend (FSO) - `code/graphics/vulkan`
 
 This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It provides the implementation behind the `gr_*` graphics API using Vulkan-Hpp (`vk::*`) and modern Vulkan features (dynamic rendering, `pipelineBarrier2`).
 
@@ -9,13 +9,14 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanDevice.*` | Instance, surface, physical/logical device, swapchain, pipeline cache |
 | `VulkanRenderer.*` | Frame orchestration, submission, per-frame sync, global resource creation |
 | `VulkanRenderingSession.*` | Render pass state machine, layout transitions, dynamic state |
-| `VulkanFrame.*` | Per-frame resources: command buffer, fences, semaphores, ring buffers |
+| `VulkanFrame.*` | Per-frame resources: command buffer, fence, semaphores, ring buffers |
 | `VulkanFrameCaps.h` | Frame capability tokens (`FrameCtx`, `ModelBoundFrame`, `NanoVGBoundFrame`, `DecalBoundFrame`) |
 | `VulkanPhaseContexts.h` | Phase tokens (`UploadCtx`, `RenderCtx`, `DeferredGeometryCtx`, `DeferredLightingCtx`) |
 | `VulkanFrameFlow.h` | Frame recording tokens (`RecordingFrame`, `InFlightFrame`) |
+| `VulkanSync2Helpers.h` | Sync2 image barrier helpers (`makeImageLayoutBarrier`, `transitionImageLayout`) |
 | `VulkanDeferredRelease.h` | Serial-gated deferred destruction queue |
 | `VulkanTextureId.h` | Type-safe texture identifier |
-| `FrameLifecycleTracker.h` | Debug validation for recording state |
+| `FrameLifecycleTracker.*` | Debug validation for recording state |
 | `VulkanGraphics.*` | Engine glue: `gr_vulkan_*` functions, `g_currentFrame` injection |
 | `VulkanBufferManager.*` | Buffer creation, updates, deferred deletion |
 | `VulkanTextureManager.*` | Texture uploads, residency tracking, sampler cache, bitmap render targets |
@@ -26,10 +27,10 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 | `VulkanPipelineManager.*` | Pipeline creation/caching by `PipelineKey` |
 | `VulkanDescriptorLayouts.*` | Set layouts, pipeline layouts, descriptor pool allocation |
 | `VulkanDeferredLights.*` | Deferred lighting pass orchestration and light volume meshes |
-| `VulkanRenderTargets.*` | Depth buffer, G-buffer, resize handling |
+| `VulkanRenderTargets.*` | Depth buffer, G-buffer, post-processing targets, resize handling |
 | `VulkanRenderTargetInfo.h` | Render target contract definition (formats, counts) |
 | `VulkanRingBuffer.*` | Per-frame transient allocations (uniform, vertex, staging) |
-| `VulkanLayoutContracts.*` | Shader ↔ pipeline layout binding contracts |
+| `VulkanLayoutContracts.*` | Shader to pipeline layout binding contracts |
 | `VulkanModelValidation.*` | Model draw validation and safety checks |
 | `VulkanModelTypes.h` | Shared model/mesh-related types |
 | `VulkanVertexTypes.h` | Vertex layout/type definitions |
@@ -40,9 +41,10 @@ This directory contains the Vulkan renderer backend for FreeSpace Open (FSO). It
 ## Constants
 
 Key constants in `VulkanConstants.h`:
-- `kFramesInFlight` — frame-ring size for per-frame tracking. Do not duplicate elsewhere.
-- `kMaxBindlessTextures` — bindless descriptor array size.
-- `kBindlessTextureSlotFallback`, `kBindlessTextureSlotDefaultBase`, etc. — reserved bindless slots.
+- `kFramesInFlight` - frame-ring size for per-frame tracking. Do not duplicate elsewhere.
+- `kMaxBindlessTextures` - bindless descriptor array size.
+- `kBindlessTextureSlotFallback` (0), `kBindlessTextureSlotDefaultBase` (1), `kBindlessTextureSlotDefaultNormal` (2), `kBindlessTextureSlotDefaultSpec` (3) - reserved bindless slots.
+- `kBindlessFirstDynamicTextureSlot` (4) - first slot available for dynamic texture allocation.
 
 ## Design Patterns in Practice
 
@@ -68,9 +70,9 @@ This backend adheres to the [Type-Driven Design Philosophy](../../../docs/DESIGN
 - **`DeferredGeometryCtx`** / **`DeferredLightingCtx`**: Enforces `begin` → `end` → `finish` sequence.
 
 ### State as Location
-- **Frames**: Managed by moving between `m_availableFrames` and `m_inFlightFrames` containers.
-- **Render Targets**: Represented by the active `RenderTargetState` subclass instance in `VulkanRenderingSession`.
-- **Texture Residency**: Resident textures exist in `m_bitmaps`/`m_targets`; pending uploads are tracked by `m_pendingUploads`; domain-invalid inputs may be cached in `m_permanentlyRejected`.
+- **Frames**: Managed by moving between `m_availableFrames` and `m_inFlightFrames` deques in `VulkanRenderer`.
+- **Render Targets**: Represented by the active `RenderTargetState` subclass instance (`m_target`) in `VulkanRenderingSession`.
+- **Texture Residency**: Resident bitmap textures live in `m_bitmaps`; render targets in `m_targets`; pending uploads in `m_pendingUploads`; bindless slot assignments in `m_bindlessSlots`; domain-invalid inputs in `m_permanentlyRejected`.
 
 ### Boundary / Adapter
 `VulkanGraphics.cpp` bridges the legacy engine's implicit global state to the backend's explicit token requirements.
@@ -95,14 +97,15 @@ Owns and manages:
 - Vulkan instance + debug messenger
 - SDL surface
 - Physical device selection + feature probing
-- Logical device + queues (graphics/transfer/present)
-- Swapchain + image views
+- Logical device + queues (graphics, present)
+- Swapchain + image views + per-image render-finished semaphores
 - Pipeline cache (device lifetime)
 
 Presentation API:
-- `acquireNextImage(semaphore)` → `AcquireResult`
-- `present(semaphore, imageIndex)` → `PresentResult`
+- `acquireNextImage(semaphore)` returns `AcquireResult`
+- `present(semaphore, imageIndex)` returns `PresentResult`
 - `recreateSwapchain(width, height)`
+- `swapchainRenderFinishedSemaphore(imageIndex)` returns the semaphore for presenting a specific image
 
 Swapchain recreation triggers `VulkanRenderTargets::resize()`.
 
@@ -125,18 +128,25 @@ Key methods:
 ### `VulkanRenderingSession` (Render Pass State Machine)
 
 Responsible for:
-- Dynamic-rendering state machine (single “current target” truth)
-- Image layout transitions (swapchain, depth, G-buffer) via `pipelineBarrier2`
+- Dynamic-rendering state machine (single "current target" truth)
+- Image layout transitions (swapchain, depth, G-buffer, post-processing) via `pipelineBarrier2`
 - Target switching (automatically ends previous pass):
-  - `requestSwapchainTarget()` — swapchain + depth
-  - `requestBitmapTarget(bitmapHandle, face)` — bitmap render targets (bmpman RTT; cubemap faces supported)
-  - `requestGBufferEmissiveTarget()` — G-buffer emissive-only (pre-deferred scene copy)
-  - `beginDeferredPass(clearNonColorBufs, preserveEmissive)` — select G-buffer target + clear policy
-  - `endDeferredGeometry()` — transition G-buffer → shader-read and select swapchain (no depth)
+  - `requestSwapchainTarget()` / `requestSwapchainNoDepthTarget()` - swapchain with/without depth
+  - `requestSceneHdrTarget()` / `requestSceneHdrNoDepthTarget()` - HDR scene texture
+  - `requestBitmapTarget(bitmapHandle, face)` - bitmap render targets (bmpman RTT; cubemap faces supported)
+  - `requestGBufferEmissiveTarget()` - G-buffer emissive-only (pre-deferred scene copy)
+  - `requestPostLdrTarget()` / `requestPostLuminanceTarget()` - post-processing LDR/luminance
+  - `requestSmaaEdgesTarget()` / `requestSmaaBlendTarget()` / `requestSmaaOutputTarget()` - SMAA passes
+  - `requestBloomMipTarget(pingPongIndex, mipLevel)` - bloom blur mip targets
+  - `beginDeferredPass(clearNonColorBufs, preserveEmissive)` - select G-buffer target + clear policy
+  - `endDeferredGeometry()` - transition G-buffer to shader-read, select swapchain (no depth)
+- Depth attachment selection:
+  - `useMainDepthAttachment()` - scene depth
+  - `useCockpitDepthAttachment()` - cockpit-only depth (for post-processing parity with OpenGL)
 - Lazy render pass begin via `ensureRendering(cmd, imageIndex)`. The session owns the active pass and ends it automatically at frame/target boundaries.
 - Dynamic state application (`applyDynamicState()`) is performed when a pass begins.
 
-**Polymorphic State:** The active render target is represented by a `std::unique_ptr<RenderTargetState>` (State as Location). There is no "target mode" enum; the object *is* the state.
+**Polymorphic State:** The active render target is a `std::unique_ptr<RenderTargetState>` (state as location). There is no target mode enum; the object is the state. Concrete target classes include `SwapchainWithDepthTarget`, `SceneHdrWithDepthTarget`, `DeferredGBufferTarget`, `BitmapTarget`, etc.
 
 **RAII Guard:** `ActivePass` manages `vkCmdBeginRendering`/`vkCmdEndRendering`.
 
@@ -170,27 +180,35 @@ Owns the Vulkan-native movie path based on `VkSamplerYcbcrConversion`:
 
 Packages everything for one frame in the ring:
 - Command pool + command buffer
-- Fence (CPU wait) + semaphores (image-available, render-finished, timeline)
-- Ring buffers: uniform, vertex, staging
-- Per-frame descriptor set + descriptor sync logic
+- Fence (`inflightFence`) for CPU wait on GPU completion
+- Semaphores: `imageAvailable` (acquire), `timelineSemaphore` (serial tracking)
+- Ring buffers: `uniformBuffer()`, `vertexBuffer()`, `stagingBuffer()`
+- Per-frame descriptor sets (global, model) + dynamic uniform bindings
 
 ### Pipelines (`VulkanPipelineManager` + `VulkanLayoutContracts`)
 
-Pipelines are "contract-driven" and cached by `PipelineKey`:
-- `PipelineKey` includes shader type + variant flags, render target contract (color/depth formats, attachment count, sample count), blend mode, and (for vertex-attribute shaders) `vertex_layout::hash()`.
-- Shader layout contracts (`VulkanLayoutContracts`) define, per `shader_type`:
-  - which pipeline layout to use (`Standard`, `Model`, `Deferred`)
-  - which vertex input mode to use (`VertexAttributes` vs. `VertexPulling`)
+Pipelines are contract-driven and cached by `PipelineKey`:
+- `PipelineKey` includes:
+  - Shader type + variant flags
+  - Render target contract (color/depth formats, attachment count, sample count)
+  - Blend mode, color write mask
+  - Stencil test state (compare op, masks, reference, pass/fail ops)
+  - Vertex layout hash (for vertex-attribute shaders; ignored for vertex-pulling shaders)
+- Shader layout contracts (`VulkanLayoutContracts`) define per `shader_type`:
+  - `PipelineLayoutKind`: `Standard`, `Model`, or `Deferred`
+  - `VertexInputMode`: `VertexAttributes` or `VertexPulling`
 
-**Documentation**: See `docs/VULKAN_PIPELINE_MANAGEMENT.md` for architecture details and `docs/VULKAN_PIPELINE_USAGE.md` for practical usage patterns, common mistakes, and debugging guidance.
+**Documentation**: See `docs/VULKAN_PIPELINE_MANAGEMENT.md` for architecture details and `docs/VULKAN_PIPELINE_USAGE.md` for practical usage patterns.
 
 ## Synchronization Primitives
 
-| Primitive | Usage |
-|-----------|-------|
-| Fence | CPU waits for GPU (frame reuse safety) |
-| Binary semaphore | GPU→GPU: image-available, render-finished |
-| Timeline semaphore | Authoritative GPU completion counter for serial-gated deferred releases |
+| Primitive | Owner | Usage |
+|-----------|-------|-------|
+| `inflightFence` | VulkanFrame | CPU waits for GPU (frame reuse safety) |
+| `imageAvailable` | VulkanFrame | GPU signal on swapchain image acquisition |
+| `renderFinishedSemaphore` | VulkanDevice (per swapchain image) | GPU signal for present queue |
+| `timelineSemaphore` | VulkanFrame | Per-frame serial for deferred releases |
+| `submitTimeline` | VulkanRenderer | Global GPU completion counter for serial-gated destruction |
 
 ## Frame Flow
 
