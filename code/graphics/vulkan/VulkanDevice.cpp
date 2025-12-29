@@ -360,17 +360,12 @@ bool VulkanDevice::initialize() {
     return false;
   }
 
-  // Store queue indices
   m_graphicsQueueIndex = deviceValues.graphicsQueueIndex.index;
   m_presentQueueIndex = deviceValues.presentQueueIndex.index;
 
-  // Query and store device capabilities
   queryDeviceCapabilities(deviceValues);
-
-  // Create pipeline cache
   createPipelineCache();
 
-  // Cache surface capabilities for swapchain recreation
   m_surfaceCapabilities = deviceValues.surfaceCapabilities;
   m_surfaceFormats =
       SCP_vector<vk::SurfaceFormatKHR>(deviceValues.surfaceFormats.begin(), deviceValues.surfaceFormats.end());
@@ -391,8 +386,6 @@ void VulkanDevice::shutdown() {
 
   // Clear non-owned handles (swapchain images are owned by the swapchain, not us)
   m_swapchainImages.clear();
-
-  // RAII handles are cleaned up by destructors in reverse declaration order
 }
 
 bool VulkanDevice::initDisplayDevice() const {
@@ -687,14 +680,11 @@ bool VulkanDevice::createLogicalDevice(const PhysicalDeviceValues &deviceValues)
 
   m_device = deviceValues.device.createDeviceUnique(deviceCreate);
 
-  // Initialize default dispatcher for device-level functions
   VULKAN_HPP_DEFAULT_DISPATCHER.init(m_device.get());
 
-  // Create queues
   m_graphicsQueue = m_device->getQueue(deviceValues.graphicsQueueIndex.index, 0);
   m_presentQueue = m_device->getQueue(deviceValues.presentQueueIndex.index, 0);
 
-  // Store device properties
   m_properties = deviceValues.properties;
   m_memoryProperties = m_physicalDevice.getMemoryProperties();
 
@@ -754,8 +744,8 @@ bool VulkanDevice::createSwapchain(const PhysicalDeviceValues &deviceValues) {
     createInfo.pQueueFamilyIndices = queueFamilyIndices;
   } else {
     createInfo.imageSharingMode = vk::SharingMode::eExclusive;
-    createInfo.queueFamilyIndexCount = 0;     // Optional
-    createInfo.pQueueFamilyIndices = nullptr; // Optional
+    createInfo.queueFamilyIndexCount = 0;
+    createInfo.pQueueFamilyIndices = nullptr;
   }
 
   createInfo.preTransform = deviceValues.surfaceCapabilities.currentTransform;
@@ -866,7 +856,6 @@ void VulkanDevice::createPipelineCache() {
       cacheFile.read(cacheData.data(), size);
       cacheFile.close();
 
-      // Validate cache header if present
       if (cacheData.size() >= sizeof(CacheHeader)) {
         const auto *header = reinterpret_cast<const CacheHeader *>(cacheData.data());
         if (header->headerLength == sizeof(CacheHeader) && header->vendorID == m_properties.vendorID &&
@@ -921,7 +910,6 @@ void VulkanDevice::savePipelineCache() {
 
 vk::SurfaceFormatKHR VulkanDevice::chooseSurfaceFormat(const PhysicalDeviceValues &values) const {
   for (const auto &availableFormat : values.surfaceFormats) {
-    // Simple check is enough for now
     if (availableFormat.format == vk::Format::eB8G8R8A8Srgb &&
         availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
       return availableFormat;
@@ -1047,7 +1035,6 @@ bool VulkanDevice::recreateSwapchain(uint32_t width, uint32_t height) {
   auto modes = m_physicalDevice.getSurfacePresentModesKHR(m_surface.get());
   m_presentModes = SCP_vector<vk::PresentModeKHR>(modes.begin(), modes.end());
 
-  // Build PhysicalDeviceValues from cached data
   PhysicalDeviceValues tempValues;
   tempValues.surfaceCapabilities = m_surfaceCapabilities;
   tempValues.surfaceFormats = std::vector<vk::SurfaceFormatKHR>(m_surfaceFormats.begin(), m_surfaceFormats.end());

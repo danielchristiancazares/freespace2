@@ -66,7 +66,6 @@ VulkanRenderer::VulkanRenderer(std::unique_ptr<os::GraphicsOperations> graphicsO
 VulkanRenderer::~VulkanRenderer() = default;
 
 bool VulkanRenderer::initialize() {
-  // Initialize the device layer (instance, surface, physical device, logical device, swapchain)
   if (!m_vulkanDevice->initialize()) {
     return false;
   }
@@ -232,10 +231,8 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame &frame) {
   if (result.needsRecreate) {
     const auto extent = querySwapchainRecreateExtent(*m_vulkanDevice);
     if (!m_vulkanDevice->recreateSwapchain(extent.width, extent.height)) {
-      // Swapchain recreation failed - cannot recover
       return std::numeric_limits<uint32_t>::max();
     }
-    // Recreate render targets that depend on swapchain size
     m_renderTargets->resize(m_vulkanDevice->swapchainExtent());
 
     // Retry acquire after successful recreation (fixes C5: crash on resize)
@@ -256,7 +253,6 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame &frame) {
 void VulkanRenderer::beginFrame(VulkanFrame &frame, uint32_t imageIndex) {
   Assertion(m_renderingSession != nullptr, "beginFrame requires an active rendering session");
 
-  // Reset per-frame uniform bindings
   frame.resetPerFrameBindings();
 
   // Scene texture state is strictly per-frame; clear any leaked state at the frame boundary.
@@ -301,7 +297,6 @@ void VulkanRenderer::beginFrame(VulkanFrame &frame, uint32_t imageIndex) {
   // Sync model descriptors AFTER upload flush so newly-resident textures are written this frame.
   Assertion(m_modelVertexHeapHandle.isValid(), "Model vertex heap handle must be valid");
 
-  // Ensure vertex heap buffer exists and sync descriptors
   vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
   beginModelDescriptorSync(frame, frame.frameIndex(), vertexHeapBuffer);
 
@@ -428,7 +423,6 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
   m_vulkanDevice->graphicsQueue().submit2(submitInfo, fence);
 #endif
 
-  // Present the frame
   auto presentResult = m_vulkanDevice->present(renderFinished, imageIndex);
 
   if (presentResult.needsRecreate) {
@@ -546,7 +540,6 @@ void VulkanRenderer::pushDebugGroup(const FrameCtx &ctx, const char *name) {
 
   vk::DebugUtilsLabelEXT label{};
   label.pLabelName = name;
-  // Default color (white with alpha)
   label.color[0] = 1.0f;
   label.color[1] = 1.0f;
   label.color[2] = 1.0f;

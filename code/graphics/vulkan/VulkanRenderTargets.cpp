@@ -96,7 +96,6 @@ void VulkanRenderTargets::createDepthResources(vk::Extent2D extent) {
 
   m_depthImageView = m_device.device().createImageViewUnique(viewInfo);
 
-  // Create sampled depth view for deferred lighting
   vk::ImageViewCreateInfo sampleViewInfo{};
   sampleViewInfo.image = m_depthImage.get();
   sampleViewInfo.viewType = vk::ImageViewType::e2D;
@@ -224,7 +223,6 @@ void VulkanRenderTargets::createGBufferResources(vk::Extent2D extent) {
     m_gbufferViews[i] = m_device.device().createImageViewUnique(viewInfo);
   }
 
-  // Sampler for G-buffer textures in lighting pass
   vk::SamplerCreateInfo samplerInfo{};
   samplerInfo.magFilter = vk::Filter::eLinear;
   samplerInfo.minFilter = vk::Filter::eLinear;

@@ -10,8 +10,6 @@ namespace graphics {
 namespace vulkan {
 
 void VulkanDescriptorLayouts::validateDeviceLimits(const vk::PhysicalDeviceLimits &limits) {
-  // Hard assert - no silent clamping
-  // maxDescriptorSetSampledImages is total across all set layouts in pipeline
   Assertion(limits.maxDescriptorSetSampledImages >= kMaxBindlessTextures,
             "Device maxDescriptorSetSampledImages (%u) < required %u. "
             "Vulkan model rendering not supported on this device.",
@@ -147,7 +145,6 @@ void VulkanDescriptorLayouts::createModelLayouts() {
 
   m_modelSetLayout = m_device.createDescriptorSetLayoutUnique(layoutInfo);
 
-  // Push constant range
   vk::PushConstantRange pushRange;
   pushRange.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment;
   pushRange.offset = 0;
@@ -157,13 +154,13 @@ void VulkanDescriptorLayouts::createModelLayouts() {
   static_assert(sizeof(ModelPushConstants) <= 256, "ModelPushConstants exceeds guaranteed minimum push constant size");
   static_assert(sizeof(ModelPushConstants) % 4 == 0, "ModelPushConstants size must be multiple of 4");
 
-  vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
-  pipelineLayoutInfo.setLayoutCount = 1;
-  pipelineLayoutInfo.pSetLayouts = &m_modelSetLayout.get();
-  pipelineLayoutInfo.pushConstantRangeCount = 1;
-  pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+  vk::PipelineLayoutCreateInfo modelPipelineLayoutInfo;
+  modelPipelineLayoutInfo.setLayoutCount = 1;
+  modelPipelineLayoutInfo.pSetLayouts = &m_modelSetLayout.get();
+  modelPipelineLayoutInfo.pushConstantRangeCount = 1;
+  modelPipelineLayoutInfo.pPushConstantRanges = &pushRange;
 
-  m_modelPipelineLayout = m_device.createPipelineLayoutUnique(pipelineLayoutInfo);
+  m_modelPipelineLayout = m_device.createPipelineLayoutUnique(modelPipelineLayoutInfo);
 
   // Descriptor pool - sizes derived from kFramesInFlight (one set per frame)
   std::array<vk::DescriptorPoolSize, 4> poolSizes{};
@@ -177,9 +174,8 @@ void VulkanDescriptorLayouts::createModelLayouts() {
   poolSizes[3].descriptorCount = kFramesInFlight; // 1 dynamic UBO per set
 
   vk::DescriptorPoolCreateInfo poolInfo;
-  // eFreeDescriptorSet not strictly needed for fixed ring, but harmless
   poolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-  poolInfo.maxSets = kFramesInFlight; // One set per frame-in-flight
+  poolInfo.maxSets = kFramesInFlight;
   poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
   poolInfo.pPoolSizes = poolSizes.data();
 

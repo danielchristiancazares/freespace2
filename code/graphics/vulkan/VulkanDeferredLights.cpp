@@ -115,10 +115,6 @@ void CylinderLight::record(const DeferredDrawContext &ctx, vk::Buffer cylinderVB
   ctx.cmd.drawIndexed(indexCount, 1, 0, 0, 0);
 }
 
-// ============================================================
-// BOUNDARY CODE - conditionals on engine type acceptable here
-// ============================================================
-
 std::vector<DeferredLight> buildDeferredLights(VulkanFrame &frame, vk::Buffer uniformBuffer, const matrix4 &viewMatrix,
                                                const matrix4 &projMatrix, uint32_t uniformAlignment) {
   std::vector<DeferredLight> result;
@@ -204,10 +200,8 @@ std::vector<DeferredLight> buildDeferredLights(VulkanFrame &frame, vk::Buffer un
                          ? lp->cockpit_light_radius_modifier.handle(MAX(src.rada, src.radb))
                          : MAX(src.rada, src.radb);
 
-      // Build model-view matrix: translation to light position
       matrix4 model{};
       vm_matrix4_set_identity(&model);
-      // Set translation manually (no vm_matrix4_set_translation exists)
       model.a1d[12] = src.vec.xyz.x;
       model.a1d[13] = src.vec.xyz.y;
       model.a1d[14] = src.vec.xyz.z;
@@ -259,7 +253,6 @@ std::vector<DeferredLight> buildDeferredLights(VulkanFrame &frame, vk::Buffer un
       vec4 viewConeDir{};
       vm_vec_transform(&viewConeDir, &coneDir4, &viewMatrix);
 
-      // Normalize
       float len = sqrtf(viewConeDir.xyzw.x * viewConeDir.xyzw.x + viewConeDir.xyzw.y * viewConeDir.xyzw.y +
                         viewConeDir.xyzw.z * viewConeDir.xyzw.z);
       if (len > 0.0001f) {
@@ -297,7 +290,6 @@ std::vector<DeferredLight> buildDeferredLights(VulkanFrame &frame, vk::Buffer un
       vm_vec_negate(&negDir);
       vm_vector_2_matrix(&orient, &negDir, nullptr, nullptr);
 
-      // Build model matrix with translation at tube start (vec2) and rotation
       matrix4 model{};
       vec3d start = src.vec2;
       vm_matrix4_set_transform(&model, &orient, &start);
