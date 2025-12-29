@@ -601,6 +601,7 @@ if (FSO_BUILD_WITH_VULKAN)
 				graphics/vulkan/VulkanModelValidation.cpp
 				graphics/vulkan/VulkanModelValidation.h
 				graphics/vulkan/VulkanRenderer.cpp
+				graphics/vulkan/VulkanRendererFrameFlow.cpp
 				graphics/vulkan/VulkanRendererResources.cpp
 				graphics/vulkan/VulkanRendererDeferredLighting.cpp
 				graphics/vulkan/VulkanRendererLifecycle.cpp
