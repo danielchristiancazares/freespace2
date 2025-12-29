@@ -3,11 +3,6 @@
 #include "VulkanSync2Helpers.h"
 #include "VulkanTextureManager.h"
 #include "osapi/outwnd.h"
-#include <atomic>
-#include <chrono>
-#include <fstream>
-#include <sstream>
-#include <string>
 
 namespace graphics {
 namespace vulkan {

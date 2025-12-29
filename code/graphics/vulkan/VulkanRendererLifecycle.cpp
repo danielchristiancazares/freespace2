@@ -4,7 +4,6 @@
 #include "VulkanMovieManager.h"
 #include "VulkanTextureBindings.h"
 
-#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <utility>

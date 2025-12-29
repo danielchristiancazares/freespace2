@@ -1,21 +1,9 @@
 #include "VulkanPipelineManager.h"
 
-#include "VulkanRenderer.h"
-#include "VulkanVertexTypes.h"
-#include "cmdline/cmdline.h"
-#include "globalincs/systemvars.h"
-
-#include <algorithm>
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cstddef>
-#include <fstream>
-#include <sstream>
 #include <stdexcept>
-#include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace graphics {
