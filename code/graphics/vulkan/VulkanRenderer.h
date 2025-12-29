@@ -142,7 +142,9 @@ public:
     return static_cast<uint32_t>(m_vulkanDevice->minUniformBufferOffsetAlignment());
   }
   uint32_t getVertexBufferAlignment() const { return m_vulkanDevice->vertexBufferAlignment(); }
-  ShaderModules getShaderModules(shader_type type) const { return m_shaderManager->getModules(type); }
+  ShaderModules getShaderModules(shader_type type, uint32_t variantFlags = 0) const {
+    return m_shaderManager->getModules(type, variantFlags);
+  }
   ShaderModules getShaderModulesByFilenames(const SCP_string &vertFilename, const SCP_string &fragFilename) const {
     return m_shaderManager->getModulesByFilenames(vertFilename, fragFilename);
   }
