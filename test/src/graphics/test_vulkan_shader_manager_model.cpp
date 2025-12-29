@@ -1,6 +1,7 @@
-#include "graphics/vulkan/VulkanShaderManager.h"
-#include "graphics/vulkan/VulkanPipelineManager.h"
+#include "graphics/vulkan/VulkanModelShaderVariants.h"
 #include "graphics/vulkan/VulkanModelValidation.h"
+#include "graphics/vulkan/VulkanPipelineManager.h"
+#include "graphics/vulkan/VulkanShaderManager.h"
 
 #include <gtest/gtest.h>
 
@@ -16,8 +17,7 @@ namespace {
 static uint32_t gCreateCalls = 0;
 static std::vector<size_t> gCodeSizes;
 
-VkResult VKAPI_CALL StubCreateShaderModule(
-	VkDevice /*device*/,
+VkResult VKAPI_CALL StubCreateShaderModule(VkDevice /*device*/,
 	const VkShaderModuleCreateInfo* createInfo,
 	const VkAllocationCallbacks* /*allocator*/,
 	VkShaderModule* pShaderModule)
@@ -28,8 +28,7 @@ VkResult VKAPI_CALL StubCreateShaderModule(
 	return VK_SUCCESS;
 }
 
-void VKAPI_CALL StubDestroyShaderModule(
-	VkDevice /*device*/,
+void VKAPI_CALL StubDestroyShaderModule(VkDevice /*device*/,
 	VkShaderModule /*module*/,
 	const VkAllocationCallbacks* /*allocator*/)
 {
@@ -79,8 +78,8 @@ class VulkanShaderManagerModelTest : public ::testing::Test {
 	void SetUp() override
 	{
 		resetStub();
-		m_root = std::filesystem::temp_directory_path() / "fso-model-shader-manager" /
-			std::filesystem::path(makeNonce());
+		m_root =
+			std::filesystem::temp_directory_path() / "fso-model-shader-manager" / std::filesystem::path(makeNonce());
 		std::filesystem::create_directories(m_root);
 
 		m_prevCreate = VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateShaderModule;
@@ -113,7 +112,8 @@ TEST_F(VulkanShaderManagerModelTest, Scenario_ModelUsesUnifiedModules)
 	// different shaders than SDR_TYPE_DEFAULT_MATERIAL (the contract), regardless
 	// of whether they come from embedded files or the filesystem.
 	writeSpirv(m_root, "model.vert.spv", 8);
-	writeSpirv(m_root, "model.frag.spv", 12);
+	writeSpirv(m_root, "model_forward.frag.spv", 12);
+	writeSpirv(m_root, "model.frag.spv", 16);
 	writeSpirv(m_root, "default-material.vert.spv", 100);
 	writeSpirv(m_root, "default-material.frag.spv", 104);
 
@@ -131,20 +131,71 @@ TEST_F(VulkanShaderManagerModelTest, Scenario_ModelUsesUnifiedModules)
 		<< "Model fragment shader should differ from default-material fragment shader";
 }
 
-TEST_F(VulkanShaderManagerModelTest, Scenario_ModelIgnoresVariantFlagsForModules)
+TEST_F(VulkanShaderManagerModelTest, Scenario_ModelIgnoresNonOutputVariantFlagsForModules)
 {
 	writeSpirv(m_root, "model.vert.spv", 16);
-	writeSpirv(m_root, "model.frag.spv", 24);
+	writeSpirv(m_root, "model_forward.frag.spv", 24);
 
 	vk::Device fakeDevice{reinterpret_cast<VkDevice>(0x1234)};
 	graphics::vulkan::VulkanShaderManager manager(fakeDevice, m_root.string());
 
 	auto first = manager.getModules(shader_type::SDR_TYPE_MODEL, 0u);
-	auto second = manager.getModules(shader_type::SDR_TYPE_MODEL, 0xFFu); // arbitrary flags
+	auto second = manager.getModules(shader_type::SDR_TYPE_MODEL, MODEL_SDR_FLAG_DIFFUSE | MODEL_SDR_FLAG_SPEC);
 
-	// Unified shader set should return the same module handles regardless of flags
+	// Forward (single-attachment) path: module selection should ignore non-output-affecting flags.
 	EXPECT_EQ(first.vert, second.vert);
 	EXPECT_EQ(first.frag, second.frag);
+}
+
+TEST_F(VulkanShaderManagerModelTest, Scenario_ModelSelectsDeferredFragmentWhenDeferredFlagSet)
+{
+	writeSpirv(m_root, "model.vert.spv", 16);
+	writeSpirv(m_root, "model_forward.frag.spv", 24);
+	writeSpirv(m_root, "model.frag.spv", 28);
+
+	vk::Device fakeDevice{reinterpret_cast<VkDevice>(0x1234)};
+	graphics::vulkan::VulkanShaderManager manager(fakeDevice, m_root.string());
+
+	auto forward = manager.getModules(shader_type::SDR_TYPE_MODEL, 0u);
+	auto deferred = manager.getModules(shader_type::SDR_TYPE_MODEL, MODEL_SDR_FLAG_DEFERRED);
+
+	EXPECT_EQ(forward.vert, deferred.vert);
+	EXPECT_NE(forward.frag, deferred.frag);
+}
+
+TEST_F(VulkanShaderManagerModelTest, Scenario_ModelVariantFlagsNormalizedByAttachmentCount)
+{
+	// Forward (single attachment): ensure deferred output signature is disabled even if the incoming flags request it.
+	const uint32_t forwardFlags =
+		graphics::vulkan::normalize_model_variant_flags_for_target(MODEL_SDR_FLAG_DEFERRED | MODEL_SDR_FLAG_DIFFUSE,
+			1u);
+	EXPECT_EQ((forwardFlags & static_cast<uint32_t>(MODEL_SDR_FLAG_DEFERRED)), 0u);
+	EXPECT_NE((forwardFlags & static_cast<uint32_t>(MODEL_SDR_FLAG_DIFFUSE)), 0u);
+
+	// Deferred (G-buffer): ensure deferred output signature is enabled even if the incoming flags omit it.
+	const uint32_t deferredFlags = graphics::vulkan::normalize_model_variant_flags_for_target(0u,
+		graphics::vulkan::VulkanRenderTargets::kGBufferCount);
+	EXPECT_NE((deferredFlags & static_cast<uint32_t>(MODEL_SDR_FLAG_DEFERRED)), 0u);
+}
+
+TEST_F(VulkanShaderManagerModelTest, Scenario_ModelUsesAttachmentCountNormalizationToSelectModules)
+{
+	writeSpirv(m_root, "model.vert.spv", 16);
+	writeSpirv(m_root, "model_forward.frag.spv", 24);
+	writeSpirv(m_root, "model.frag.spv", 28);
+
+	vk::Device fakeDevice{reinterpret_cast<VkDevice>(0x1234)};
+	graphics::vulkan::VulkanShaderManager manager(fakeDevice, m_root.string());
+
+	const uint32_t forwardFlags = graphics::vulkan::normalize_model_variant_flags_for_target(0u, 1u);
+	const uint32_t deferredFlags = graphics::vulkan::normalize_model_variant_flags_for_target(0u,
+		graphics::vulkan::VulkanRenderTargets::kGBufferCount);
+
+	auto forward = manager.getModules(shader_type::SDR_TYPE_MODEL, forwardFlags);
+	auto deferred = manager.getModules(shader_type::SDR_TYPE_MODEL, deferredFlags);
+
+	EXPECT_EQ(forward.vert, deferred.vert);
+	EXPECT_NE(forward.frag, deferred.frag);
 }
 
 TEST_F(VulkanShaderManagerModelTest, Scenario_ShieldDecalUsesShieldImpactModules)
@@ -209,9 +260,9 @@ TEST_F(VulkanShaderManagerModelTest, Scenario_ModelRequiresDescriptorIndexingFea
 {
 	// Missing critical descriptor indexing features should return false
 	vk::PhysicalDeviceDescriptorIndexingFeatures feats{};
-	feats.shaderSampledImageArrayNonUniformIndexing = VK_FALSE; // required
-	feats.runtimeDescriptorArray = VK_FALSE; // required
-	feats.descriptorBindingVariableDescriptorCount = VK_FALSE; // no longer required
+	feats.shaderSampledImageArrayNonUniformIndexing = VK_FALSE;    // required
+	feats.runtimeDescriptorArray = VK_FALSE;                       // required
+	feats.descriptorBindingVariableDescriptorCount = VK_FALSE;     // no longer required
 	feats.descriptorBindingSampledImageUpdateAfterBind = VK_FALSE; // no longer required
 
 	EXPECT_FALSE(graphics::vulkan::ValidateModelDescriptorIndexingSupport(feats));

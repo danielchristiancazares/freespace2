@@ -5,6 +5,7 @@
 #include "VulkanDebug.h"
 #include "VulkanFrameCaps.h"
 #include "VulkanFrameFlow.h"
+#include "VulkanModelShaderVariants.h"
 #include "VulkanModelTypes.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanRenderer.h"
@@ -28,9 +29,6 @@
 #include "graphics/util/uniform_structs.h"
 #include "lighting/lighting.h"
 #include "mod_table/mod_table.h"
-
-#define MODEL_SDR_FLAG_MODE_CPP
-#include "def_files/data/effects/model_shader_flags.h"
 
 extern transform_stack gr_model_matrix_stack;
 extern matrix4 gr_view_matrix;
@@ -129,7 +127,6 @@ float clampLineWidth(const VkPhysicalDeviceLimits &limits, float requestedWidth)
   return clamped;
 }
 
-// Helper functions
 vk::Viewport createFullScreenViewport() {
   vk::Viewport viewport{};
   viewport.x = 0.f;
@@ -249,7 +246,6 @@ uint32_t convertColorWriteMask(const bvec4 &mask) {
   return out;
 }
 
-// Stub implementations for unimplemented functions
 gr_buffer_handle gr_vulkan_create_buffer(BufferType type, BufferUsageHint usage) {
   return currentRenderer().createBuffer(type, usage);
 }
@@ -265,8 +261,6 @@ void gr_vulkan_setup_frame() {
   auto &renderer = ctxBase.renderer;
 
   VulkanFrame &frame = ctxBase.frame();
-
-  // Reset per-frame uniform bindings (optional will be empty at frame start)
   frame.resetPerFrameBindings();
 
   // DO NOT start the render pass here - allow gr_clear to set clear flags first.
@@ -282,7 +276,6 @@ void gr_vulkan_setup_frame() {
   // Clipped UI draws still call gr_set_clip/gr_reset_clip and update scissor explicitly.
   vk::Rect2D scissor = createFullScreenScissor();
 
-  // Line width: apply requested width, clamped to device limits
   const auto &limits = renderer.vulkanDevice()->properties().limits;
   const float lineWidth = clampLineWidth(limits, g_requestedLineWidth);
 
@@ -465,7 +458,6 @@ void gr_vulkan_update_transform_buffer(void *data, size_t size) {
 void gr_vulkan_set_clip(int x, int y, int w, int h, int resize_mode) {
   applyClipToScreen(x, y, w, h, resize_mode);
 
-  // Apply the updated clip as dynamic scissor state.
   if (g_backend && g_backend->recording.has_value()) {
     auto ctxBaseOpt = maybeCurrentFrameCtx();
     if (!ctxBaseOpt.has_value()) {
@@ -1132,11 +1124,6 @@ void gr_vulkan_render_model(model_material *material_info, indexed_vertex_source
   auto cmd = renderCtx.cmd;
   const auto &rt = renderCtx.targetInfo;
 
-  // Get shader modules for model shader
-  ShaderModules modules = ctxBase.renderer.getShaderModules(SDR_TYPE_MODEL);
-  Assertion(modules.vert != nullptr, "Model vertex shader not loaded");
-  Assertion(modules.frag != nullptr, "Model fragment shader not loaded");
-
   // Build pipeline key from active render target contract
   PipelineKey key{};
   key.type = SDR_TYPE_MODEL;
@@ -1147,6 +1134,14 @@ void gr_vulkan_render_model(model_material *material_info, indexed_vertex_source
   key.color_attachment_count = rt.colorAttachmentCount;
   key.blend_mode = material_info->get_blend_mode();
   // Model shaders ignore layout_hash (vertex pulling)
+
+  // Shader module selection must match the active render target contract.
+  key.variant_flags = normalize_model_variant_flags_for_target(key.variant_flags, rt.colorAttachmentCount);
+
+  // Get shader modules for model shader (variant flags may select forward vs deferred fragment output signature)
+  ShaderModules modules = ctxBase.renderer.getShaderModules(SDR_TYPE_MODEL, key.variant_flags);
+  Assertion(modules.vert != nullptr, "Model vertex shader not loaded");
+  Assertion(modules.frag != nullptr, "Model fragment shader not loaded");
 
   // Get or create pipeline (pass empty layout for vertex pulling)
   vertex_layout emptyLayout;
@@ -2492,9 +2487,7 @@ void init_function_pointers() {
     gr_screen.gf_deferred_lighting_finish = stub_deferred_lighting_finish;
   }
 
-  // Line width: store requested width (applied at frame setup)
   gr_screen.gf_set_line_width = [](float width) {
-    // Sanitize input
     if (!(width > 0.0f)) {
       width = 1.0f;
     }
