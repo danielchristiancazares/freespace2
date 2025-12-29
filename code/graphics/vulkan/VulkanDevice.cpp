@@ -980,12 +980,12 @@ VulkanDevice::AcquireResult VulkanDevice::acquireNextImage(vk::Semaphore imageAv
   return result;
 }
 
-VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, uint32_t imageIndex) {
+VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore presentWait, uint32_t imageIndex) {
   PresentResult result;
 
   vk::PresentInfoKHR presentInfo;
   presentInfo.waitSemaphoreCount = 1;
-  presentInfo.pWaitSemaphores = &renderFinished;
+  presentInfo.pWaitSemaphores = &presentWait;
   presentInfo.swapchainCount = 1;
   auto swapchain = m_swapchain.get();
   presentInfo.pSwapchains = &swapchain;

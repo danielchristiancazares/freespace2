@@ -75,7 +75,7 @@ public:
     bool needsRecreate = false;
     bool success = false;
   };
-  PresentResult present(vk::Semaphore renderFinished, uint32_t imageIndex);
+  PresentResult present(vk::Semaphore presentWait, uint32_t imageIndex);
 
   bool recreateSwapchain(uint32_t width, uint32_t height);
 
