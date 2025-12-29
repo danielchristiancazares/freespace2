@@ -1,11 +1,9 @@
 #include "VulkanFrame.h"
 #include "VulkanDebug.h"
 
-#include <array>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
-#include <type_traits>
 
 namespace graphics {
 namespace vulkan {

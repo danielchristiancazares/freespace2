@@ -7,12 +7,7 @@
 #include "model/modelrender.h"
 #include "osapi/outwnd.h"
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
 #include <cstring>
-#include <fstream>
-#include <string>
 
 extern matrix4 gr_view_matrix;
 extern matrix4 gr_projection_matrix;

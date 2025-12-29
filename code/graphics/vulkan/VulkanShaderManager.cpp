@@ -7,8 +7,6 @@
 #undef MODEL_SDR_FLAG_MODE_CPP
 #include "globalincs/pstypes.h"
 
-#include <atomic>
-#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
