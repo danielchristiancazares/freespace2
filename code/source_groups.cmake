@@ -598,9 +598,10 @@ if (FSO_BUILD_WITH_VULKAN)
 		graphics/vulkan/VulkanMovieManager.h
 		graphics/vulkan/VulkanBufferManager.cpp
 		graphics/vulkan/VulkanBufferManager.h
-		graphics/vulkan/VulkanModelValidation.cpp
+				graphics/vulkan/VulkanModelValidation.cpp
 			graphics/vulkan/VulkanModelValidation.h
 				graphics/vulkan/VulkanRenderer.cpp
+				graphics/vulkan/VulkanRendererRenderState.cpp
 				graphics/vulkan/VulkanRenderer.h
 				graphics/vulkan/VulkanRenderTargets.cpp
 				graphics/vulkan/VulkanRenderTargets.h
