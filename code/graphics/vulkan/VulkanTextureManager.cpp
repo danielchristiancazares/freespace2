@@ -100,7 +100,7 @@ VulkanTextureManager::VulkanTextureManager(vk::Device device, const vk::Physical
 
 uint32_t VulkanTextureManager::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const {
   for (uint32_t i = 0; i < m_memoryProperties.memoryTypeCount; ++i) {
-    if ((typeFilter & (1 << i)) && (m_memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+    if ((typeFilter & (1u << i)) && (m_memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
       return i;
     }
   }

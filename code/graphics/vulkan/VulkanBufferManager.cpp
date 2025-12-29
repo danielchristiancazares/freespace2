@@ -23,7 +23,7 @@ VulkanBufferManager::VulkanBufferManager(vk::Device device, const vk::PhysicalDe
 
 uint32_t VulkanBufferManager::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) const {
   for (uint32_t i = 0; i < m_memoryProperties.memoryTypeCount; ++i) {
-    if ((typeFilter & (1 << i)) && (m_memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+    if ((typeFilter & (1u << i)) && (m_memoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
       return i;
     }
   }
