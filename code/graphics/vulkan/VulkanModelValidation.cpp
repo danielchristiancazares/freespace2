@@ -18,9 +18,6 @@ bool ValidateModelDescriptorIndexingSupport(const vk::PhysicalDeviceDescriptorIn
     return false;
   }
 
-  // REMOVED: descriptorBindingSampledImageUpdateAfterBind (no longer used)
-  // REMOVED: descriptorBindingVariableDescriptorCount (no longer used)
-
   return true;
 }
 

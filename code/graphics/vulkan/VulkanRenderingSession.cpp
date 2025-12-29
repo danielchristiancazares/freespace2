@@ -34,15 +34,12 @@ void VulkanRenderingSession::beginFrame(vk::CommandBuffer cmd, uint32_t imageInd
 
   m_clearOps = ClearOps::clearAll();
 
-  // Transition swapchain and depth to attachment layouts
   transitionSwapchainToAttachment(cmd, imageIndex);
   transitionDepthToAttachment(cmd);
 }
 
 void VulkanRenderingSession::endFrame(vk::CommandBuffer cmd, uint32_t imageIndex) {
   endActivePass();
-
-  // Transition swapchain to present layout
   transitionSwapchainToPresent(cmd, imageIndex);
 }
 
@@ -466,7 +463,6 @@ void VulkanRenderingSession::GBufferAttachmentTarget::begin(VulkanRenderingSessi
 
   const auto extent = s.m_device.swapchainExtent();
 
-  // Ensure gbuffer images are in color-attachment layout for rendering.
   s.transitionGBufferToAttachment(cmd);
 
   vk::RenderingAttachmentInfo colorAttachment{};
@@ -693,7 +689,6 @@ void VulkanRenderingSession::beginOffscreenColorRenderingInternal(vk::CommandBuf
 void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd) {
   const auto extent = m_device.swapchainExtent();
 
-  // Transition G-buffer images to color attachment optimal
   transitionGBufferToAttachment(cmd);
   const vk::ImageView depthView = (m_depthAttachment == DepthAttachmentKind::Main)
                                       ? m_targets.depthAttachmentView()
@@ -704,7 +699,6 @@ void VulkanRenderingSession::beginGBufferRenderingInternal(vk::CommandBuffer cmd
     transitionCockpitDepthToAttachment(cmd);
   }
 
-  // Setup color attachments for G-buffer
   std::array<vk::RenderingAttachmentInfo, VulkanRenderTargets::kGBufferCount> colorAttachments{};
   for (uint32_t i = 0; i < VulkanRenderTargets::kGBufferCount; ++i) {
     colorAttachments[i].imageView = m_targets.gbufferView(i);

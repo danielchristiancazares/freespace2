@@ -68,7 +68,6 @@ void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer &buffer, vk::De
   Assertion(size > 0, "uploadToDeviceLocal requires size > 0");
   Assertion(dstOffset + size <= buffer.size, "uploadToDeviceLocal range exceeds destination buffer size");
 
-  // Create a transient staging buffer for this upload.
   vk::BufferCreateInfo stagingInfo{};
   stagingInfo.size = size;
   stagingInfo.usage = vk::BufferUsageFlagBits::eTransferSrc;
@@ -89,7 +88,6 @@ void VulkanBufferManager::uploadToDeviceLocal(const VulkanBuffer &buffer, vk::De
   std::memcpy(mapped, data, static_cast<size_t>(size));
   m_device.unmapMemory(stagingMemory.get());
 
-  // Record copy into a one-time command buffer and wait for completion.
   vk::CommandBufferAllocateInfo allocInfo{};
   allocInfo.commandPool = m_transferCommandPool.get();
   allocInfo.level = vk::CommandBufferLevel::ePrimary;
@@ -166,9 +164,7 @@ gr_buffer_handle VulkanBufferManager::createBuffer(BufferType type, BufferUsageH
   buffer.usage = usage;
   buffer.size = 0;
 
-  // Buffer will be created/resized on first update
-  // Don't create buffer yet - wait for first updateBufferData call
-
+  // Buffer will be created/resized on first updateBufferData call
   m_buffers.push_back(std::move(buffer));
   return gr_buffer_handle(static_cast<int>(m_buffers.size() - 1));
 }
@@ -179,7 +175,6 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle) {
 
   auto &buffer = m_buffers[handle.value()];
 
-  // Unmap if mapped
   if (buffer.mapped) {
     m_device.unmapMemory(buffer.memory.get());
     buffer.mapped = nullptr;
@@ -193,7 +188,6 @@ void VulkanBufferManager::deleteBuffer(gr_buffer_handle handle) {
                                [buf = std::move(buffer.buffer), mem = std::move(buffer.memory)]() mutable {});
   }
 
-  // Mark slot as invalid
   buffer.size = 0;
 }
 
@@ -222,11 +216,8 @@ void VulkanBufferManager::updateBufferData(gr_buffer_handle handle, size_t size,
 
   // Upload data
   if (updatedBuffer.mapped) {
-    // Host-visible: direct copy
     memcpy(static_cast<char *>(updatedBuffer.mapped), static_cast<const char *>(data), size);
-    // Host-coherent memory doesn't need explicit flush
   } else {
-    // Device-local: stage and copy.
     uploadToDeviceLocal(updatedBuffer, 0, static_cast<vk::DeviceSize>(size), data);
   }
 }
@@ -253,10 +244,8 @@ void VulkanBufferManager::updateBufferDataOffset(gr_buffer_handle handle, size_t
     return;
   }
 
-  // Copy to mapped memory
   void *dest = static_cast<char *>(buffer.mapped) + offset;
   memcpy(static_cast<char *>(dest), static_cast<const char *>(data), size);
-  // Host-coherent memory doesn't need explicit flush
 }
 
 void *VulkanBufferManager::mapBuffer(gr_buffer_handle handle) {
@@ -316,9 +305,7 @@ void VulkanBufferManager::resizeBuffer(gr_buffer_handle handle, size_t size) {
     }
   }
 
-  // Retire the old buffer if it exists
   if (buffer.buffer) {
-    // Unmap if mapped
     if (buffer.mapped) {
       m_device.unmapMemory(buffer.memory.get());
       buffer.mapped = nullptr;
@@ -367,7 +354,6 @@ vk::Buffer VulkanBufferManager::ensureBuffer(gr_buffer_handle handle, vk::Device
 }
 
 void VulkanBufferManager::cleanup() {
-  // Unmap all mapped buffers
   for (auto &buffer : m_buffers) {
     if (buffer.mapped) {
       m_device.unmapMemory(buffer.memory.get());

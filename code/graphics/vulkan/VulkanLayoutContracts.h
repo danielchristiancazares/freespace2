@@ -33,7 +33,6 @@ const ShaderLayoutSpec &getShaderLayoutSpec(shader_type type);
 // Returns the full set of layout contracts, indexed by shader_type value
 const SCP_vector<ShaderLayoutSpec> &getShaderLayoutSpecs();
 
-// Convenience helpers
 bool usesVertexPulling(shader_type type);
 PipelineLayoutKind pipelineLayoutForShader(shader_type type);
 

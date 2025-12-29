@@ -30,38 +30,21 @@ struct VertexFormatMapping {
 // Location mapping follows OpenGL convention:
 // 0 = POSITION, 1 = COLOR, 2 = TEXCOORD, 3 = NORMAL, 4 = TANGENT, etc.
 static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatMapping> VERTEX_FORMAT_MAP = {
-    // Position formats -> location 0
     {vertex_format_data::POSITION4, {vk::Format::eR32G32B32A32Sfloat, 0, 4}},
     {vertex_format_data::POSITION3, {vk::Format::eR32G32B32Sfloat, 0, 3}},
     {vertex_format_data::POSITION2, {vk::Format::eR32G32Sfloat, 0, 2}},
     {vertex_format_data::SCREEN_POS, {vk::Format::eR32G32Sfloat, 0, 2}},
-
-    // Color formats -> location 1
     {vertex_format_data::COLOR3, {vk::Format::eR8G8B8Unorm, 1, 3}},
     {vertex_format_data::COLOR4, {vk::Format::eR8G8B8A8Unorm, 1, 4}},
     {vertex_format_data::COLOR4F, {vk::Format::eR32G32B32A32Sfloat, 1, 4}},
-
-    // Texture coordinate formats -> location 2
     {vertex_format_data::TEX_COORD2, {vk::Format::eR32G32Sfloat, 2, 2}},
     {vertex_format_data::TEX_COORD4, {vk::Format::eR32G32B32A32Sfloat, 2, 4}},
-
-    // Normal -> location 3
     {vertex_format_data::NORMAL, {vk::Format::eR32G32B32Sfloat, 3, 3}},
-
-    // Tangent -> location 4
     {vertex_format_data::TANGENT, {vk::Format::eR32G32B32A32Sfloat, 4, 4}},
-
-    // Model ID -> location 5
     {vertex_format_data::MODEL_ID, {vk::Format::eR32Sfloat, 5, 1}},
-
-    // Radius -> location 6
     {vertex_format_data::RADIUS, {vk::Format::eR32Sfloat, 6, 1}},
-
-    // UVec -> location 7
     {vertex_format_data::UVEC, {vk::Format::eR32G32B32Sfloat, 7, 3}},
-
-    // Matrix4 -> locations 8-11 (4 vec4s)
-    {vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}}, // handled specially
+    {vertex_format_data::MATRIX4, {vk::Format::eR32G32B32A32Sfloat, 8, 4}},
 };
 
 // Vulkan allows gaps in vertex attribute locations - a layout with position (0) and
@@ -144,7 +127,6 @@ static bool formatHasStencil(vk::Format format) {
 VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
   VertexInputState result;
 
-  // Group components by buffer_number to create bindings
   std::unordered_map<size_t, std::vector<const vertex_format_data *>> componentsByBuffer;
 
   for (size_t i = 0; i < layout.get_num_vertex_components(); ++i) {
@@ -154,13 +136,11 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 
   std::unordered_map<uint32_t, uint32_t> divisorsByBinding;
 
-  // Create bindings for each buffer
   for (const auto &[bufferNum, components] : componentsByBuffer) {
     if (components.empty()) {
       continue;
     }
 
-    // Get stride for this buffer
     size_t stride = layout.get_vertex_stride(bufferNum);
 
     vk::VertexInputBindingDescription binding{};
@@ -181,7 +161,6 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 
     result.bindings.push_back(binding);
 
-    // Create attributes for each component
     for (const auto *component : components) {
       auto it = VERTEX_FORMAT_MAP.find(component->format_type);
       Assertion(it != VERTEX_FORMAT_MAP.end(), "Unknown vertex format type %d - add to VERTEX_FORMAT_MAP",
