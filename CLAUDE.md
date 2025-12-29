@@ -1,2 +1,2 @@
 # Claude Code 
-- Read @AGENTS.md
+- Follow instructions from @AGENTS.md
