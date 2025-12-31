@@ -7,6 +7,12 @@ This document describes the complete model rendering pipeline in the Vulkan rend
 ## Table of Contents
 
 1. [Overview](#1-overview)
+   - [1.1 Architecture Summary](#11-architecture-summary)
+   - [1.2 Why Vertex Pulling?](#12-why-vertex-pulling)
+   - [1.3 Key Files](#13-key-files)
+   - [1.4 Pipeline Type](#14-pipeline-type)
+   - [1.5 Pipeline Layout Contracts](#15-pipeline-layout-contracts)
+   - [1.6 Dynamic State](#16-dynamic-state)
 2. [Prerequisites](#2-prerequisites)
 3. [Glossary](#3-glossary)
 4. [Complete Flow Diagram](#4-complete-flow-diagram)
@@ -15,6 +21,7 @@ This document describes the complete model rendering pipeline in the Vulkan rend
 7. [Uniform Buffer Management](#7-uniform-buffer-management)
 8. [Descriptor Synchronization](#8-descriptor-synchronization)
 9. [Draw Call Execution](#9-draw-call-execution)
+   - [9.2 Pipeline Selection and VulkanPipelineManager](#92-pipeline-selection-and-vulkanpipelinemanager)
 10. [Push Constants](#10-push-constants)
 11. [Common Patterns](#11-common-patterns)
 12. [Performance Considerations](#12-performance-considerations)
@@ -57,6 +64,10 @@ Vertex pulling eliminates this overhead:
 | `code/graphics/vulkan/VulkanRendererResources.cpp` | Model rendering orchestration, descriptor sync |
 | `code/graphics/vulkan/VulkanModelTypes.h` | Push constants structure and attribute bits |
 | `code/graphics/vulkan/VulkanGraphics.cpp` | Engine integration, `gr_vulkan_render_model()` |
+| `code/graphics/vulkan/VulkanPipelineManager.h` | Pipeline caching, `PipelineKey` structure, vertex input modes |
+| `code/graphics/vulkan/VulkanPipelineManager.cpp` | Pipeline creation, vertex layout conversion |
+| `code/graphics/vulkan/VulkanLayoutContracts.h` | Shader-to-pipeline-layout mapping, `VertexInputMode` enum |
+| `code/graphics/vulkan/VulkanLayoutContracts.cpp` | Layout specifications for all shader types |
 | `code/graphics/vulkan/VulkanDescriptorLayouts.cpp` | Model pipeline layout and descriptor set layout |
 | `code/graphics/shaders/model.vert` | Vertex shader with vertex pulling logic |
 | `code/graphics/shaders/model.frag` | Fragment shader with bindless texture sampling |
@@ -66,6 +77,71 @@ Vertex pulling eliminates this overhead:
 
 - **Shader Type**: `SDR_TYPE_MODEL`
 - **Pipeline Layout**: Model-specific layout with vertex heap SSBO, bindless textures, dynamic UBO, and transform SSBO
+
+### 1.5 Pipeline Layout Contracts
+
+The Vulkan renderer uses a contract system (`VulkanLayoutContracts.h`) to map shader types to pipeline configurations:
+
+```cpp
+enum class PipelineLayoutKind {
+  Standard, // per-draw push descriptors + global set
+  Model,    // model bindless set + push constants
+  Deferred  // deferred lighting push descriptors + global (G-buffer) set
+};
+
+enum class VertexInputMode {
+  VertexAttributes, // traditional vertex attributes from vertex_layout
+  VertexPulling     // no vertex attributes; fetch from buffers in shader
+};
+
+struct ShaderLayoutSpec {
+  shader_type type;
+  const char *name;
+  PipelineLayoutKind pipelineLayout;
+  VertexInputMode vertexInput;
+};
+```
+
+**Model Shader Contract**:
+- **Pipeline Layout**: `PipelineLayoutKind::Model`
+- **Vertex Input**: `VertexInputMode::VertexPulling`
+
+This is the **only** shader type that uses vertex pulling. All other shaders use `VertexInputMode::VertexAttributes`.
+
+### 1.6 Dynamic State
+
+The renderer targets Vulkan 1.4 and uses extensive dynamic state to minimize pipeline permutations:
+
+**Core Dynamic States** (Extended Dynamic State 1/2, always available):
+
+| State | Set Via |
+|-------|---------|
+| Viewport | `vkCmdSetViewport` |
+| Scissor | `vkCmdSetScissor` |
+| Line Width | `vkCmdSetLineWidth` |
+| Cull Mode | `vkCmdSetCullMode` |
+| Front Face | `vkCmdSetFrontFace` |
+| Primitive Topology | `vkCmdSetPrimitiveTopology` |
+| Depth Test Enable | `vkCmdSetDepthTestEnable` |
+| Depth Write Enable | `vkCmdSetDepthWriteEnable` |
+| Depth Compare Op | `vkCmdSetDepthCompareOp` |
+| Stencil Test Enable | `vkCmdSetStencilTestEnable` |
+
+**Optional Dynamic States** (Extended Dynamic State 3, capability-gated):
+
+| State | Capability Flag |
+|-------|-----------------|
+| Color Blend Enable | `caps.colorBlendEnable` |
+| Color Write Mask | `caps.colorWriteMask` |
+| Polygon Mode | `caps.polygonMode` |
+| Rasterization Samples | `caps.rasterizationSamples` |
+
+**Baked Pipeline State** (not dynamic):
+
+- Stencil compare/write masks
+- Stencil operations (fail/depth-fail/pass for front and back faces)
+- Stencil reference value
+- Blend factors and equations
 
 ---
 
@@ -93,6 +169,7 @@ You should also understand:
 | Term | Definition |
 |------|------------|
 | **Vertex Pulling** | Technique where shaders read vertex data from a storage buffer using `gl_VertexIndex`, rather than through fixed-function vertex attribute binding. |
+| **Vertex Attributes** | Traditional vertex input mode where the pipeline binds vertex buffers and the fixed-function unit provides data to shader inputs. |
 | **Bindless Textures** | Array-based texture access where textures are indexed by integer slot rather than bound individually per draw. |
 | **SSBO** | Shader Storage Buffer Object. A buffer accessible in shaders with read/write capability and flexible size. |
 | **Dynamic Offset** | An offset applied at descriptor set bind time, allowing multiple data ranges to share a single descriptor binding. |
@@ -100,6 +177,9 @@ You should also understand:
 | **Fallback Texture** | A default texture (typically black or pink) used when the requested texture is not resident. |
 | **Residency** | Whether a texture's data is currently uploaded to GPU memory and available for sampling. |
 | **Push Constants** | Small, fast uniform data pushed directly into the command buffer. Limited to 256 bytes minimum (spec guarantee). |
+| **PipelineKey** | Composite key identifying a unique graphics pipeline configuration. Used by `VulkanPipelineManager` for caching. |
+| **Extended Dynamic State (EDS)** | Vulkan extensions allowing pipeline state to be set dynamically at command buffer time. EDS1/EDS2 are core in Vulkan 1.4; EDS3 is optional. |
+| **Layout Contract** | Mapping from `shader_type` to its required `PipelineLayoutKind` and `VertexInputMode`, defined in `VulkanLayoutContracts.h`. |
 
 ---
 
@@ -133,6 +213,10 @@ You should also understand:
     |   +-- Build ModelPushConstants
     |
     +-- [Draw Call]
+    |   +-- Build PipelineKey from material and render target
+    |   +-- Get/create pipeline via VulkanPipelineManager::getPipeline()
+    |   |   +-- Model shaders use VertexPulling mode (no vertex input state)
+    |   +-- Set dynamic state (cull mode, depth test/write, stencil test, etc.)
     |   +-- Bind model pipeline
     |   +-- Bind model descriptor set (with dynamic offsets for UBO and transform buffer)
     |   +-- Push ModelPushConstants (vertex layout + texture slots)
@@ -489,7 +573,69 @@ std::array<ModelBindlessDescriptorCache, kFramesInFlight> m_modelBindlessCache;
 - `bufferp`: Vertex buffer metadata
 - `texi`: Texture batch index
 
-### 9.2 Pipeline Selection
+### 9.2 Pipeline Selection and VulkanPipelineManager
+
+The `VulkanPipelineManager` handles pipeline creation and caching. It supports two vertex input modes:
+
+| Mode | Description | Used By |
+|------|-------------|---------|
+| **VertexPulling** | No vertex input attributes; shader fetches from storage buffers via `gl_VertexIndex` | `SDR_TYPE_MODEL` |
+| **VertexAttributes** | Traditional vertex input with bindings and attributes from `vertex_layout` | All other shaders |
+
+The mode is determined by `VulkanLayoutContracts.h`:
+
+```cpp
+// From VulkanLayoutContracts.h
+enum class VertexInputMode {
+  VertexAttributes, // traditional vertex attributes from vertex_layout
+  VertexPulling     // no vertex attributes; fetch from buffers in shader
+};
+
+// Model shaders use vertex pulling
+bool usesVertexPulling(shader_type type);  // Returns true for SDR_TYPE_MODEL
+```
+
+**PipelineKey Structure** (`VulkanPipelineManager.h`):
+
+```cpp
+struct PipelineKey {
+  // Shader identification
+  shader_type type = SDR_TYPE_NONE;
+  uint32_t variant_flags = 0;
+  size_t shader_hash = 0;  // Computed internally by getPipeline()
+
+  // Render target configuration
+  VkFormat color_format = VK_FORMAT_UNDEFINED;
+  VkFormat depth_format = VK_FORMAT_UNDEFINED;
+  VkSampleCountFlagBits sample_count = VK_SAMPLE_COUNT_1_BIT;
+  uint32_t color_attachment_count = 1;
+
+  // Blend and color state
+  gr_alpha_blend blend_mode = ALPHA_BLEND_NONE;
+  uint32_t color_write_mask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+  // Stencil configuration (baked into pipeline)
+  bool stencil_test_enable = false;
+  VkCompareOp stencil_compare_op = VK_COMPARE_OP_ALWAYS;
+  uint32_t stencil_compare_mask = 0xFF;
+  uint32_t stencil_write_mask = 0xFF;
+  uint32_t stencil_reference = 0;
+
+  // Stencil operations (front/back faces)
+  VkStencilOp front_fail_op = VK_STENCIL_OP_KEEP;
+  VkStencilOp front_depth_fail_op = VK_STENCIL_OP_KEEP;
+  VkStencilOp front_pass_op = VK_STENCIL_OP_KEEP;
+  VkStencilOp back_fail_op = VK_STENCIL_OP_KEEP;
+  VkStencilOp back_depth_fail_op = VK_STENCIL_OP_KEEP;
+  VkStencilOp back_pass_op = VK_STENCIL_OP_KEEP;
+
+  // Vertex layout hash (IGNORED for vertex pulling shaders)
+  size_t layout_hash = 0;
+};
+```
+
+**Building the Pipeline Key** (from `gr_vulkan_render_model()`):
 
 ```cpp
 // Build pipeline key from render target and material
@@ -501,12 +647,34 @@ key.depth_format           = static_cast<VkFormat>(rt.depthFormat);
 key.sample_count           = static_cast<VkSampleCountFlagBits>(renderer.getSampleCount());
 key.color_attachment_count = rt.colorAttachmentCount;
 key.blend_mode             = material_info->get_blend_mode();
-// layout_hash ignored - vertex pulling uses no vertex input state
+key.color_write_mask       = convertColorWriteMask(material_info->get_color_mask());
 
+// Stencil configuration
+key.stencil_test_enable    = material_info->is_stencil_enabled();
+key.stencil_compare_op     = static_cast<VkCompareOp>(convertComparisionFunction(stencilFunc.compare));
+key.stencil_compare_mask   = stencilFunc.mask;
+key.stencil_reference      = static_cast<uint32_t>(stencilFunc.ref);
+key.stencil_write_mask     = material_info->get_stencil_mask();
+
+// Front/back stencil operations from material
+key.front_fail_op          = static_cast<VkStencilOp>(convertStencilOperation(frontOp.stencilFailOperation));
+key.front_depth_fail_op    = static_cast<VkStencilOp>(convertStencilOperation(frontOp.depthFailOperation));
+key.front_pass_op          = static_cast<VkStencilOp>(convertStencilOperation(frontOp.successOperation));
+// ... similar for back_*_op ...
+
+// Model shaders ignore layout_hash (vertex pulling mode)
+
+// Get or create pipeline (pass empty layout for vertex pulling)
+vertex_layout emptyLayout;
 vk::Pipeline pipeline = renderer.getPipeline(key, modules, emptyLayout);
 ```
 
-**Note**: `layout_hash` is ignored because vertex pulling eliminates vertex input state. All vertex formats use the same pipeline.
+**Key Points**:
+
+- `layout_hash` is **ignored** for model shaders because vertex pulling eliminates vertex input state
+- `shader_hash` is computed internally from the shader modules, not set by the caller
+- Stencil operations are baked into the pipeline (not dynamic state)
+- The pipeline manager caches pipelines by `PipelineKey` for reuse across frames
 
 ### 9.3 Descriptor Set Binding
 
@@ -586,37 +754,41 @@ cmd.drawIndexed(
 
 **Location**: `VulkanModelTypes.h`
 
-**Size**: 64 bytes (verified by `static_assert`)
+**Size**: 64 bytes (16 fields x 4 bytes, verified by `static_assert`)
 
 ```cpp
+// Push constant block for model rendering with vertex pulling and bindless textures.
+// Layout must exactly match the GLSL declaration in model.vert and model.frag.
 struct ModelPushConstants {
     // Vertex heap addressing
-    uint32_t vertexOffset;      // Byte offset into vertex heap
+    uint32_t vertexOffset;      // Byte offset into vertex heap buffer for this draw
     uint32_t stride;            // Byte stride between vertices
 
-    // Vertex attribute presence (MODEL_ATTRIB_* bits)
+    // Vertex attribute presence mask (MODEL_ATTRIB_* bits)
     uint32_t vertexAttribMask;
 
-    // Vertex layout offsets (byte offsets within a vertex)
+    // Vertex layout offsets (byte offsets within a vertex; ignored if not present in vertexAttribMask)
     uint32_t posOffset;         // Position (vec3)
     uint32_t normalOffset;      // Normal (vec3)
     uint32_t texCoordOffset;    // Texture coordinate (vec2)
     uint32_t tangentOffset;     // Tangent (vec4)
-    uint32_t modelIdOffset;     // Model ID (float) for batching
+    uint32_t modelIdOffset;     // Model id (float; used for batched transforms)
     uint32_t boneIndicesOffset; // Bone indices (ivec4)
     uint32_t boneWeightsOffset; // Bone weights (vec4)
 
-    // Bindless texture slot indices
+    // Material texture indices (into bindless texture array). Always valid.
     uint32_t baseMapIndex;
     uint32_t glowMapIndex;
     uint32_t normalMapIndex;
     uint32_t specMapIndex;
 
-    // Reserved/future use
-    uint32_t matrixIndex;       // Instance matrix index
-    uint32_t flags;             // Shader variant flags
+    // Instancing (reserved for future use)
+    uint32_t matrixIndex;
+
+    // Shader variant flags
+    uint32_t flags;
 };
-static_assert(sizeof(ModelPushConstants) == 64, "Must be 64 bytes");
+static_assert(sizeof(ModelPushConstants) == 64, "ModelPushConstants must be 64 bytes to match GLSL layout");
 ```
 
 ### 10.2 Vertex Attribute Mask Bits
@@ -766,25 +938,43 @@ void drawModelToGBuffer(const FrameCtx& frameCtx, const ModelData& model) {
 
 ## 12. Performance Considerations
 
-### 12.1 Minimizing State Changes
+### 12.1 Pipeline Caching
+
+`VulkanPipelineManager` caches all created pipelines by `PipelineKey`. Benefits:
+
+- First frame: Pipelines created on-demand (may cause brief hitches)
+- Subsequent frames: Cached pipelines returned immediately
+- Vulkan pipeline cache (`VkPipelineCache`) accelerates SPIR-V compilation across sessions
+
+**Model shader advantage**: Because vertex pulling eliminates vertex input state variations, model shaders have fewer pipeline permutations than traditional vertex attribute shaders. The key differences are:
+- Stencil configuration changes
+- Blend mode changes
+- Render target format changes (forward vs deferred)
+- Shader variant flags
+
+### 12.2 Minimizing State Changes
 
 | Operation | Cost | Frequency |
 |-----------|------|-----------|
-| Pipeline bind | High | Once per material/blend mode change |
+| Pipeline bind | High | Once per material/blend mode/stencil change |
 | Descriptor set bind | Medium | Once per model (dynamic offset changes) |
 | Push constants | Low | Every draw call |
 | Index buffer bind | Low | Every draw call |
 
-**Optimization**: Sort draws by pipeline key to minimize pipeline binds.
+**Optimization**: Sort draws by `PipelineKey` to minimize pipeline binds. Key fields that force new pipelines:
+- `stencil_test_enable` and stencil operations (if different)
+- `blend_mode` (when EDS3 colorBlendEnable is not available)
+- `color_write_mask` (when EDS3 colorWriteMask is not available)
+- Render target format changes
 
-### 12.2 Descriptor Update Batching
+### 12.3 Descriptor Update Batching
 
 The bindless cache (`m_modelBindlessCache`) ensures:
 - First frame: All 1024 texture slots written once
 - Subsequent frames: Only changed slots written
 - Typical case: 0-50 texture changes per frame
 
-### 12.3 Memory Access Patterns
+### 12.4 Memory Access Patterns
 
 **Vertex Pulling Trade-offs**:
 - **Pro**: Single SSBO for all vertex data simplifies binding
@@ -793,7 +983,7 @@ The bindless cache (`m_modelBindlessCache`) ensures:
 
 **Recommendation**: Profile with RenderDoc or Nsight to identify actual bottlenecks.
 
-### 12.4 Dynamic Offset Alignment
+### 12.5 Dynamic Offset Alignment
 
 Ensure uniform buffer offsets respect `minUniformBufferOffsetAlignment`:
 ```cpp
@@ -947,6 +1137,38 @@ bool use32Bit = (batch.flags & VB_FLAG_LARGE_INDEX) != 0;
 vk::IndexType indexType = use32Bit ? vk::IndexType::eUint32 : vk::IndexType::eUint16;
 ```
 
+### Issue 7: Layout Hash Mismatch (Non-Model Shaders)
+
+**Symptoms**: `std::runtime_error` thrown with message "PipelineKey.layout_hash mismatches provided vertex_layout"
+
+**Causes**:
+- `PipelineKey.layout_hash` was not set to match the `vertex_layout` passed to `getPipeline()`
+- The layout was modified between computing the hash and calling `getPipeline()`
+
+**Solution**:
+```cpp
+// For shaders using VertexAttributes mode, set layout_hash from the vertex_layout
+PipelineKey key{};
+key.type = SDR_TYPE_INTERFACE;  // or other non-model shader
+key.layout_hash = myLayout.hash();  // Must match layout passed to getPipeline()
+
+// Then call getPipeline with the same layout
+vk::Pipeline pipeline = renderer.getPipeline(key, modules, myLayout);
+```
+
+**Note**: This error only applies to shaders using `VertexInputMode::VertexAttributes`. Model shaders (`SDR_TYPE_MODEL`) use `VertexInputMode::VertexPulling` and ignore `layout_hash` entirely.
+
+### Issue 8: Stencil Enabled Without Stencil Format
+
+**Symptoms**: `std::runtime_error` thrown with message "Stencil test enabled but render target depth format has no stencil component"
+
+**Causes**:
+- `PipelineKey.stencil_test_enable = true` but depth format lacks stencil (e.g., `VK_FORMAT_D32_SFLOAT`)
+
+**Solution**:
+- Use a depth/stencil format like `VK_FORMAT_D32_SFLOAT_S8_UINT` or `VK_FORMAT_D24_UNORM_S8_UINT`
+- Or disable stencil testing if stencil is not needed
+
 ---
 
 ## Appendix: Descriptor Set Layout Reference
@@ -988,24 +1210,26 @@ Per frame-in-flight:
 
 ### Source Files
 
-| File | Line Range | Function/Section |
-|------|------------|------------------|
-| `VulkanRendererResources.cpp` | - | `setModelVertexHeapHandle()` |
-| `VulkanRendererResources.cpp` | - | `setModelUniformBinding()` |
-| `VulkanRendererResources.cpp` | - | `updateModelDescriptors()` |
-| `VulkanRendererResources.cpp` | - | `beginModelDescriptorSync()` |
-| `VulkanGraphics.cpp` | 1085-1141 | `issueModelDraw()` |
-| `VulkanGraphics.cpp` | 1143-1330 | `gr_vulkan_render_model()` |
-| `VulkanDescriptorLayouts.cpp` | 109-193 | `createModelLayouts()` |
-| `VulkanModelTypes.h` | 10-50 | `ModelPushConstants`, `MODEL_ATTRIB_*` |
-| `uniform_structs.h` | 79-145 | `model_uniform_data` |
-| `model.vert` | 1-189 | Vertex pulling shader |
-| `model.frag` | - | Fragment shader with bindless textures |
+| File | Function/Section |
+|------|------------------|
+| `VulkanRendererResources.cpp` | `setModelVertexHeapHandle()`, `setModelUniformBinding()` |
+| `VulkanRendererResources.cpp` | `updateModelDescriptors()`, `beginModelDescriptorSync()` |
+| `VulkanGraphics.cpp` | `issueModelDraw()`, `gr_vulkan_render_model()` |
+| `VulkanPipelineManager.h` | `PipelineKey`, `PipelineKeyHasher`, `VertexInputState` |
+| `VulkanPipelineManager.cpp` | `getPipeline()`, `createPipeline()`, `convertVertexLayoutToVulkan()` |
+| `VulkanLayoutContracts.h` | `PipelineLayoutKind`, `VertexInputMode`, `ShaderLayoutSpec` |
+| `VulkanLayoutContracts.cpp` | `getShaderLayoutSpec()`, `usesVertexPulling()` |
+| `VulkanDescriptorLayouts.cpp` | `createModelLayouts()` |
+| `VulkanModelTypes.h` | `ModelPushConstants`, `MODEL_ATTRIB_*` constants |
+| `uniform_structs.h` | `model_uniform_data` structure |
+| `model.vert` | Vertex pulling shader |
+| `model.frag` | Fragment shader with bindless textures |
 
 ### Related Documentation
 
 | Document | Topics |
 |----------|--------|
+| `VULKAN_ARCHITECTURE_OVERVIEW.md` | Overall Vulkan renderer structure |
 | `VULKAN_DESCRIPTOR_SETS.md` | Overall descriptor set architecture |
 | `VULKAN_TEXTURE_RESIDENCY.md` | Bindless texture residency system |
 | `VULKAN_UNIFORM_BINDINGS.md` | Uniform buffer organization |

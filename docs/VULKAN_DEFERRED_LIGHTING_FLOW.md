@@ -250,8 +250,27 @@ void VulkanRenderingSession::beginDeferredPass(bool clearNonColorBufs, bool pres
 **Pipeline Requirements**:
 - Shader type: `SDR_TYPE_MODEL`
 - Color format: `R16G16B16A16_SFLOAT`
-- Color attachment count: 5
+- Color attachment count: 5 (`VulkanRenderTargets::kGBufferCount`)
 - Depth format: Runtime-selected (matches G-buffer depth)
+
+**PipelineKey Configuration** (from `VulkanGraphics.cpp::render_model`):
+```cpp
+PipelineKey key{};
+key.type = SDR_TYPE_MODEL;
+key.variant_flags = material_info->get_shader_flags();  // Includes MODEL_SDR_FLAG_DEFERRED
+key.color_format = static_cast<VkFormat>(rt.colorFormat);       // R16G16B16A16_SFLOAT
+key.depth_format = static_cast<VkFormat>(rt.depthFormat);       // D32_SFLOAT_S8_UINT or similar
+key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
+key.color_attachment_count = rt.colorAttachmentCount;           // 5 for G-buffer
+key.blend_mode = material_info->get_blend_mode();               // Typically ALPHA_BLEND_NONE
+key.color_write_mask = convertColorWriteMask(material_info->get_color_mask());
+key.stencil_test_enable = material_info->is_stencil_enabled();
+// ... stencil operations from material
+```
+
+The `color_attachment_count` is derived from `RenderTargetInfo`, which is set to `kGBufferCount` (5) when the `DeferredGBufferTarget` is active. The model shader's variant flags include `MODEL_SDR_FLAG_DEFERRED` when rendering to the G-buffer, which is normalized based on the attachment count via `normalize_model_variant_flags_for_target()`.
+
+**Layout Selection**: `SDR_TYPE_MODEL` uses `PipelineLayoutKind::Model` (bindless textures via set 0, dynamic UBO via set 1) and `VertexInputMode::VertexPulling` (no vertex attributes; data fetched from storage buffer).
 
 **Shader Outputs** (from `model.frag`):
 ```glsl
@@ -448,6 +467,41 @@ tube.light.lightType = LT_TUBE;  // Value: 2
 
 **Function**: `VulkanRenderer::recordDeferredLighting(const RenderCtx& render, vk::Buffer uniformBuffer, vk::DescriptorSet globalSet, const std::vector<DeferredLight>& lights)`
 
+**PipelineKey Configuration** (from `VulkanRendererDeferredLighting.cpp`):
+```cpp
+// Vertex layout: Position only for light volume meshes
+static const vertex_layout deferredLayout = []() {
+  vertex_layout layout{};
+  layout.add_vertex_component(vertex_format_data::POSITION3, sizeof(float) * 3, 0);
+  return layout;
+}();
+
+const auto &rt = render.targetInfo;
+PipelineKey key{};
+key.type = shader_type::SDR_TYPE_DEFERRED_LIGHTING;
+key.variant_flags = 0;
+key.color_format = static_cast<VkFormat>(rt.colorFormat);   // Swapchain or HDR format
+key.depth_format = static_cast<VkFormat>(rt.depthFormat);   // VK_FORMAT_UNDEFINED (no depth)
+key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
+key.color_attachment_count = rt.colorAttachmentCount;       // 1 (final output target)
+key.blend_mode = ALPHA_BLEND_ADDITIVE;                      // Most lights use additive
+key.layout_hash = deferredLayout.hash();
+
+// Ambient pipeline uses blend-off (overwrites undefined swapchain content)
+PipelineKey ambientKey = key;
+ambientKey.blend_mode = ALPHA_BLEND_NONE;
+```
+
+**Pipeline Layout Selection**: `SDR_TYPE_DEFERRED_LIGHTING` uses `PipelineLayoutKind::Deferred` (from `VulkanLayoutContracts.h`), which selects `m_deferredPipelineLayout` in `VulkanPipelineManager::createPipeline()`. This layout differs from Standard and Model layouts:
+
+| Layout Kind | Set 0 | Set 1 | Used By |
+|-------------|-------|-------|---------|
+| **Standard** | Push descriptors (per-draw) | Global set (unused for deferred) | UI, particles, post-process |
+| **Model** | Bindless textures | Dynamic UBO | `SDR_TYPE_MODEL` |
+| **Deferred** | Push descriptors (matrix + light UBOs) | Global set (G-buffer textures) | `SDR_TYPE_DEFERRED_LIGHTING` |
+
+The Deferred layout is required because set 0 contains per-light uniform buffers pushed via `pushDescriptorSetKHR()`, while set 1 binds the G-buffer textures via the global descriptor set.
+
 **Setup Phase** (executed once before lights):
 ```cpp
 // Fullscreen viewport/scissor, depth disabled
@@ -462,6 +516,7 @@ vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, deferredLay
 vk::Pipeline ambientPipeline = m_pipelineManager->getPipeline(ambientKey, modules, deferredLayout);
 
 // Bind G-buffer descriptor set (set=1) once for all lights
+// Uses deferredPipelineLayout, NOT the standard pipeline layout
 cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, ctx.layout, 1, 1, &globalSet, 0, nullptr);
 ```
 
@@ -727,7 +782,47 @@ if (m_sceneTexture.has_value()) {
 }
 ```
 
-### 9.3 Descriptor Binding Layout
+### 9.3 VulkanPipelineManager Integration
+
+The deferred lighting system uses `VulkanPipelineManager` for pipeline creation and caching. The manager handles two distinct pipeline configurations for deferred rendering:
+
+**Geometry Pass (G-Buffer)**:
+- Shader: `SDR_TYPE_MODEL` with `MODEL_SDR_FLAG_DEFERRED` variant flag
+- Layout: `PipelineLayoutKind::Model` (bindless textures, vertex pulling)
+- Attachments: 5 color (`kGBufferCount`) + 1 depth
+- The pipeline is created with `color_attachment_count = 5`, causing the blend state to be replicated for all MRT outputs
+
+**Lighting Pass**:
+- Shader: `SDR_TYPE_DEFERRED_LIGHTING`
+- Layout: `PipelineLayoutKind::Deferred` (push descriptors for per-light UBOs)
+- Attachments: 1 color (swapchain or scene HDR) + 0 depth
+- Two pipeline variants: `ALPHA_BLEND_ADDITIVE` (most lights) and `ALPHA_BLEND_NONE` (ambient)
+
+**Key Source Files**:
+
+| File | Role |
+|------|------|
+| `VulkanPipelineManager.h` | `PipelineKey` struct, pipeline caching |
+| `VulkanPipelineManager.cpp` | `createPipeline()` with MRT blend state replication |
+| `VulkanLayoutContracts.h` | `PipelineLayoutKind::Deferred`, `ShaderLayoutSpec` |
+| `VulkanLayoutContracts.cpp` | Shader-to-layout mapping table |
+
+**Pipeline Creation Flow**:
+```cpp
+// In VulkanPipelineManager::createPipeline()
+switch (layoutSpec.pipelineLayout) {
+  case PipelineLayoutKind::Deferred:
+    pipelineInfo.layout = m_deferredPipelineLayout;  // Uses deferred layout
+    break;
+  // ...
+}
+
+// MRT blend state: same blend mode replicated for all attachments
+std::vector<vk::PipelineColorBlendAttachmentState> attachments(
+    key.color_attachment_count, colorBlendAttachment);
+```
+
+### 9.4 Descriptor Binding Layout
 
 The deferred lighting shader uses a two-set layout with push descriptors for per-light data:
 
@@ -898,8 +993,14 @@ if (dot(position, position) < 1.0e-8 && lightType == LT_AMBIENT) {
 | `VulkanRenderingSession.cpp` | `beginDeferredPass()` | ~248 | G-buffer target setup |
 | `VulkanRenderingSession.cpp` | `endDeferredGeometry()` | ~439 | Transition to lighting phase |
 | `VulkanGraphics.cpp` | `gr_vulkan_deferred_lighting_*()` | - | Engine API bridge functions |
+| `VulkanGraphics.cpp` | `render_model()` | ~1140 | Model pipeline key configuration |
 | `VulkanRenderTargets.h` | G-buffer constants | ~15-22 | `kGBufferCount`, `kGBufferEmissiveIndex` |
 | `VulkanPhaseContexts.h` | `DeferredGeometryCtx`, `DeferredLightingCtx` | ~50-74 | Capability token definitions |
+| `VulkanPipelineManager.h` | `PipelineKey`, `VulkanPipelineManager` | - | Pipeline key struct and cache manager |
+| `VulkanPipelineManager.cpp` | `createPipeline()` | ~412 | Pipeline creation with layout selection |
+| `VulkanLayoutContracts.h` | `PipelineLayoutKind`, `ShaderLayoutSpec` | ~12-28 | Layout kind enum and shader contracts |
+| `VulkanLayoutContracts.cpp` | `getShaderLayoutSpec()` | - | Shader-to-layout mapping |
+| `VulkanModelShaderVariants.h` | `normalize_model_variant_flags_for_target()` | ~20 | Deferred flag normalization |
 
 ### Related Documentation
 

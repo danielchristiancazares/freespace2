@@ -11,6 +11,8 @@ This document is the entry point for the Vulkan renderer documentation in `docs/
 3. [Vulkan Requirements](#vulkan-requirements)
 4. [Terminology and Core Types](#terminology-and-core-types)
 5. [Renderer Architecture](#renderer-architecture)
+   - [Key Source Files](#key-source-files)
+   - [Pipeline Management Architecture](#pipeline-management-architecture)
 6. [Frame Flow](#frame-flow)
 7. [Render Targets](#render-targets)
 8. [Getting Started](#getting-started)
@@ -135,6 +137,18 @@ Typestate tokens encoding the deferred lighting call order (`begin` -> `end` -> 
 | `VulkanFrame` | `VulkanFrame.h` | Per-frame resources: command buffer, synchronization primitives, ring buffer allocators, per-frame UBO bindings |
 | `VulkanRenderer` | `VulkanRenderer.h` | Top-level renderer; orchestrates frame lifecycle, token minting, and high-level draw calls |
 | `RenderTargetInfo` | `VulkanRenderTargetInfo.h` | Pipeline compatibility "contract": color format, color attachment count, depth format |
+| `VulkanPipelineManager` | `VulkanPipelineManager.h` | Thread-safe pipeline cache; creates and caches pipelines by `PipelineKey` |
+
+### Pipeline Types
+
+| Type | Header | Description |
+|------|--------|-------------|
+| `PipelineKey` | `VulkanPipelineManager.h` | Composite key identifying unique pipeline configuration: shader type, variant flags, render target formats, blend mode, stencil state, vertex layout hash |
+| `PipelineKeyHasher` | `VulkanPipelineManager.h` | Hash functor for `PipelineKey`; uses boost-style hash combining |
+| `VertexInputState` | `VulkanPipelineManager.h` | Converted Vulkan vertex input configuration: bindings, attributes, divisors |
+| `PipelineLayoutKind` | `VulkanLayoutContracts.h` | Enum: `Standard`, `Model`, `Deferred` - determines which pipeline layout to use |
+| `VertexInputMode` | `VulkanLayoutContracts.h` | Enum: `VertexAttributes`, `VertexPulling` - determines vertex input strategy |
+| `ShaderLayoutSpec` | `VulkanLayoutContracts.h` | Per-shader-type contract: which layout and vertex input mode to use |
 
 ### Internal RAII Types
 
@@ -153,6 +167,7 @@ If you are unsure which token you should have, start with `VULKAN_RENDER_PASS_ST
 +------------------------------------------------------------------+
 |                        VulkanRenderer                             |
 |  - Owns VulkanDevice, VulkanRenderTargets, VulkanRenderingSession |
+|  - Owns VulkanPipelineManager, VulkanShaderManager                |
 |  - Mints capability tokens (RecordingFrame, FrameCtx, RenderCtx)  |
 |  - Orchestrates frame lifecycle and submit timeline               |
 +------------------------------------------------------------------+
@@ -168,6 +183,15 @@ If you are unsure which token you should have, start with `VULKAN_RENDER_PASS_ST
                     | - SMAA targets     |
                     | - Effect snapshot  |
                     +--------------------+
+         |
+         v
++-------------------------------+
+|   VulkanPipelineManager       |
+|  - Thread-safe pipeline cache |
+|  - 3 pipeline layouts         |
+|  - Dynamic state management   |
+|  - Vertex input conversion    |
++-------------------------------+
 ```
 
 ### Key Source Files
@@ -189,10 +213,58 @@ If you are unsure which token you should have, start with `VULKAN_RENDER_PASS_ST
 | `VulkanFrameCaps.h` | `FrameCtx` and bound-frame tokens (`ModelBoundFrame`, `NanoVGBoundFrame`, `DecalBoundFrame`) |
 | `VulkanPhaseContexts.h` | `UploadCtx`, `RenderCtx`, deferred lighting tokens |
 | `VulkanConstants.h` | Global constants: `kFramesInFlight`, `kMaxBindlessTextures`, bindless slot assignments |
-| `VulkanPipelineManager.cpp/h` | Pipeline cache, shader variant compilation |
+| `VulkanPipelineManager.cpp/h` | Thread-safe pipeline cache with PipelineKey-based lookup; manages three pipeline layouts (Standard, Model, Deferred); vertex input state conversion and caching |
 | `VulkanTextureManager.cpp/h` | Texture upload, bindless slot assignment, residency management |
 | `VulkanBufferManager.cpp/h` | Device-local buffer management, staging, deferred release |
 | `VulkanDescriptorLayouts.cpp/h` | Descriptor set layouts, pipeline layouts, descriptor pool management |
+| `VulkanLayoutContracts.cpp/h` | Shader-to-pipeline-layout mapping; defines which shaders use which layout and vertex input mode |
+
+### Pipeline Management Architecture
+
+`VulkanPipelineManager` provides thread-safe graphics pipeline creation and caching. Pipelines are created lazily on first use and cached by a composite `PipelineKey` that captures all non-dynamic pipeline state.
+
+**Pipeline Layout Kinds**:
+
+| Layout | Use Case | Descriptor Strategy |
+|--------|----------|---------------------|
+| `Standard` | 2D, UI, particles, post-process | Push descriptors (set 0) + global set |
+| `Model` | 3D model rendering | Bindless textures (set 0) + dynamic UBO (set 1) |
+| `Deferred` | Deferred lighting pass | Push descriptors + G-buffer global set |
+
+**Vertex Input Modes**:
+
+| Mode | Shaders | Mechanism |
+|------|---------|-----------|
+| `VertexAttributes` | All except `SDR_TYPE_MODEL` | Traditional vertex input via `vkCmdBindVertexBuffers()` |
+| `VertexPulling` | `SDR_TYPE_MODEL` only | No vertex attributes; shader fetches from storage buffers via `gl_VertexIndex` |
+
+**Thread Safety Model**:
+
+The pipeline manager protects its internal caches (`m_pipelines`, `m_vertexInputCache`) with a mutex. All public methods (`getPipeline()`) acquire the lock before cache lookup or pipeline creation. While the Vulkan backend currently operates single-threaded, this design permits future multi-threaded command buffer recording.
+
+**Dynamic State Strategy**:
+
+The renderer uses dynamic state extensively to minimize pipeline permutations:
+
+- **Core (Vulkan 1.3+, always available)**: Viewport, scissor, line width, cull mode, front face, primitive topology, depth test/write enable, depth compare op, stencil test enable
+- **EDS3 (optional)**: Color blend enable, color write mask, polygon mode, rasterization samples
+
+State not set dynamically (blend mode, stencil operations, color write mask when EDS3 unavailable) is baked into the pipeline and affects the cache key.
+
+**PipelineKey Fields**:
+
+| Field | Description |
+|-------|-------------|
+| `type` | Shader type (e.g., `SDR_TYPE_MODEL`, `SDR_TYPE_INTERFACE`) |
+| `variant_flags` | Shader variant permutation flags |
+| `shader_hash` | Hash of shader modules (computed internally) |
+| `color_format`, `depth_format` | Render target formats |
+| `sample_count`, `color_attachment_count` | MSAA and MRT configuration |
+| `blend_mode`, `color_write_mask` | Blend configuration |
+| `stencil_*` | Full stencil state (test enable, compare op, masks, operations) |
+| `layout_hash` | Vertex layout hash (ignored for vertex-pulling shaders) |
+
+For complete details, see `VULKAN_PIPELINE_MANAGEMENT.md`.
 
 ---
 
@@ -395,8 +467,9 @@ If you are new to this renderer:
 - Code: `VulkanBufferManager.cpp/h`, `VulkanRingBuffer.cpp/h`
 
 **Pipeline issues / shader variants / cache behavior:**
-- `VULKAN_PIPELINE_MANAGEMENT.md` (architecture and lifecycle)
+- `VULKAN_PIPELINE_MANAGEMENT.md` (architecture, lifecycle, thread safety)
 - `VULKAN_PIPELINE_USAGE.md` (construction patterns, common mistakes)
+- Code: `VulkanPipelineManager.cpp/h` (pipeline cache), `VulkanLayoutContracts.cpp/h` (shader-to-layout mapping)
 
 **Uniform buffer alignment / std140 layout:**
 - `VULKAN_UNIFORM_ALIGNMENT.md` (alignment rules, adding new structs)
@@ -441,6 +514,29 @@ RenderTargetInfo info = m_session.ensureRendering(cmd, imageIndex);
 RenderCtx ctx(cmd, info);  // Private constructor - only VulkanRenderer creates RenderCtx
 ```
 
+**Getting a pipeline for rendering:**
+```cpp
+// Build pipeline key from current render state
+PipelineKey key{};
+key.type = SDR_TYPE_INTERFACE;
+key.variant_flags = 0;
+key.color_format = targetInfo.colorFormat;
+key.depth_format = targetInfo.depthFormat;
+key.sample_count = targetInfo.sampleCount;
+key.color_attachment_count = targetInfo.colorAttachmentCount;
+key.blend_mode = currentBlendMode;
+key.layout_hash = vertexLayout.hash();
+
+// Get shader modules (selects SPIR-V based on type + variant)
+ShaderModules modules = shaderManager->getModules(key.type, key.variant_flags);
+
+// Get or create cached pipeline (thread-safe)
+vk::Pipeline pipeline = pipelineManager->getPipeline(key, modules, vertexLayout);
+
+// Bind and draw
+cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+```
+
 ---
 
 ## Testing and Behavioral Invariants
@@ -461,6 +557,9 @@ When changing renderer state machines (target switching, pass boundaries, post-p
 - Layout transitions must track current layout accurately
 - Bound-frame tokens require corresponding UBO bindings (assertions in `require*Bound()` functions)
 - Submit serial increases monotonically; completed serial never exceeds submit serial
+- Pipeline cache key equality and hash must be consistent (same key produces same hash)
+- For vertex attribute shaders, `PipelineKey.layout_hash` must match the provided `vertex_layout.hash()`
+- Pipeline layout selection must match shader type (`getShaderLayoutSpec()` contract)
 
 ---
 
@@ -489,8 +588,9 @@ When changing renderer state machines (target switching, pass boundaries, post-p
 
 | Document | Topics |
 |----------|--------|
-| `VULKAN_PIPELINE_MANAGEMENT.md` | Pipeline architecture, cache keys, shader variants, vertex input modes |
+| `VULKAN_PIPELINE_MANAGEMENT.md` | Pipeline architecture, cache keys, shader variants, vertex input modes, thread safety |
 | `VULKAN_PIPELINE_USAGE.md` | Pipeline key construction, binding patterns, debugging tips |
+| `VulkanLayoutContracts.h` | Shader-to-layout mapping API: `getShaderLayoutSpec()`, `usesVertexPulling()`, `pipelineLayoutForShader()` |
 
 ### Uniforms
 

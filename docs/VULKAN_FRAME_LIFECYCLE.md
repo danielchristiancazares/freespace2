@@ -15,9 +15,10 @@ This document describes the frame management system in the Vulkan renderer, cove
 7. [Deferred Resource Collection](#deferred-resource-collection)
 8. [VulkanFrame Synchronization Primitives](#vulkanframe-synchronization-primitives)
 9. [Rendering Session Integration](#rendering-session-integration)
-10. [Container Summary](#container-summary)
-11. [Typical Frame Sequence](#typical-frame-sequence)
-12. [Related Documentation](#related-documentation)
+10. [Pipeline Acquisition and Binding](#pipeline-acquisition-and-binding)
+11. [Container Summary](#container-summary)
+12. [Typical Frame Sequence](#typical-frame-sequence)
+13. [Related Documentation](#related-documentation)
 
 ---
 
@@ -214,9 +215,20 @@ Additional tokens enforce phase-specific API access (`VulkanPhaseContexts.h`):
 | Token | Purpose | Created By |
 |-------|---------|------------|
 | `UploadCtx` | Proves upload phase is active; enables staging operations | Internal (frame start, `beginFrame()`) |
-| `RenderCtx` | Proves dynamic rendering is active; enables draw calls | `ensureRenderingStarted(FrameCtx)` |
+| `RenderCtx` | Proves dynamic rendering is active; provides `targetInfo` for pipeline selection | `ensureRenderingStarted(FrameCtx)` |
 | `DeferredGeometryCtx` | Proves G-buffer pass is active | `deferredLightingBegin()` |
 | `DeferredLightingCtx` | Proves lighting pass is active | `deferredLightingEnd()` |
+
+**RenderCtx Contents:**
+
+```cpp
+struct RenderCtx {
+    vk::CommandBuffer cmd;      // Command buffer for recording draw commands
+    RenderTargetInfo targetInfo; // Color format, depth format, attachment count
+};
+```
+
+The `targetInfo` provides the render target configuration needed to build the `PipelineKey`. This ensures pipelines are always compatible with the current render pass.
 
 ### Token Hierarchy
 
@@ -447,6 +459,123 @@ This design supports suspend/resume patterns where rendering may be interrupted 
 
 ---
 
+## Pipeline Acquisition and Binding
+
+Pipelines are acquired lazily during the frame when draw calls occur, not at frame start. The `VulkanPipelineManager` caches pipelines by `PipelineKey` and creates new ones on-demand.
+
+### Pipeline Acquisition Flow
+
+```
+ensureRenderingStarted(FrameCtx)
+         │
+         │ Returns RenderCtx with targetInfo
+         v
++------------------+
+│ Build PipelineKey│
+│   - shader type  │
+│   - variant_flags│
+│   - color_format │  ← from RenderCtx.targetInfo
+│   - depth_format │  ← from RenderCtx.targetInfo
+│   - attachment_count │
+│   - blend_mode   │
+│   - stencil_*    │
+│   - layout_hash  │  ← for vertex attribute shaders
++------------------+
+         │
+         v
+m_pipelineManager->getPipeline(key, modules, layout)
+         │
+         │ Cache hit: return existing pipeline
+         │ Cache miss: create, cache, return
+         v
+cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline)
+```
+
+### PipelineKey Construction
+
+The `PipelineKey` captures all non-dynamic pipeline state:
+
+```cpp
+PipelineKey key{};
+key.type = shader_type::SDR_TYPE_MODEL;          // Shader type
+key.variant_flags = SDR_FLAG_DIFFUSE_MAP;        // Shader permutation
+key.color_format = render.targetInfo.colorFormat; // From RenderCtx
+key.depth_format = render.targetInfo.depthFormat; // From RenderCtx
+key.color_attachment_count = render.targetInfo.colorAttachmentCount;
+key.blend_mode = ALPHA_BLEND_NONE;               // Material blend mode
+key.color_write_mask = 0xF;                       // RGBA write mask
+key.stencil_test_enable = false;                  // Stencil config
+key.layout_hash = layout.hash();                  // Vertex layout hash
+
+vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, layout);
+```
+
+### Two Pipeline Acquisition Patterns
+
+**1. Vertex Attribute Shaders** (interface, particles, effects):
+- `layout_hash` must match the provided `vertex_layout`
+- Pipeline includes vertex input bindings and attributes
+- Uses standard or deferred pipeline layout
+
+**2. Vertex Pulling Shaders** (models, SDR_TYPE_MODEL):
+- `layout_hash` is ignored (vertex data fetched from storage buffer)
+- Pipeline has empty vertex input state
+- Uses model pipeline layout with bindless descriptors
+
+### Dynamic State at Draw Time
+
+After binding a pipeline, draw code sets additional dynamic state as needed:
+
+```cpp
+// Always set by ensureRendering() via applyDynamicState():
+cmd.setCullMode(m_cullMode);
+cmd.setFrontFace(vk::FrontFace::eClockwise);
+cmd.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+cmd.setDepthTestEnable(depthTest);
+cmd.setDepthWriteEnable(depthWrite);
+cmd.setDepthCompareOp(vk::CompareOp::eLessOrEqual);
+cmd.setStencilTestEnable(VK_FALSE);
+
+// Per-draw overrides as needed:
+cmd.setViewport(0, 1, &viewport);
+cmd.setScissor(0, 1, &scissor);
+cmd.setLineWidth(lineWidth);
+cmd.setPrimitiveTopology(topology);  // Override for lines, points, etc.
+```
+
+### Extended Dynamic State 3
+
+When available, additional state is set dynamically to reduce pipeline permutations:
+
+```cpp
+if (supportsExtendedDynamicState3) {
+    if (caps.colorBlendEnable) {
+        cmd.setColorBlendEnableEXT(0, blendEnables);
+    }
+    if (caps.colorWriteMask) {
+        cmd.setColorWriteMaskEXT(0, masks);
+    }
+    if (caps.polygonMode) {
+        cmd.setPolygonModeEXT(vk::PolygonMode::eFill);
+    }
+    if (caps.rasterizationSamples) {
+        cmd.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+    }
+}
+```
+
+### Pipeline Layout Selection
+
+Pipeline layouts are selected based on the shader type's layout contract (`VulkanLayoutContracts.h`):
+
+| Shader Category | Pipeline Layout | Descriptor Strategy |
+|-----------------|-----------------|---------------------|
+| Standard (interface, particles) | `m_pipelineLayout` | Per-draw push descriptors |
+| Model (SDR_TYPE_MODEL) | `m_modelPipelineLayout` | Bindless model set + push constants |
+| Deferred (lighting pass) | `m_deferredPipelineLayout` | Push descriptors + G-buffer global set |
+
+---
+
 ## Container Summary
 
 | Container | Type | Purpose |
@@ -510,9 +639,24 @@ beginRecording()
     └── renderingSession.beginFrame()    ← Swapchain/depth barriers
 
 [Recording Phase - Engine records rendering commands]
-├── ensureRenderingStarted() → RenderCtx
-├── draw commands...
+├── ensureRenderingStarted(FrameCtx) → RenderCtx
+│   ├── renderingSession.ensureRendering()   ← Lazy render pass start
+│   └── applyDynamicState()                  ← Baseline dynamic state
+├── [Per-Draw Pipeline Acquisition]
+│   ├── Build PipelineKey from RenderCtx.targetInfo + material state
+│   ├── m_pipelineManager->getPipeline()     ← Cache lookup or creation
+│   └── cmd.bindPipeline()                   ← Bind to command buffer
+├── [Dynamic State Overrides]
+│   ├── cmd.setViewport(), cmd.setScissor()
+│   ├── cmd.setPrimitiveTopology()           ← If not triangles
+│   └── cmd.setColorBlendEnableEXT()         ← If EDS3 available
+├── [Descriptor Updates]
+│   ├── cmd.pushDescriptorSetKHR()           ← Per-draw textures/uniforms
+│   └── cmd.bindDescriptorSets()             ← Model/global sets
+├── draw commands (vkCmdDraw*, vkCmdDrawIndexed*)
 ├── target switches (auto-end/begin passes)
+│   ├── requestPostLdrTarget() etc.          ← Ends current pass
+│   └── ensureRenderingStarted() → new RenderCtx
 └── ...
 
 advanceFrame(prev)
@@ -572,3 +716,14 @@ recycleOneInFlight()
 | `VULKAN_TEXTURE_RESIDENCY.md` | Texture upload and bindless residency |
 | `VULKAN_DEFERRED_LIGHTING_FLOW.md` | Deferred rendering phase tokens |
 | `DESIGN_PHILOSOPHY.md` | Type-driven design and capability token principles |
+
+### Source Files
+
+| File | Purpose |
+|------|---------|
+| `VulkanPipelineManager.h/cpp` | Pipeline creation, caching, and `PipelineKey` definition |
+| `VulkanLayoutContracts.h` | Shader-to-pipeline-layout mapping and vertex input mode |
+| `VulkanRenderingSession.h/cpp` | Render target state machine and dynamic rendering |
+| `VulkanRendererFrameFlow.cpp` | Frame begin/end, submission, and recycling |
+| `VulkanPhaseContexts.h` | `UploadCtx`, `RenderCtx`, and deferred phase tokens |
+| `VulkanFrameCaps.h` | `FrameCtx` and bound resource tokens |
