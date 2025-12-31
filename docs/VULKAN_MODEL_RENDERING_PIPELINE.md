@@ -54,7 +54,7 @@ Vertex pulling eliminates this overhead:
 
 | File | Purpose |
 |------|---------|
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Model rendering orchestration, descriptor sync |
+| `code/graphics/vulkan/VulkanRendererResources.cpp` | Model rendering orchestration, descriptor sync |
 | `code/graphics/vulkan/VulkanModelTypes.h` | Push constants structure and attribute bits |
 | `code/graphics/vulkan/VulkanGraphics.cpp` | Engine integration, `gr_vulkan_render_model()` |
 | `code/graphics/vulkan/VulkanDescriptorLayouts.cpp` | Model pipeline layout and descriptor set layout |
@@ -176,7 +176,7 @@ Engine Model Data
 
 **Function**: `VulkanRenderer::setModelVertexHeapHandle(gr_buffer_handle handle)`
 
-**Location**: `VulkanRenderer.cpp`
+**Location**: `VulkanRendererResources.cpp`
 
 **Called At**: When `GPUMemoryHeap` creates the ModelVertex heap during engine initialization.
 
@@ -203,7 +203,7 @@ void VulkanRenderer::setModelVertexHeapHandle(gr_buffer_handle handle) {
 
 **Called At**: Before descriptor sync at frame start
 
-**Example** (from `VulkanRenderer.cpp`):
+**Example** (from `VulkanRendererFrameFlow.cpp`):
 ```cpp
 // Ensure vertex heap buffer exists and sync descriptors
 vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
@@ -332,7 +332,7 @@ The `model_uniform_data` structure contains:
 
 **Function**: `VulkanRenderer::setModelUniformBinding()`
 
-**Location**: `VulkanRenderer.cpp`
+**Location**: `VulkanRendererResources.cpp`
 
 **Process**:
 
@@ -370,7 +370,7 @@ The `model_uniform_data` structure contains:
 
 **Function**: `VulkanRenderer::beginModelDescriptorSync()`
 
-**Location**: `VulkanRenderer.cpp`
+**Location**: `VulkanRendererResources.cpp`
 
 **Called At**: Frame start, after texture uploads complete
 
@@ -402,7 +402,7 @@ void VulkanRenderer::beginModelDescriptorSync(VulkanFrame& frame,
 
 **Function**: `VulkanRenderer::updateModelDescriptors()`
 
-**Location**: `VulkanRenderer.cpp`
+**Location**: `VulkanRendererResources.cpp`
 
 This function batches all descriptor writes for efficiency:
 
@@ -990,10 +990,10 @@ Per frame-in-flight:
 
 | File | Line Range | Function/Section |
 |------|------------|------------------|
-| `VulkanRenderer.cpp` | 2681-2686 | `setModelVertexHeapHandle()` |
-| `VulkanRenderer.cpp` | 2924-2967 | `setModelUniformBinding()` |
-| `VulkanRenderer.cpp` | 2990-3110 | `updateModelDescriptors()` |
-| `VulkanRenderer.cpp` | 3112-3138 | `beginModelDescriptorSync()` |
+| `VulkanRendererResources.cpp` | - | `setModelVertexHeapHandle()` |
+| `VulkanRendererResources.cpp` | - | `setModelUniformBinding()` |
+| `VulkanRendererResources.cpp` | - | `updateModelDescriptors()` |
+| `VulkanRendererResources.cpp` | - | `beginModelDescriptorSync()` |
 | `VulkanGraphics.cpp` | 1085-1141 | `issueModelDraw()` |
 | `VulkanGraphics.cpp` | 1143-1330 | `gr_vulkan_render_model()` |
 | `VulkanDescriptorLayouts.cpp` | 109-193 | `createModelLayouts()` |

@@ -174,7 +174,13 @@ If you are unsure which token you should have, start with `VULKAN_RENDER_PASS_ST
 
 | File | Responsibility |
 |------|----------------|
-| `VulkanRenderer.cpp/h` | Frame lifecycle, token minting, high-level API, deferred lighting orchestration |
+| `VulkanRenderer.h` | Renderer class declaration, token minting, high-level API |
+| `VulkanRendererLifecycle.cpp` | Initialization, shutdown, resource creation (`initialize()`, `createFrames()`, etc.) |
+| `VulkanRendererFrameFlow.cpp` | Frame lifecycle (`beginRecording()`, `advanceFrame()`, `submitRecordedFrame()`, etc.) |
+| `VulkanRendererResources.cpp` | Buffer/texture management, model descriptors (`setModelUniformBinding()`, etc.) |
+| `VulkanRendererDeferredLighting.cpp` | Deferred lighting orchestration (`deferredLightingBegin()`, `recordDeferredLighting()`, etc.) |
+| `VulkanRendererPostProcessing.cpp` | Post-processing effects (`beginSceneTexture()`, `endSceneTexture()`, bloom, SMAA, etc.) |
+| `VulkanRendererRenderState.cpp` | Render state management (`ensureRenderingStarted()`, viewport/scissor, z-buffer, etc.) |
 | `VulkanDevice.cpp/h` | Device selection, swapchain creation/recreation, queues, pipeline cache |
 | `VulkanRenderTargets.cpp/h` | Render target image/view/sampler creation, layout state tracking |
 | `VulkanRenderingSession.cpp/h` | Target switching, dynamic rendering begin/end, barriers, clear ops |
@@ -362,7 +368,7 @@ If you are new to this renderer:
 
 **Frame lifecycle / recording / submit / present:**
 - `VULKAN_SYNCHRONIZATION.md`
-- Code: `VulkanRenderer.cpp` (`beginRecording`, `advanceFrame`, `submitRecordedFrame`, present logic)
+- Code: `VulkanRendererFrameFlow.cpp` (`beginRecording`, `advanceFrame`, `submitRecordedFrame`, present logic)
 
 **Adding a new render target or changing target sizes:**
 - `VULKAN_RENDER_PASS_STRUCTURE.md` (target types and transitions)
@@ -398,7 +404,7 @@ If you are new to this renderer:
 
 **Deferred lighting / G-buffer rendering:**
 - `VULKAN_DEFERRED_LIGHTING_FLOW.md` (complete flow, G-buffer channels)
-- Code: `VulkanPhaseContexts.h` (typestate tokens), `VulkanRenderer.cpp` (deferred API)
+- Code: `VulkanPhaseContexts.h` (typestate tokens), `VulkanRendererDeferredLighting.cpp` (deferred API)
 
 **DLSS / upscaling:**
 - `PLAN_DLSS.md` (implementation plan and required invariants)

@@ -286,6 +286,6 @@ VulkanDevice provides these accessors for swapchain state:
 
 - `code/graphics/vulkan/VulkanDevice.h` - Swapchain member declarations and API
 - `code/graphics/vulkan/VulkanDevice.cpp` - Swapchain creation, acquisition, presentation
-- `code/graphics/vulkan/VulkanRenderer.cpp` - High-level acquire/present flow
+- `code/graphics/vulkan/VulkanRendererFrameFlow.cpp` - High-level acquire/present flow
 - `code/graphics/vulkan/VulkanFrame.h` - Per-frame semaphores and resources
 - `code/graphics/vulkan/VulkanRenderTargets.cpp` - Resize handling triggered by swapchain recreation

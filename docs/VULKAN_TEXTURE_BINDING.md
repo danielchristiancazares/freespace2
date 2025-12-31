@@ -217,7 +217,7 @@ vk::Sampler VulkanTextureManager::getOrCreateSampler(const SamplerKey& key) cons
 Model rendering uses a pre-allocated descriptor set with a large combined-image-sampler array. This enables batch rendering where each vertex/instance carries a texture index rather than requiring per-draw descriptor switches:
 
 ```cpp
-// VulkanRenderer.cpp (bindless descriptor update - conceptual)
+// VulkanRendererResources.cpp (bindless descriptor update - conceptual)
 // Correctness rule: every slot must always point at a valid descriptor.
 // Shader code can sample any slot without defensive null checks.
 
@@ -244,7 +244,7 @@ for (const auto& [arrayIndex, id] : textures) {
 The renderer maintains a per-frame cache to minimize redundant descriptor updates. Only slots whose descriptors have changed since the previous frame are written:
 
 ```cpp
-// VulkanRenderer.cpp (differential descriptor updates - conceptual)
+// VulkanRendererResources.cpp (differential descriptor updates - conceptual)
 auto& cache = m_modelBindlessCache[frameIndex];
 
 if (!cache.initialized) {

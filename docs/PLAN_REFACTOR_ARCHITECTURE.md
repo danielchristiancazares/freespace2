@@ -25,13 +25,13 @@ Tracks remaining architectural work for correctness, phase enforcement, and type
 
 - **Current**: single `m_globalDescriptorSet` updated every frame (race: update while in-flight).
 - **Fix**: allocate `kFramesInFlight` global sets, update/bind only current frame.
-- **Touchpoints**: `VulkanRenderer.h`, `VulkanRenderer.cpp`, `VulkanDescriptorLayouts.h`, `VulkanDescriptorLayouts.cpp`.
+- **Touchpoints**: `VulkanRenderer.h`, `VulkanRendererResources.cpp`, `VulkanDescriptorLayouts.h`, `VulkanDescriptorLayouts.cpp`.
 
 ### 2. Model UBO descriptor refresh on buffer recreation
 
 - **Current**: `DynamicUniformBinding` tracks only handle + offset; descriptor updates skipped if handle unchanged.
 - **Fix**: track buffer generation or resolved `vk::Buffer` and refresh descriptor on change.
-- **Touchpoints**: `VulkanFrame.h`, `VulkanBufferManager.h`, `VulkanBufferManager.cpp`, `VulkanRenderer.cpp`.
+- **Touchpoints**: `VulkanFrame.h`, `VulkanBufferManager.h`, `VulkanBufferManager.cpp`, `VulkanRendererResources.cpp`.
 
 ### 3. Swapchain layout tracking reset on recreation
 
@@ -49,7 +49,7 @@ Tracks remaining architectural work for correctness, phase enforcement, and type
 
 - **Current**: `acquireImage()` returns `UINT32_MAX` on failure.
 - **Fix**: remove or make private; use `acquireImageOrThrow` or a typestate token at the boundary.
-- **Touchpoints**: `VulkanRenderer.h`, `VulkanRenderer.cpp`, `VulkanFrameFlow.h`.
+- **Touchpoints**: `VulkanRenderer.h`, `VulkanRendererFrameFlow.cpp`, `VulkanFrameFlow.h`.
 
 ### 6. Eliminate empty descriptor returns in draw path
 
@@ -62,7 +62,7 @@ Tracks remaining architectural work for correctness, phase enforcement, and type
 
 - **Current**: `VulkanRenderingSession::endDeferredGeometry()` uses runtime type checks.
 - **Fix**: thread deferred tokens through session or make transitions uncallable outside deferred geometry.
-- **Touchpoints**: `VulkanRenderingSession.cpp`, `VulkanRenderer.cpp`.
+- **Touchpoints**: `VulkanRenderingSession.cpp`, `VulkanRendererDeferredLighting.cpp`.
 
 ---
 
@@ -72,19 +72,19 @@ Tracks remaining architectural work for correctness, phase enforcement, and type
 
 - **Current**: several draw helpers call `ensureRenderingStarted()` internally instead of requiring a `RenderCtx`.
 - **Fix**: move `ensureRenderingStarted()` to boundary call sites and pass `RenderCtx` through draw helpers.
-- **Touchpoints**: `VulkanRenderer.cpp`, `VulkanGraphics.cpp`.
+- **Touchpoints**: `VulkanRendererRenderState.cpp`, `VulkanGraphics.cpp`.
 
 ### 9. Buffer operations without token
 
 - **Current**: `updateBufferData()`, `mapBuffer()`, `flushMappedBuffer()` lack phase tokens.
 - **Fix**: add `const FrameCtx&` parameter (or determine phase-independent).
-- **Touchpoints**: `VulkanRenderer.h`, `VulkanRenderer.cpp`, `VulkanGraphics.cpp`.
+- **Touchpoints**: `VulkanRenderer.h`, `VulkanRendererResources.cpp`, `VulkanGraphics.cpp`.
 
 ### 10. Uniform binding uses VulkanFrame& instead of FrameCtx
 
 - **Current**: `setModelUniformBinding(VulkanFrame&, ...)`, `setSceneUniformBinding(VulkanFrame&, ...)`.
 - **Fix**: change to `const FrameCtx&`.
-- **Touchpoints**: `VulkanRenderer.h`, `VulkanRenderer.cpp`.
+- **Touchpoints**: `VulkanRenderer.h`, `VulkanRendererResources.cpp`.
 
 ### 11. Seal FrameCtx provenance (optional)
 

@@ -64,7 +64,7 @@ The pipeline consists of three phases:
 
 | File | Purpose |
 |------|---------|
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Deferred lighting orchestration and command recording |
+| `code/graphics/vulkan/VulkanRendererDeferredLighting.cpp` | Deferred lighting orchestration and command recording |
 | `code/graphics/vulkan/VulkanDeferredLights.cpp` | Light data building and per-light draw recording |
 | `code/graphics/vulkan/VulkanDeferredLights.h` | Light UBO structures (`DeferredMatrixUBO`, `DeferredLightUBO`) and light variant types |
 | `code/graphics/vulkan/VulkanRenderingSession.cpp` | G-buffer target management and layout transitions |
@@ -885,12 +885,12 @@ if (dot(position, position) < 1.0e-8 && lightType == LT_AMBIENT) {
 
 | File | Function | Line | Description |
 |------|----------|------|-------------|
-| `VulkanRenderer.cpp` | `beginDeferredLighting()` | ~571 | Internal geometry pass setup |
-| `VulkanRenderer.cpp` | `deferredLightingBegin()` | ~1017 | Public API - returns `DeferredGeometryCtx` |
-| `VulkanRenderer.cpp` | `deferredLightingEnd()` | ~1023 | Public API - returns `DeferredLightingCtx` |
-| `VulkanRenderer.cpp` | `deferredLightingFinish()` | ~1039 | Public API - consumes `DeferredLightingCtx` |
-| `VulkanRenderer.cpp` | `bindDeferredGlobalDescriptors()` | ~1065 | G-buffer descriptor binding |
-| `VulkanRenderer.cpp` | `recordDeferredLighting()` | ~3503 | Per-light draw recording loop |
+| `VulkanRendererDeferredLighting.cpp` | `beginDeferredLighting()` | - | Internal geometry pass setup |
+| `VulkanRendererDeferredLighting.cpp` | `deferredLightingBegin()` | - | Public API - returns `DeferredGeometryCtx` |
+| `VulkanRendererDeferredLighting.cpp` | `deferredLightingEnd()` | - | Public API - returns `DeferredLightingCtx` |
+| `VulkanRendererDeferredLighting.cpp` | `deferredLightingFinish()` | - | Public API - consumes `DeferredLightingCtx` |
+| `VulkanRendererDeferredLighting.cpp` | `bindDeferredGlobalDescriptors()` | - | G-buffer descriptor binding |
+| `VulkanRendererDeferredLighting.cpp` | `recordDeferredLighting()` | - | Per-light draw recording loop |
 | `VulkanDeferredLights.cpp` | `buildDeferredLights()` | ~122 | Light construction from engine state |
 | `VulkanDeferredLights.cpp` | `FullscreenLight::record()` | ~64 | Fullscreen light draw recording |
 | `VulkanDeferredLights.cpp` | `SphereLight::record()` | ~82 | Point/cone light draw recording |

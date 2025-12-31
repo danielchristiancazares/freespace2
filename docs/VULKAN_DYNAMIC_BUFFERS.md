@@ -612,7 +612,7 @@ Frame 0:                            [Recording] ----+--> [GPU Executing] -->
 
 ### 7.3 Frame Preparation and Recycling
 
-From `VulkanRenderer.cpp`:
+From `VulkanRendererFrameFlow.cpp`:
 
 ```cpp
 void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial)
@@ -625,6 +625,7 @@ void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completed
     frame.reset();
 }
 
+// VulkanRendererFrameFlow.cpp
 void VulkanRenderer::recycleOneInFlight()
 {
     InFlightFrame inflight = std::move(m_inFlightFrames.front());
@@ -645,7 +646,7 @@ void VulkanRenderer::recycleOneInFlight()
 
 ### 7.4 Frame Advance Flow
 
-From `VulkanRenderer.cpp`:
+From `VulkanRendererFrameFlow.cpp`:
 
 ```cpp
 RecordingFrame VulkanRenderer::advanceFrame(RecordingFrame prev)
@@ -1060,7 +1061,7 @@ constexpr uint32_t kMaxBindlessTextures = 1024;
 | `VulkanFrame.h` | Per-frame resources, ring buffer accessors, sync primitives |
 | `VulkanFrame.cpp` | Frame initialization, `wait_for_gpu`, `reset` |
 | `VulkanDeferredRelease.h` | `MoveOnlyFunction`, `DeferredReleaseQueue` |
-| `VulkanRenderer.cpp` | `prepareFrameForReuse`, `recycleOneInFlight`, `advanceFrame` |
+| `VulkanRendererFrameFlow.cpp` | `prepareFrameForReuse`, `recycleOneInFlight`, `advanceFrame` |
 | `VulkanGraphics.cpp` | `gr_vulkan_update_transform_buffer`, buffer management hooks |
 | `VulkanConstants.h` | `kFramesInFlight`, bindless texture slot constants |
 | `code/graphics/2d.h` | `BufferType`, `BufferUsageHint` enums, `gr_buffer_handle` |

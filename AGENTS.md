@@ -1,8 +1,42 @@
 # Codex Guidelines
 
-You will be working primarily on the Vulkan backend unless the user says otherwise.
-
 ## Agent Workflow
+- Ensure you adhere to `docs/DESIGN_PHILOSOPHY.md` before proposing fixes or architectural changes. Your proposals will get rejected if you don't.
+- If you change or write new tests, rebuild and run them using `./test.ps1 -Rebuild`
+- If you modify core engine or headers, do a full build: `./build.ps1`
+
+### Permission Boundaries
+- Don't ask to run `./build.ps1` or `./test.ps1`, just do it.
+- Running specific test filter: Don't ask. Run as needed.
+- Full rebuild (`./build.ps1`): Don't ask. Run after finishing a code change.
+- Running full test suite (./test.ps1 -Rebuild: Don't ask. Run it after finishing a task.
+- Commits: Confirm with user first
+- Pushing changes: Don't ask. Always do it after a commit.
+- Destructive git commands (`git reset`, `git restore`, `git checkout`): ALWAYS ask
+
+### tools-mcp Usage
+- Prefer `mcp__tools-mcp__Read` over `cat`/`Get-Content`.
+- Prefer `mcp__tools-mcp_Search` over `rg`/`grep`.
+- Prefer `mcp__tools-mcp__Glob` for finding files.
+- Prefer `mcp__tools-mcp__Edit` for modifications and `Write` for new files.
+- Prefer `apply_patch`; use `mcp__tools-mcp__Edit` as an alternative.
+- Use `mcp__tools-mcp__Outline` to quickly understand what’s in a file and where to jump next.
+- If `mcp__tools-mcp` is unavailable, fall back to built in tooling and command line.
+
+### RAG Tool Usage
+- Prefer tools-mcp `Search` (ripgrep) when you have an exact token/string (symbol name, error text, build flag, `#define`, config key).
+- Prefer `mcp__rag__search_code` when you *don't* have an exact token and need semantic/codebase-wide discovery (e.g., "where is swapchain recreated?", "similar descriptor update patterns", "who owns this VkImage?").
+- Run `mcp__rag__index_repo` at the start of a session, when you expect cross-cutting code archaeology, or after big repo changes (branch switch/pull, mass renames/moves, large refactors) that could make search results stale.
+- Re-run `mcp__rag__index_repo` when `mcp__rag__search_code` results are obviously missing/stale or still pointing at old paths.
+- Keep RAG queries narrow: include subsystem/path hints ("deferred lighting", "post processing"), the object type (`VkImage`, `DescriptorSet`), and the behavior ("recreate on resize", "transition layout").
+- Indexing has a built-in filter for just code files. Don't move files around to avoid indexing them, it's already handled by the tool.
+
+### Commit Expectations
+- Messages: short, imperative summary with type and scope.
+  - `feat(vulkan): implement ring buffer overflow handling`
+  - `fix(bmpman): correct mipmap level calculation`
+  - `refactor(render): extract depth attachment logic`
+- Group related changes per commit.
 
 ## Repository Map
 - Rendering backends: `code/graphics/` (`vulkan/`, `opengl/`, etc.)
@@ -31,75 +65,15 @@ You will be working primarily on the Vulkan backend unless the user says otherwi
 ### Windows (PowerShell)
 ```powershell
 ./build.ps1                     # Full build
-./build.ps1 -Target Freespace2  # Main executable only
-./build.ps1 -Target code        # Engine library only
 ./build.ps1 -Clean              # Clean rebuild
-./build.ps1 -ConfigureOnly      # CMake configure only
 ./test.ps1 -Rebuild             # Build and run tests
 ```
-
-### POSIX
-```sh
-./build.sh
-cmake -S . -B build -G Ninja -DFSO_BUILD_WITH_VULKAN=ON -DSHADERS_ENABLE_COMPILATION=ON
-cmake --build build --parallel
-cmake --build build --target unittests
-```
-
-### Run Tests
-```sh
-./build/bin/unittests --gtest_filter="Vulkan*"     # Vulkan tests only
-./build/bin/unittests                               # All tests
-```
-
-### Integration Tests (Require GPU)
-```sh
-export FS2_VULKAN_IT=1  # Windows: $env:FS2_VULKAN_IT="1"
-./build/bin/unittests --gtest_filter="VulkanSubsystems.*"
-```
-
 ## Coding Style
 - Language: C++17 minimum (`cxx_std_17`) unless a subsystem states otherwise.
-- Formatting: `.clang-format` is authoritative; run `clang-format` on files you touch (no permission needed).
-- Do not reformat: `lib/` (third-party), `build/` (output), `Testing/` (output).
-- Formatting rules (high level):
-  - Default/root: `IndentWidth: 4`, `TabWidth: 4`, `UseTab: ForContinuationAndIndentation`, `ColumnLimit: 120`
-  - Vulkan: `code/graphics/vulkan/` uses `IndentWidth: 2`, `UseTab: Never`, `ColumnLimit: 120`
+- Formatting: `./build.ps1` will automatically run `.clang-format` so don't waste time fixing indentation.
 - Naming:
   - Types: `PascalCase` (e.g. `RenderCtx`, `FrameCtx`)
   - Constants/macros: `ALL_CAPS`
   - Functions/variables: `snake_case` (legacy), `camelCase` (new Vulkan code)
   - Handles/indices: suffix with `...Handle`, `...Index`
 - Headers: prefer forward declarations over includes; keep headers lean.
-
-## Agent Workflow
-- Ensure you adhere to `docs/DESIGN_PHILOSOPHY.md` before proposing fixes or architectural changes. Your proposals will get rejected if you don't.
-- If you change or write new tests, rebuild and run them using `./test.ps1 -Rebuild`
-- If you modify core engine or headers, do a full build: `./build.ps1`
-
-### Tooling Preferences
-- Prefer tools-mcp `Read` over `cat`/`Get-Content`.
-- Prefer tools-mcp `Search` over `rg`/`grep`.
-- Prefer tools-mcp `Glob` for finding files.
-- Prefer tools-mcp `Edit` for modifications and `Write` for new files.
-- Prefer `apply_patch`; use tools-mcp `Edit` as an alternative.
-- Use tools-mcp `Outline` to quickly understand what’s in a file and where to jump next.
-- If tools-mcp is unavailable, use `rg`/`rg --files`.
-
-### Permission Boundaries
-- Running `clang-format`: Do not ask; do it as needed.
-- Building with `-Target code`: Do not ask; do it as needed.
-- Running specific test filter: Do not ask; do it as needed.
-- Full rebuild (`./build.ps1`): Do not ask; do it as needed.
-- Running full test suite (./test.ps1 -Rebuild: Do not ask; do it as needed.
-- Commit working: Ask
-- Pushing changes: Do not ask; do it as needed.
-- Destructive git commands (`git reset`, `git restore`, `git checkout`): ALWAYS ask
-
-### Commit Expectations
-- Messages: short, imperative summary with type and scope.
-  - `feat(vulkan): implement ring buffer overflow handling`
-  - `fix(bmpman): correct mipmap level calculation`
-  - `refactor(render): extract depth attachment logic`
-- Add detail lines for context as needed.
-- Group related changes per commit.

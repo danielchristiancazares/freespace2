@@ -1207,7 +1207,7 @@ Common validation messages and their meanings:
 | `code/graphics/vulkan/VulkanGraphics.cpp` | Vulkan rendering commands and state management |
 | `code/graphics/vulkan/VulkanClip.h` | Scissor/clip computation and clamping |
 | `code/graphics/vulkan/VulkanRenderer.h` | Renderer class declaration |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Renderer implementation |
+| `code/graphics/vulkan/VulkanRendererRenderState.cpp` | Render state management (viewport, scissor) |
 
 ### Shader Files
 
