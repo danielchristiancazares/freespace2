@@ -736,7 +736,7 @@ Changing slot assignment phase may cause one-frame "fallback sampling" for newly
 
 **Mitigation**:
 
-- Keep existing "slow path flush now" in `VulkanRenderer` for critical cases (animated textures) where the renderer already forces an upload flush mid-frame (`code/graphics/vulkan/VulkanRenderer.cpp`, search: `animated textures`)
+- Keep existing "slow path flush now" in `VulkanRenderer` for critical cases (animated textures) where the renderer already forces an upload flush mid-frame (`code/graphics/vulkan/VulkanRendererResources.cpp`, search: `animated textures`)
 - Ensure descriptor sync ordering: slot assignment occurs before descriptor writes
 
 ### Risk: Widespread Signature Churn

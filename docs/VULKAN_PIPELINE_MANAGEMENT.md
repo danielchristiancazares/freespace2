@@ -213,6 +213,8 @@ Stencil parameters are baked into the pipeline (all affect the cache key):
 | Front fail/depth-fail/pass ops | `front_*_op` | Default: `VK_STENCIL_OP_KEEP` |
 | Back fail/depth-fail/pass ops | `back_*_op` | Default: `VK_STENCIL_OP_KEEP` |
 
+**Front/Back Face Sharing**: The compare operation, compare mask, write mask, and reference value are shared between front and back faces (both use the same `stencil_compare_op`, `stencil_compare_mask`, `stencil_write_mask`, and `stencil_reference` fields). Only the stencil operations (fail, depth-fail, pass) can differ between front and back faces via the separate `front_*_op` and `back_*_op` fields.
+
 **Current Usage**: Stencil state is primarily used for shield decals (`SDR_TYPE_SHIELD_DECAL`). Most pipelines use default stencil state (test disabled).
 
 ---
@@ -340,6 +342,44 @@ Variant flags are defined in `code/graphics/2d.h`:
 | `SDR_TYPE_POST_PROCESS_TONEMAPPING` | `SDR_FLAG_TONEMAPPING_LINEAR_OUT` | `1<<0` | Linear output (skip sRGB) |
 | `SDR_TYPE_ENVMAP_SPHERE_WARP` | `SDR_FLAG_ENV_MAP` | `1<<0` | Environment map enabled |
 
+### Model Shader Variant Flags
+
+Model-specific variant flags are defined separately in `def_files/data/effects/model_shader_flags.h` and control material features for `SDR_TYPE_MODEL`:
+
+| Flag | Value | Purpose |
+|------|-------|---------|
+| `MODEL_SDR_FLAG_LIGHT` | `1<<0` | Lighting calculations enabled |
+| `MODEL_SDR_FLAG_DEFERRED` | `1<<1` | G-buffer MRT output (vs forward single output) |
+| `MODEL_SDR_FLAG_HDR` | `1<<2` | HDR rendering path |
+| `MODEL_SDR_FLAG_DIFFUSE` | `1<<3` | Diffuse texture map |
+| `MODEL_SDR_FLAG_GLOW` | `1<<4` | Glow/emissive map |
+| `MODEL_SDR_FLAG_SPEC` | `1<<5` | Specular map |
+| `MODEL_SDR_FLAG_NORMAL` | `1<<6` | Normal map |
+| `MODEL_SDR_FLAG_AMBIENT` | `1<<7` | Ambient occlusion map |
+| `MODEL_SDR_FLAG_MISC` | `1<<8` | Miscellaneous map |
+| `MODEL_SDR_FLAG_TEAMCOLOR` | `1<<9` | Team color support |
+| `MODEL_SDR_FLAG_FOG` | `1<<10` | Fog calculations |
+| `MODEL_SDR_FLAG_TRANSFORM` | `1<<11` | Transform animations |
+| `MODEL_SDR_FLAG_SHADOWS` | `1<<12` | Shadow receiving |
+| `MODEL_SDR_FLAG_THRUSTER` | `1<<13` | Thruster glow effect |
+| `MODEL_SDR_FLAG_ALPHA_MULT` | `1<<14` | Alpha multiply blending |
+| `MODEL_SDR_FLAG_SHADOW_MAP` | `1<<15` | Shadow map generation (compile-time only) |
+| `MODEL_SDR_FLAG_THICK_OUTLINES` | `1<<16` | Thick outlines (compile-time only) |
+
+**Automatic Flag Normalization**: The `MODEL_SDR_FLAG_DEFERRED` flag is automatically set or cleared based on the render target's attachment count via `normalize_model_variant_flags_for_target()` in `VulkanModelShaderVariants.h`:
+
+```cpp
+inline uint32_t normalize_model_variant_flags_for_target(uint32_t variantFlags, uint32_t colorAttachmentCount) {
+    const bool wantsDeferredOutputs = (colorAttachmentCount == VulkanRenderTargets::kGBufferCount);
+    if (wantsDeferredOutputs) {
+        return variantFlags | static_cast<uint32_t>(MODEL_SDR_FLAG_DEFERRED);
+    }
+    return variantFlags & ~static_cast<uint32_t>(MODEL_SDR_FLAG_DEFERRED);
+}
+```
+
+This ensures the correct fragment shader output signature (forward vs deferred) is selected based on the active render target.
+
 ### Shader Module Selection
 
 Variant flags affect SPIR-V filename selection in `VulkanShaderManager::getModules()`:
@@ -403,6 +443,24 @@ vk::Pipeline pipeline = pipelineManager->getPipeline(key, modules, layout);
 ## 5. Vertex Input State Conversion
 
 The renderer converts `vertex_layout` (engine abstraction) to Vulkan vertex input state structures.
+
+### VertexInputState Structure
+
+The conversion result is stored in the `VertexInputState` structure defined in `VulkanPipelineManager.h`:
+
+```cpp
+struct VertexInputState {
+    std::vector<vk::VertexInputBindingDescription> bindings;    // Per-buffer binding info (stride, input rate)
+    std::vector<vk::VertexInputAttributeDescription> attributes; // Per-attribute info (location, format, offset)
+    std::vector<vk::VertexInputBindingDivisorDescription> divisors; // Instance divisors (if divisor > 1)
+};
+```
+
+| Member | Purpose |
+|--------|---------|
+| `bindings` | Describes each vertex buffer binding: stride in bytes and whether data is per-vertex or per-instance |
+| `attributes` | Maps shader locations to buffer bindings with format and offset information |
+| `divisors` | Optional; only populated when `VK_EXT_vertex_attribute_divisor` is needed for divisor > 1 |
 
 ### Location Mapping
 

@@ -30,7 +30,7 @@ The Vulkan backend implements a multi-frame-in-flight rendering architecture usi
 | Mechanism | Purpose | Primary Location |
 |-----------|---------|------------------|
 | Binary Semaphores | GPU-GPU sync (acquire/present) | `VulkanFrame.cpp`, `VulkanDevice.cpp` |
-| Timeline Semaphore | Serial-based GPU completion tracking | `VulkanRenderer.cpp` |
+| Timeline Semaphore | Serial-based GPU completion tracking | `VulkanRendererFrameFlow.cpp` |
 | Fences | CPU-GPU sync (frame reuse) | `VulkanFrame.cpp` |
 | Pipeline Barriers | Execution/memory dependencies | `VulkanRenderingSession.cpp`, `VulkanTextureManager.cpp` |
 | Image Layout Transitions | Access pattern changes | `VulkanRenderingSession.cpp` |
@@ -64,7 +64,7 @@ Key Vulkan 1.4 features used:
 | `VulkanFrame.h` | Per-frame fence, imageAvailable semaphore, per-frame timeline semaphore (unused) |
 | `VulkanFrame.cpp` | Sync primitive creation, `wait_for_gpu()` implementation |
 | `VulkanDevice.h/cpp` | Per-swapchain-image renderFinished semaphores, acquire/present, swapchain recreation |
-| `VulkanRenderer.cpp` | Global timeline semaphore, frame submission, frame recycling |
+| `VulkanRendererFrameFlow.cpp` | Global timeline semaphore, frame submission, frame recycling |
 | `VulkanRenderingSession.cpp` | `stageAccessForLayout()` helper, all image layout transitions |
 | `VulkanBufferManager.cpp` | Buffer upload with pipeline barriers and fence wait |
 | `VulkanTextureManager.cpp` | Texture upload barriers, immediate and frame-buffered |
@@ -194,7 +194,7 @@ m_timelineSemaphore = m_device.createSemaphoreUnique(semaphoreInfo);
 
 ### Global Timeline Semaphore
 
-**File:** `VulkanRenderer.cpp`
+**File:** `VulkanRendererLifecycle.cpp`
 ```cpp
 void VulkanRenderer::createSubmitTimelineSemaphore() {
   vk::SemaphoreTypeCreateInfo timelineType;
@@ -306,7 +306,7 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 
 ### Frame Submission
 
-**File:** `VulkanRenderer.cpp`
+**File:** `VulkanRendererFrameFlow.cpp`
 
 The engine uses `vkQueueSubmit2` (Synchronization2) for frame submission:
 
@@ -378,7 +378,7 @@ graphics::vulkan::SubmitInfo VulkanRenderer::submitRecordedFrame(graphics::vulka
 
 ### Frame Recycling with Fence Wait
 
-**File:** `VulkanRenderer.cpp`
+**File:** `VulkanRendererFrameFlow.cpp`
 ```cpp
 void VulkanRenderer::recycleOneInFlight()
 {
@@ -813,8 +813,8 @@ The following locations use blocking device/queue waits:
 
 | Location | Wait Type | Purpose |
 |----------|-----------|---------|
-| `VulkanRenderer.cpp` | `device().waitSemaphores()` (timeline) | `submitInitCommandsAndWait()` - blocking init command completion |
-| `VulkanRenderer.cpp` | `device().waitIdle()` | Shutdown synchronization before resource destruction |
+| `VulkanRendererLifecycle.cpp` | `device().waitSemaphores()` (timeline) | `submitInitCommandsAndWait()` - blocking init command completion |
+| `VulkanRendererLifecycle.cpp` | `device().waitIdle()` | Shutdown synchronization before resource destruction |
 | `VulkanDevice.cpp` | `device->waitIdle()` | Pre-destruction cleanup |
 | `VulkanDevice.cpp` | `device->waitIdle()` | Pre-swapchain recreation (ensure images not in use) |
 | `VulkanBufferManager.cpp` | `waitForFences()` | Buffer upload completion |
@@ -977,7 +977,7 @@ The engine includes RenderDoc integration (`VulkanDebug.h`, `renderdoc.cpp`) for
 
 ### Issue 1: renderFinished Signal Stage
 
-**Location:** `VulkanRenderer.cpp`
+**Location:** `VulkanRendererFrameFlow.cpp`
 ```cpp
 signalSemaphores[0].semaphore = renderFinished;
 signalSemaphores[0].stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
@@ -993,7 +993,7 @@ However, if late-stage compute work (e.g., async compute for next frame) is adde
 
 ### Issue 2: Identical Preprocessor Branches
 
-**Location:** `VulkanRenderer.cpp`
+**Location:** `VulkanRendererFrameFlow.cpp`
 ```cpp
 #if defined(VULKAN_HPP_NO_EXCEPTIONS)
   m_vulkanDevice->graphicsQueue().submit2(submitInfo, fence);

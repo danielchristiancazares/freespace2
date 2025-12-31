@@ -291,7 +291,7 @@ static_assert(sizeof(my_uniform) == 32,
 The renderer validates dynamic offsets before binding:
 
 ```cpp
-// From VulkanRenderer.cpp
+// From VulkanRendererResources.cpp
 const auto alignment = getMinUniformOffsetAlignment();
 const auto dynOffset = static_cast<uint32_t>(offset);
 
@@ -723,7 +723,7 @@ struct model_uniform_data {
 
 ### Example 5: Ring Buffer Allocation Pattern
 
-**File:** `code/graphics/vulkan/VulkanRenderer.cpp`
+**File:** `code/graphics/vulkan/VulkanRendererPostProcessing.cpp`
 
 ```cpp
 // Build uniform data on stack
@@ -844,7 +844,8 @@ Assertion((dynOffset % alignment) == 0,
 | `code/graphics/util/uniform_structs.h` | Shared uniform struct definitions |
 | `code/graphics/vulkan/VulkanRingBuffer.h` | Ring buffer for per-frame allocations |
 | `code/graphics/vulkan/VulkanDeferredLights.h` | Vulkan-specific deferred light UBOs |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Uniform allocation and binding patterns |
+| `code/graphics/vulkan/VulkanRendererResources.cpp` | Model uniform binding and validation |
+| `code/graphics/vulkan/VulkanRendererPostProcessing.cpp` | Post-processing uniform allocation |
 
 ### External References
 

@@ -541,7 +541,7 @@ void drawSomething(const RenderCtx& ctx) {
 
 **Called At**: Frame start, after acquiring swapchain image
 
-**Implementation** (`VulkanRenderer.cpp`):
+**Implementation** (`VulkanRendererFrameFlow.cpp`):
 ```cpp
 graphics::vulkan::RecordingFrame VulkanRenderer::beginRecording()
 {
@@ -586,7 +586,7 @@ void someRenderingFunction() {
 
 **Function**: `VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)`
 
-**Implementation** (`VulkanRenderer.cpp`):
+**Implementation** (`VulkanRendererRenderState.cpp`):
 ```cpp
 RenderCtx VulkanRenderer::ensureRenderingStarted(const FrameCtx& ctx)
 {
@@ -639,13 +639,13 @@ void renderModel(const FrameCtx& frameCtx) {
 - `updateTexture()`: Creates `UploadCtx` for texture updates during frame
 - `uploadMovieTexture()`: Creates `UploadCtx` for movie frame uploads
 
-**Implementation** (`VulkanRenderer.cpp`):
+**Implementation** (`VulkanRendererFrameFlow.cpp`, `VulkanRendererResources.cpp`):
 ```cpp
-// In beginFrame():
+// In beginFrame() (VulkanRendererFrameFlow.cpp):
 const UploadCtx uploadCtx{frame, cmd, m_frameCounter};
 m_textureUploader->flushPendingUploads(uploadCtx);
 
-// In updateTexture():
+// In updateTexture() (VulkanRendererResources.cpp):
 UploadCtx uploadCtx{ctx.m_recording.ref(), cmd, m_frameCounter};
 m_textureUploader->updateTexture(uploadCtx, bitmapHandle, bpp, data, width, height);
 ```
@@ -1268,7 +1268,10 @@ Over time, more code can be migrated to use tokens directly, improving compile-t
 - `code/graphics/vulkan/VulkanRenderer.h` - Token-consuming API declarations, InitCtx (private)
 
 **Implementation**:
-- `code/graphics/vulkan/VulkanRenderer.cpp` - Token-consuming API implementations
+- `code/graphics/vulkan/VulkanRendererRenderState.cpp` - `ensureRenderingStarted()`, viewport/scissor
+- `code/graphics/vulkan/VulkanRendererDeferredLighting.cpp` - Deferred lighting token APIs
+- `code/graphics/vulkan/VulkanRendererPostProcessing.cpp` - Scene texture APIs
+- `code/graphics/vulkan/VulkanRendererFrameFlow.cpp` - Frame lifecycle token management
 - `code/graphics/vulkan/VulkanGraphics.cpp` - Token creation helpers and bridge functions
 
 **Design Philosophy**:

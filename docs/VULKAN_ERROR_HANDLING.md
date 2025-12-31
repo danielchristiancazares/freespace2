@@ -34,7 +34,8 @@ The Vulkan renderer uses a multi-layered error handling strategy:
 
 **Key Files**:
 - `code/graphics/vulkan/VulkanDevice.cpp` - Device-level error handling, swapchain recreation
-- `code/graphics/vulkan/VulkanRenderer.cpp` - Renderer-level error handling, frame acquisition
+- `code/graphics/vulkan/VulkanRendererFrameFlow.cpp` - Frame acquisition, submission error handling
+- `code/graphics/vulkan/VulkanRendererLifecycle.cpp` - Initialization error handling
 - `code/graphics/vulkan/VulkanFrame.cpp` - Per-frame synchronization and fence handling
 - `code/graphics/vulkan/VulkanDescriptorLayouts.cpp` - Device limit validation
 - `code/graphics/vulkan/VulkanRingBuffer.cpp` - Ring buffer allocation failures
@@ -207,7 +208,7 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 
 **Function**: `VulkanRenderTargets::resize(vk::Extent2D extent)`
 
-**Called At**: After swapchain recreation (`VulkanRenderer.cpp`)
+**Called At**: After swapchain recreation (`VulkanRendererFrameFlow.cpp`)
 
 **Recreated Resources**:
 - G-buffer attachments (color, normal, position, specular, emissive)
@@ -220,7 +221,7 @@ VulkanDevice::PresentResult VulkanDevice::present(vk::Semaphore renderFinished, 
 
 The renderer provides two acquisition functions with different error handling approaches.
 
-**Graceful Degradation** (`VulkanRenderer::acquireImage`) - Returns invalid index on failure:
+**Graceful Degradation** (`VulkanRenderer::acquireImage` in `VulkanRendererFrameFlow.cpp`) - Returns invalid index on failure:
 ```cpp
 uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
     auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
@@ -242,7 +243,7 @@ uint32_t VulkanRenderer::acquireImage(VulkanFrame& frame) {
 }
 ```
 
-**Exception-Based** (`VulkanRenderer::acquireImageOrThrow`) - Throws on failure:
+**Exception-Based** (`VulkanRenderer::acquireImageOrThrow` in `VulkanRendererFrameFlow.cpp`) - Throws on failure:
 ```cpp
 uint32_t VulkanRenderer::acquireImageOrThrow(VulkanFrame& frame) {
     auto result = m_vulkanDevice->acquireNextImage(frame.imageAvailable());
@@ -510,7 +511,7 @@ static_assert(sizeof(ModelPushConstants) % 4 == 0,
 
 **Usage**: Development-time invariants that should never fail in correct code.
 
-**Pattern** (`VulkanRenderer.cpp`):
+**Pattern** (`VulkanRendererFrameFlow.cpp`):
 ```cpp
 Assertion(m_renderingSession != nullptr,
           "beginFrame requires an active rendering session");
@@ -749,7 +750,7 @@ if (result == vk::Result::eTimeout) {
 
 **Source Files**:
 - `code/graphics/vulkan/VulkanDevice.cpp` - Error detection (`acquireNextImage`, `present`), swapchain recreation, validation callback
-- `code/graphics/vulkan/VulkanRenderer.cpp` - Image acquisition with retry logic
+- `code/graphics/vulkan/VulkanRendererFrameFlow.cpp` - Image acquisition with retry logic
 - `code/graphics/vulkan/VulkanFrame.cpp` - Fence wait error handling
 - `code/graphics/vulkan/VulkanTextureManager.cpp` - Staging buffer exhaustion handling
 - `code/graphics/vulkan/VulkanDescriptorLayouts.cpp` - Device limit validation

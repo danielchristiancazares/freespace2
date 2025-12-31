@@ -42,7 +42,8 @@ instead of traditional `VkRenderPass` objects. This design:
 | `VulkanRenderTargets.h` | G-buffer, depth, and post-process image ownership |
 | `VulkanRenderTargetInfo.h` | Pipeline-compatible attachment format contract |
 | `VulkanPhaseContexts.h` | Capability tokens (`RenderCtx`, `UploadCtx`, `DeferredGeometryCtx`, etc.) |
-| `VulkanRenderer.cpp` | Deferred lighting pipeline, frame management |
+| `VulkanRendererDeferredLighting.cpp` | Deferred lighting pipeline |
+| `VulkanRendererFrameFlow.cpp` | Frame management |
 | `VulkanTextureManager.h/cpp` | Bitmap render target management for RTT |
 
 ---
@@ -863,7 +864,7 @@ assertions on mismatched contexts.
 | Bloom constants | `VulkanRenderTargets.h` | `kBloomPingPongCount`, `kBloomMipLevels` |
 | Depth format selection | `VulkanRenderTargets.cpp` | `findDepthFormat()`, `depthHasStencil()` |
 | Image ownership | `VulkanRenderTargets.h` | Memory allocation, layout tracking |
-| Deferred lighting | `VulkanRenderer.cpp` | `deferredLightingBegin()`, `deferredLightingEnd()`, `deferredLightingFinish()` |
+| Deferred lighting | `VulkanRendererDeferredLighting.cpp` | `deferredLightingBegin()`, `deferredLightingEnd()`, `deferredLightingFinish()` |
 | Bitmap RTT | `VulkanTextureManager.h` | Render target management |
 
 ---

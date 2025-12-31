@@ -480,7 +480,8 @@ The Fake classes mirror specific portions of the production implementation:
 | Production File | Relevant Test Files |
 |-----------------|---------------------|
 | `code/graphics/vulkan/VulkanRenderingSession.cpp` | `test_vulkan_depth_attachment_switch.cpp`, `test_vulkan_frame_lifecycle.cpp` |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | `test_vulkan_post_effects_semantics.cpp`, `test_vulkan_renderer_shutdown.cpp` |
+| `code/graphics/vulkan/VulkanRendererPostProcessing.cpp` | `test_vulkan_post_effects_semantics.cpp` |
+| `code/graphics/vulkan/VulkanRendererLifecycle.cpp` | `test_vulkan_renderer_shutdown.cpp` |
 | `code/graphics/vulkan/VulkanTextureManager.cpp` | `test_vulkan_texture_render_target.cpp`, `test_vulkan_texture_contract.cpp` |
 | `code/graphics/vulkan/VulkanPipelineManager.cpp` | `test_vulkan_pipeline_manager.cpp` |
 | `code/graphics/vulkan/VulkanBufferManager.cpp` | `test_vulkan_buffer_manager_retirement.cpp`, `test_vulkan_buffer_zero_size.cpp` |

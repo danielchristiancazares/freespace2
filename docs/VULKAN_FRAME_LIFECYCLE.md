@@ -256,7 +256,7 @@ The `beginFrame()` method performs critical per-frame initialization after acqui
 Texture uploads are batched and executed at frame start, before any rendering begins:
 
 ```cpp
-// VulkanRenderer.cpp - beginFrame()
+// VulkanRendererFrameFlow.cpp - beginFrame()
 const UploadCtx uploadCtx{frame, cmd, m_frameCounter};
 m_textureUploader->flushPendingUploads(uploadCtx);
 ```
@@ -271,7 +271,7 @@ The `UploadCtx` token proves the upload phase is active and provides access to t
 After upload flush, model descriptors are synchronized:
 
 ```cpp
-// VulkanRenderer.cpp - beginFrame()
+// VulkanRendererFrameFlow.cpp - beginFrame()
 vk::Buffer vertexHeapBuffer = m_bufferManager->ensureBuffer(m_modelVertexHeapHandle, 1);
 beginModelDescriptorSync(frame, frame.frameIndex(), vertexHeapBuffer);
 ```
@@ -333,7 +333,7 @@ Resources (buffers, textures, movie textures) are not destroyed immediately; the
 2. **Frame recycle:** `prepareFrameForReuse()` collects after fence wait confirms GPU completion
 
 ```cpp
-// VulkanRenderer.cpp - prepareFrameForReuse()
+// VulkanRendererFrameFlow.cpp - prepareFrameForReuse()
 void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completedSerial)
 {
     m_bufferManager->collect(completedSerial);
@@ -345,7 +345,7 @@ void VulkanRenderer::prepareFrameForReuse(VulkanFrame& frame, uint64_t completed
 **Note:** Movie textures are collected in `beginFrame()` rather than `prepareFrameForReuse()`:
 
 ```cpp
-// VulkanRenderer.cpp - beginFrame()
+// VulkanRendererFrameFlow.cpp - beginFrame()
 if (m_movieManager) {
     m_movieManager->collect(m_completedSerial);
 }
@@ -359,12 +359,12 @@ The safe retire serial determines what serial value is assigned to resources del
 - **After submit:** The serial is updated to the actual submitted value
 
 ```cpp
-// VulkanRenderer.cpp - beginFrame() (before recording starts)
+// VulkanRendererFrameFlow.cpp - beginFrame() (before recording starts)
 m_textureManager->setSafeRetireSerial(m_submitSerial + 1);
 m_movieManager->setSafeRetireSerial(m_submitSerial + 1);
 m_bufferManager->setSafeRetireSerial(m_submitSerial + 1);
 
-// VulkanRenderer.cpp - submitRecordedFrame() (after submit)
+// VulkanRendererFrameFlow.cpp - submitRecordedFrame() (after submit)
 m_textureManager->setSafeRetireSerial(m_submitSerial);  // Now equals the actual submitted serial
 m_bufferManager->setSafeRetireSerial(m_submitSerial);
 ```

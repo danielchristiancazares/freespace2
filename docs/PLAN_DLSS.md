@@ -182,7 +182,7 @@ The G-buffer count is defined as `kGBufferCount = 5` in `VulkanRenderTargets.h:2
 
 ### Current Frame Flow
 
-From `VulkanRenderer.cpp` and `VulkanRenderingSession.cpp`:
+From `VulkanRendererFrameFlow.cpp` and `VulkanRenderingSession.cpp`:
 
 ```
 1. beginFrame()
@@ -1403,7 +1403,8 @@ Feature complete with user controls. Performance meets targets. Documentation up
 | `code/graphics/vulkan/VulkanRenderingSession.h` | New target types for motion vectors; DLSS transition methods |
 | `code/graphics/vulkan/VulkanRenderingSession.cpp` | Layout transitions for DLSS; `transitionForDlssEvaluate()` |
 | `code/graphics/vulkan/VulkanRenderer.h` | `ResolutionState`, DLSS manager ownership, jitter state |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Frame orchestration, jitter application, history reset, DLSS evaluate call |
+| `code/graphics/vulkan/VulkanRendererFrameFlow.cpp` | Frame orchestration, jitter application, history reset |
+| `code/graphics/vulkan/VulkanRendererPostProcessing.cpp` | DLSS evaluate call (post-processing integration) |
 | `code/graphics/vulkan/VulkanTextureManager.h` | `SamplerKey` LOD bias extension |
 | `code/graphics/vulkan/VulkanTextureManager.cpp` | Sampler cache update for LOD bias |
 | `code/graphics/shaders/model.frag` | Motion vector output (location 5) |

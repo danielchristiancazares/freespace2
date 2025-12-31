@@ -1098,7 +1098,8 @@ Scene uniforms are tracked but not yet wired to a descriptor set.
 | `VulkanConstants.h` | Bindless limits and reserved slots |
 | `VulkanFrame.h` | Per-frame descriptor set storage and bindings |
 | `VulkanRenderer.h` | Frame array, bindless cache structure |
-| `VulkanRenderer.cpp` | Allocation, sync, update logic |
+| `VulkanRendererLifecycle.cpp` | Descriptor resource creation |
+| `VulkanRendererResources.cpp` | Model descriptor sync and update logic |
 | `VulkanLayoutContracts.h` | Pipeline layout kind enum, vertex input mode |
 | `VulkanLayoutContracts.cpp` | Shader-to-layout mapping (33 shader types) |
 | `VulkanPipelineManager.h` | Pipeline key and hasher |

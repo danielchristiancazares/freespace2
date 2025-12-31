@@ -633,7 +633,7 @@ Use this checklist when reviewing performance-critical code or diagnosing issues
 |------|----------|
 | `code/graphics/vulkan/VulkanDevice.cpp` | Pipeline cache persistence (`createPipelineCache`, `savePipelineCache`) |
 | `code/graphics/vulkan/VulkanPipelineManager.cpp` | Pipeline creation, dynamic state list (`BuildDynamicStateList`) |
-| `code/graphics/vulkan/VulkanRenderer.cpp` | Descriptor management (`updateModelDescriptors`), ring buffer usage |
+| `code/graphics/vulkan/VulkanRendererResources.cpp` | Descriptor management (`updateModelDescriptors`), ring buffer usage |
 | `code/graphics/vulkan/VulkanRenderer.h` | Ring buffer size constants |
 | `code/graphics/vulkan/VulkanRenderingSession.cpp` | Barrier management, layout transitions |
 | `code/graphics/vulkan/VulkanConstants.h` | Frame count, bindless array size |

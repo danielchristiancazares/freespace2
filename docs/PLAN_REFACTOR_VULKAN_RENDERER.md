@@ -1,6 +1,14 @@
 # VulkanRenderer.cpp Refactoring Analysis
 
-## Summary
+> **STATUS: COMPLETED** - This refactoring has been implemented. VulkanRenderer.cpp has been split into:
+> - `VulkanRendererLifecycle.cpp` - Initialization and shutdown
+> - `VulkanRendererFrameFlow.cpp` - Frame lifecycle (beginFrame, endFrame, acquire, submit)
+> - `VulkanRendererResources.cpp` - Buffer/texture management, model descriptors
+> - `VulkanRendererDeferredLighting.cpp` - Deferred lighting pipeline
+> - `VulkanRendererPostProcessing.cpp` - Post-processing effects
+> - `VulkanRendererRenderState.cpp` - Render state management (viewport, scissor)
+
+## Summary (Historical)
 - **File**: `code/graphics/vulkan/VulkanRenderer.cpp`
 - **Size**: 3875 lines (largest in Vulkan codebase)
 - **Functions**: ~65 methods
