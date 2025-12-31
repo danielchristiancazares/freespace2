@@ -997,6 +997,17 @@ static void draw_decal_pass(const DecalBoundFrame &bound, const ShaderModules &m
   cmd.setDepthTestEnable(VK_FALSE);
   cmd.setDepthWriteEnable(VK_FALSE);
   cmd.setStencilTestEnable(VK_FALSE);
+  if (renderer.supportsExtendedDynamicState3()) {
+    const auto &caps = renderer.getExtendedDynamicState3Caps();
+    if (caps.colorBlendEnable) {
+      vk::Bool32 blendEnable = (blendMode != ALPHA_BLEND_NONE) ? VK_TRUE : VK_FALSE;
+      cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(1, &blendEnable));
+    }
+    if (caps.colorWriteMask) {
+      auto mask = static_cast<vk::ColorComponentFlags>(key.color_write_mask);
+      cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(1, &mask));
+    }
+  }
 
   // Fullscreen viewport/scissor (decals are screen-space projected via depth reconstruction).
   vk::Viewport viewport = createFullScreenViewport();
@@ -1133,6 +1144,23 @@ void gr_vulkan_render_model(model_material *material_info, indexed_vertex_source
   key.sample_count = static_cast<VkSampleCountFlagBits>(ctxBase.renderer.getSampleCount());
   key.color_attachment_count = rt.colorAttachmentCount;
   key.blend_mode = material_info->get_blend_mode();
+  key.color_write_mask = convertColorWriteMask(material_info->get_color_mask());
+  key.stencil_test_enable = material_info->is_stencil_enabled();
+  const auto &stencilFunc = material_info->get_stencil_func();
+  key.stencil_compare_op = static_cast<VkCompareOp>(convertComparisionFunction(stencilFunc.compare));
+  key.stencil_compare_mask = stencilFunc.mask;
+  key.stencil_reference = static_cast<uint32_t>(stencilFunc.ref);
+  key.stencil_write_mask = material_info->get_stencil_mask();
+
+  const auto &frontStencilOp = material_info->get_front_stencil_op();
+  key.front_fail_op = static_cast<VkStencilOp>(convertStencilOperation(frontStencilOp.stencilFailOperation));
+  key.front_depth_fail_op = static_cast<VkStencilOp>(convertStencilOperation(frontStencilOp.depthFailOperation));
+  key.front_pass_op = static_cast<VkStencilOp>(convertStencilOperation(frontStencilOp.successOperation));
+
+  const auto &backStencilOp = material_info->get_back_stencil_op();
+  key.back_fail_op = static_cast<VkStencilOp>(convertStencilOperation(backStencilOp.stencilFailOperation));
+  key.back_depth_fail_op = static_cast<VkStencilOp>(convertStencilOperation(backStencilOp.depthFailOperation));
+  key.back_pass_op = static_cast<VkStencilOp>(convertStencilOperation(backStencilOp.successOperation));
   // Model shaders ignore layout_hash (vertex pulling)
 
   // Shader module selection must match the active render target contract.
@@ -1253,7 +1281,7 @@ void gr_vulkan_render_model(model_material *material_info, indexed_vertex_source
   cmd.setDepthTestEnable(depthTest ? VK_TRUE : VK_FALSE);
   cmd.setDepthWriteEnable(depthWrite ? VK_TRUE : VK_FALSE);
   cmd.setDepthCompareOp(depthTest ? vk::CompareOp::eLessOrEqual : vk::CompareOp::eAlways);
-  cmd.setStencilTestEnable(VK_FALSE);
+  cmd.setStencilTestEnable(material_info->is_stencil_enabled() ? VK_TRUE : VK_FALSE);
 
   // Extended dynamic state 3: per-material blending must be re-enabled after the session baseline disables it.
   if (ctxBase.renderer.supportsExtendedDynamicState3()) {
@@ -1269,8 +1297,7 @@ void gr_vulkan_render_model(model_material *material_info, indexed_vertex_source
       cmd.setColorBlendEnableEXT(0, vk::ArrayProxy<const vk::Bool32>(rt.colorAttachmentCount, enables.data()));
     }
     if (caps.colorWriteMask) {
-      vk::ColorComponentFlags mask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-                                     vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+      vk::ColorComponentFlags mask = static_cast<vk::ColorComponentFlags>(key.color_write_mask);
       std::array<vk::ColorComponentFlags, VulkanRenderTargets::kGBufferCount> masks{};
       masks.fill(mask);
       cmd.setColorWriteMaskEXT(0, vk::ArrayProxy<const vk::ColorComponentFlags>(rt.colorAttachmentCount, masks.data()));
