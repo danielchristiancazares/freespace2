@@ -1299,7 +1299,7 @@ void HudGauge::resetClip()
 
 	if ( gr_screen.rendering_to_texture != -1 ) {
 		gr_set_screen_scale(canvas_w, canvas_h, -1, -1, target_w, target_h, target_w, target_h, true);
-		
+
 		hx = display_offset_x;
 		hy = display_offset_y;
 
@@ -1310,8 +1310,21 @@ void HudGauge::resetClip()
 
 		gr_set_clip(hx, hy, w, h);
 	} else {
-		gr_resize_screen_pos(&hx, &hy);
-		gr_set_screen_scale(base_w, base_h);
+		// For reticle_follow gauges, include HUD_nose offset in the clip origin.
+		// This matches how setClip() handles reticle_follow and ensures the scissor
+		// covers the actual render area. Vulkan requires this since it can't disable
+		// scissor test like OpenGL does for full-screen clips.
+		if (reticle_follow) {
+			hx = HUD_nose_x;
+			hy = HUD_nose_y;
+
+			gr_resize_screen_pos(&hx, &hy);
+			gr_set_screen_scale(base_w, base_h);
+			gr_unsize_screen_pos(&hx, &hy);
+		} else {
+			gr_resize_screen_pos(&hx, &hy);
+			gr_set_screen_scale(base_w, base_h);
+		}
 
 		w = gr_screen.max_w;
 		h = gr_screen.max_h;

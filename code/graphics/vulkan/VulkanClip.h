@@ -1,6 +1,8 @@
 #pragma once
 
+#include "cmdline/cmdline.h"
 #include "graphics/2d.h"
+#include "osapi/osapi.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -63,6 +65,11 @@ inline ClipScissorRect clampClipScissorToFramebuffer(const ClipScissorRect &in, 
 // Note: This operates on global gr_screen since the resize helpers (gr_resize_screen_pos / gr_unsize_screen_pos)
 // reference global state.
 inline void applyClipToScreen(int x, int y, int w, int h, int resize_mode) {
+  // Debug: log when clip coordinates are negative (likely HUD_nose offset causing issues)
+  if (Cmdline_vk_hud_debug && (x < 0 || y < 0)) {
+    mprintf(("VK_HUD_DEBUG: applyClipToScreen negative coords: x=%d y=%d w=%d h=%d (will clamp to 0)\n", x, y, w, h));
+  }
+
   // Sanity clamp input
   if (x < 0) {
     x = 0;
