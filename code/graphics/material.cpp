@@ -36,7 +36,12 @@ gr_zbuffer_type material_determine_depth_mode(bool depth_testing, bool blending)
 
 void material_set_unlit(material* mat_info, int texture, float alpha, bool blending, bool depth_testing)
 {
-	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
+	// Only override the shader type for plain `material` instances (default is SDR_TYPE_DEFAULT_MATERIAL).
+	// Derived materials (e.g. batched_bitmap_material, nanovg_material) set their own shader types in their
+	// constructors and must not be clobbered by this generic helper.
+	if (mat_info->get_shader_type() == SDR_TYPE_DEFAULT_MATERIAL) {
+		mat_info->set_shader_type(SDR_TYPE_INTERFACE);
+	}
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 
 	gr_alpha_blend blend_mode = material_determine_blend_mode(texture, blending);
@@ -59,7 +64,10 @@ void material_set_unlit(material* mat_info, int texture, float alpha, bool blend
 
 void material_set_unlit_opaque(material* mat_info, int texture, bool depth_testing)
 {
-	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
+	// See comment in material_set_unlit().
+	if (mat_info->get_shader_type() == SDR_TYPE_DEFAULT_MATERIAL) {
+		mat_info->set_shader_type(SDR_TYPE_INTERFACE);
+	}
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 
 	gr_alpha_blend blend_mode = ALPHA_BLEND_NONE;
@@ -85,7 +93,10 @@ void material_set_unlit_emissive(material* mat_info, int texture, float alpha, f
 
 void material_set_unlit_color(material* mat_info, int texture, color *clr, bool blending, bool depth_testing)
 {
-	mat_info->set_shader_type(SDR_TYPE_INTERFACE);
+	// See comment in material_set_unlit().
+	if (mat_info->get_shader_type() == SDR_TYPE_DEFAULT_MATERIAL) {
+		mat_info->set_shader_type(SDR_TYPE_INTERFACE);
+	}
 	mat_info->set_texture_map(TM_BASE_TYPE, texture);
 
 	gr_alpha_blend blend_mode = material_determine_blend_mode(texture, blending);
