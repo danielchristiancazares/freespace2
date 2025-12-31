@@ -1,0 +1,42 @@
+# Build outputs and generated files
+build/
+documentation/doxygen/
+
+# Third-party dependencies (2073+ files)
+lib/
+
+# Editor tools (not part of main codebase)
+fred2/
+wxfred2/
+
+# RAG excluded directory (already marked for exclusion)
+_rag_excluded/
+
+# Third-party test framework
+test/gtest/
+
+# Temporary test outputs
+Testing/
+
+# Test data files (optional - uncomment if you don't need test data indexed)
+test/test_data/
+
+# Compiled shader outputs and generated headers
+code/graphics/shaders/compiled/
+
+# CMake generated files (if not in build/)
+CMakeCache.txt
+CMakeFiles/
+*.cmake.user
+
+# Binary asset files (optional - uncomment if you don't need assets indexed)
+*.png
+*.jpg
+*.jpeg
+*.ico
+*.bmp
+*.ttf
+*.otf
+*.spv
+
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)

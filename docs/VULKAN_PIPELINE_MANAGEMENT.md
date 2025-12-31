@@ -133,7 +133,7 @@ These values are immutable once the pipeline is created:
 
 | State | Cache Key Field | Notes |
 |-------|-----------------|-------|
-| Shader modules | `type` + `variant_flags` | Vertex + fragment modules selected by type/variant |
+| Shader modules | `type` + `variant_flags` + `shader_hash` | Vertex + fragment modules; `shader_hash` computed internally |
 | Pipeline layout | Derived from `type` | Determined by `pipelineLayoutForShader()` |
 | Vertex input layout | `layout_hash` | Attribute bindings and formats (unless vertex pulling) |
 | Color attachment format | `color_format` | From render target |
@@ -228,6 +228,7 @@ struct PipelineKey {
     // Shader identity
     shader_type type = SDR_TYPE_NONE;
     uint32_t variant_flags = 0;
+    size_t shader_hash = 0;  // Hash of shader modules (computed internally by getPipeline)
 
     // Render target format
     VkFormat color_format = VK_FORMAT_UNDEFINED;
@@ -256,6 +257,8 @@ struct PipelineKey {
 };
 ```
 
+**Note on `shader_hash`**: This field is computed internally by `getPipeline()` from the provided `ShaderModules` and should not be set by callers. It enables correct caching when the same shader type uses different SPIR-V modules (e.g., filename-based module loading).
+
 ### Hash Computation
 
 The key is hashed for map lookup using a boost-style hash combine pattern. Each field is combined with a magic constant (`0x9e3779b9`, derived from the golden ratio) to distribute hash values:
@@ -265,6 +268,7 @@ size_t PipelineKeyHasher::operator()(const PipelineKey& key) const
 {
     size_t h = static_cast<size_t>(key.type);
     h ^= static_cast<size_t>(key.variant_flags + 0x9e3779b9 + (h << 6) + (h >> 2));
+    h ^= static_cast<size_t>(key.shader_hash + 0x9e3779b9 + (h << 6) + (h >> 2));
     h ^= static_cast<size_t>(key.color_format + 0x9e3779b9 + (h << 6) + (h >> 2));
     h ^= static_cast<size_t>(key.depth_format + 0x9e3779b9 + (h << 6) + (h >> 2));
     h ^= static_cast<size_t>(key.sample_count + 0x9e3779b9 + (h << 6) + (h >> 2));
@@ -291,6 +295,29 @@ size_t PipelineKeyHasher::operator()(const PipelineKey& key) const
 }
 ```
 
+### Shader Module Hashing
+
+The `shader_hash` field is computed from the VkShaderModule handles using a helper function:
+
+```cpp
+static std::uintptr_t shaderModuleId(vk::ShaderModule module) {
+    const auto handle = static_cast<VkShaderModule>(module);
+#if defined(VK_USE_64_BIT_PTR_DEFINES)
+    return reinterpret_cast<std::uintptr_t>(handle);
+#else
+    return static_cast<std::uintptr_t>(handle);
+#endif
+}
+
+static size_t hashShaderModules(const ShaderModules& modules) {
+    std::size_t h = shaderModuleId(modules.vert);
+    h ^= shaderModuleId(modules.frag) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    return h;
+}
+```
+
+This allows the pipeline cache to distinguish between different shader modules even when `shader_type` and `variant_flags` are the same (e.g., when using `getModulesByFilenames()` for custom shaders).
+
 ### Key Equality
 
 The `operator==` implementation mirrors the hash, with special handling for vertex pulling shaders:
@@ -303,6 +330,7 @@ bool PipelineKey::operator==(const PipelineKey& other) const
     const bool ignoreLayout = usesVertexPulling(type);
 
     return variant_flags == other.variant_flags &&
+           shader_hash == other.shader_hash &&
            color_format == other.color_format &&
            depth_format == other.depth_format &&
            sample_count == other.sample_count &&
@@ -719,12 +747,16 @@ Validate key (for VertexAttributes shaders)
     '-- Throw if mismatch
     |
     v
-Check cache: key -> VkPipeline
+Compute shader_hash from modules
+    |-- Create cache key copy
+    '-- cacheKey.shader_hash = hashShaderModules(modules)
+    |
+    v
+Check cache: cacheKey -> VkPipeline
     |
     +-- [Cache Hit] --> Return existing pipeline
     |
     '-- [Cache Miss] --> Create new pipeline
-                            |-- Get shader modules (cached by type + variant)
                             |-- Get vertex input state (cached by layout hash)
                             |-- Build VkGraphicsPipelineCreateInfo
                             |   |-- Shader stages
@@ -734,15 +766,15 @@ Check cache: key -> VkPipeline
                             |   |-- Dynamic state list
                             |   '-- Pipeline layout from shader type
                             |-- Call vkCreateGraphicsPipelines()
-                            '-- Store in cache
+                            '-- Store in cache with cacheKey
     |
     v
 Bind pipeline and issue draw
 ```
 
-### Pipeline Key Validation
+### Pipeline Key Validation and Shader Hash Computation
 
-Before cache lookup, the pipeline key is validated for vertex attribute shaders:
+Before cache lookup, the pipeline key is validated for vertex attribute shaders and the `shader_hash` is computed from the provided modules:
 
 ```cpp
 vk::Pipeline VulkanPipelineManager::getPipeline(
@@ -761,18 +793,26 @@ vk::Pipeline VulkanPipelineManager::getPipeline(
         }
     }
 
+    // Compute shader_hash from the provided modules and create the cache key.
+    // This ensures pipelines using different shader modules are cached separately,
+    // even when shader_type and variant_flags are identical.
+    PipelineKey cacheKey = key;
+    cacheKey.shader_hash = hashShaderModules(modules);
+
     std::lock_guard<std::mutex> guard(m_mutex);
-    auto it = m_pipelines.find(key);
+    auto it = m_pipelines.find(cacheKey);
     if (it != m_pipelines.end()) {
         return it->second.get();
     }
 
-    auto pipeline = createPipeline(key, modules, layout);
+    auto pipeline = createPipeline(cacheKey, modules, layout);
     auto handle = pipeline.get();
-    m_pipelines.emplace(key, std::move(pipeline));
+    m_pipelines.emplace(cacheKey, std::move(pipeline));
     return handle;
 }
 ```
+
+**Key Behavior**: Callers should not set `shader_hash` in the provided `PipelineKey`. The method computes it internally from the `ShaderModules` parameter, ensuring correct caching regardless of how shader modules were obtained (via `getModules()` or `getModulesByFilenames()`).
 
 ### Dynamic State List Construction
 
@@ -1175,6 +1215,11 @@ vk::Pipeline getPipeline(
     const ShaderModules& modules,
     const vertex_layout& layout);
 ```
+
+**Notes**:
+- The `shader_hash` field in `key` is ignored; it is computed internally from `modules`
+- For VertexAttributes shaders, `key.layout_hash` must match `layout.hash()` (throws on mismatch)
+- For VertexPulling shaders (SDR_TYPE_MODEL), `layout_hash` and `layout` are ignored
 
 ### Layout Contract Query
 

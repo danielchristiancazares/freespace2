@@ -7,7 +7,7 @@ This document provides comprehensive technical documentation of the FreeSpace 2 
 | Property | Value |
 |----------|-------|
 | Related Docs | [VULKAN_ARCHITECTURE_OVERVIEW.md](VULKAN_ARCHITECTURE_OVERVIEW.md), [VULKAN_HUD_RENDERING.md](VULKAN_HUD_RENDERING.md), [VULKAN_RENDER_PASS_STRUCTURE.md](VULKAN_RENDER_PASS_STRUCTURE.md) |
-| Key Files | `code/graphics/render.cpp`, `code/graphics/matrix.cpp`, `code/graphics/vulkan/VulkanClip.h` |
+| Key Files | `code/graphics/render.cpp`, `code/graphics/matrix.cpp`, `code/graphics/vulkan/VulkanClip.h`, `code/graphics/vulkan/VulkanPipelineManager.h`, `code/graphics/vulkan/VulkanLayoutContracts.h` |
 
 ## Prerequisites
 
@@ -30,11 +30,12 @@ For Vulkan-specific context, see [VULKAN_ARCHITECTURE_OVERVIEW.md](VULKAN_ARCHIT
 4. [Orthographic Projection Setup](#4-orthographic-projection-setup)
 5. [2D Primitive Rendering](#5-2d-primitive-rendering)
 6. [Shader System for 2D](#6-shader-system-for-2d)
-7. [Integration with 3D Rendering](#7-integration-with-3d-rendering)
-8. [Performance Considerations and Optimization](#8-performance-considerations-and-optimization)
-9. [Thread Safety and Synchronization](#9-thread-safety-and-synchronization)
-10. [Debugging and Troubleshooting](#10-debugging-and-troubleshooting)
-11. [File Reference](#11-file-reference)
+7. [Pipeline Management for 2D Rendering](#7-pipeline-management-for-2d-rendering)
+8. [Integration with 3D Rendering](#8-integration-with-3d-rendering)
+9. [Performance Considerations and Optimization](#9-performance-considerations-and-optimization)
+10. [Thread Safety and Synchronization](#10-thread-safety-and-synchronization)
+11. [Debugging and Troubleshooting](#11-debugging-and-troubleshooting)
+12. [File Reference](#12-file-reference)
 
 ---
 
@@ -863,7 +864,157 @@ interfaceData.alphaThreshold = 0.f;
 
 ---
 
-## 7. Integration with 3D Rendering
+## 7. Pipeline Management for 2D Rendering
+
+The Vulkan backend uses `VulkanPipelineManager` to create and cache graphics pipelines for all rendering, including 2D. Pipelines are identified by a composite `PipelineKey` that captures all non-dynamic state.
+
+### Vertex Input Modes
+
+The pipeline manager supports two vertex input modes, defined in `VulkanLayoutContracts.h`:
+
+| Mode | Description | Used By |
+|------|-------------|---------|
+| `VertexAttributes` | Traditional vertex input with bindings and attributes derived from `vertex_layout` | All 2D shaders (Interface, NanoVG, Batched Bitmap, Default Material) |
+| `VertexPulling` | No vertex input attributes; shader fetches from storage buffers via `gl_VertexIndex` | Model shaders only (`SDR_TYPE_MODEL`) |
+
+**Key Point**: All 2D rendering uses `VertexAttributes` mode. This means vertex data is passed through traditional Vulkan vertex input bindings, with attributes mapped to shader locations via `vertex_layout`. The `VertexPulling` mode is reserved exclusively for 3D model rendering with bindless techniques.
+
+### 2D Shader Layout Contracts
+
+Each shader type has an explicit layout contract specifying its pipeline layout and vertex input mode (from `VulkanLayoutContracts.cpp`):
+
+```cpp
+// 2D shader layout contracts - all use Standard layout with vertex attributes
+makeSpec(SDR_TYPE_BATCHED_BITMAP,   "SDR_TYPE_BATCHED_BITMAP",   PL::Standard, VI::VertexAttributes),
+makeSpec(SDR_TYPE_DEFAULT_MATERIAL, "SDR_TYPE_DEFAULT_MATERIAL", PL::Standard, VI::VertexAttributes),
+makeSpec(SDR_TYPE_INTERFACE,        "SDR_TYPE_INTERFACE",        PL::Standard, VI::VertexAttributes),
+makeSpec(SDR_TYPE_NANOVG,           "SDR_TYPE_NANOVG",           PL::Standard, VI::VertexAttributes),
+makeSpec(SDR_TYPE_ROCKET_UI,        "SDR_TYPE_ROCKET_UI",        PL::Standard, VI::VertexAttributes),
+makeSpec(SDR_TYPE_FLAT_COLOR,       "SDR_TYPE_FLAT_COLOR",       PL::Standard, VI::VertexAttributes),
+```
+
+All 2D shaders use `PipelineLayoutKind::Standard`, which employs per-draw push descriptors with a global descriptor set.
+
+### PipelineKey Configuration for 2D
+
+When rendering 2D primitives, the `PipelineKey` is populated as follows:
+
+```cpp
+// From VulkanGraphics.cpp - gr_vulkan_render_primitives()
+PipelineKey pipelineKey{};
+pipelineKey.type = shaderType;                           // e.g., SDR_TYPE_INTERFACE
+pipelineKey.variant_flags = material_info->get_shader_flags();
+pipelineKey.color_format = static_cast<VkFormat>(rt.colorFormat);
+pipelineKey.depth_format = static_cast<VkFormat>(rt.depthFormat);  // May be UNDEFINED for 2D
+pipelineKey.sample_count = static_cast<VkSampleCountFlagBits>(renderer.getSampleCount());
+pipelineKey.color_attachment_count = rt.colorAttachmentCount;      // Usually 1 for 2D
+pipelineKey.blend_mode = material_info->get_blend_mode();
+pipelineKey.layout_hash = layout->hash();                          // REQUIRED for VertexAttributes
+
+// Get or create pipeline with vertex input state derived from layout
+vk::Pipeline pipeline = renderer.getPipeline(pipelineKey, shaderModules, *layout);
+```
+
+**Important**: For shaders using `VertexAttributes` mode, `layout_hash` must match the hash of the provided `vertex_layout`. The pipeline manager validates this and throws an error on mismatch.
+
+### NanoVG Stencil Configuration
+
+NanoVG rendering requires additional stencil state in the `PipelineKey` for complex path filling:
+
+```cpp
+// NanoVG-specific stencil configuration
+pipelineKey.color_write_mask = convertColorWriteMask(material_info->get_color_mask());
+pipelineKey.stencil_test_enable = material_info->is_stencil_enabled();
+pipelineKey.stencil_compare_op = convertComparisonFunction(stencilFunc.compare);
+pipelineKey.stencil_compare_mask = stencilFunc.mask;
+pipelineKey.stencil_reference = stencilFunc.ref;
+pipelineKey.stencil_write_mask = material_info->get_stencil_mask();
+
+// Front and back face stencil operations
+pipelineKey.front_fail_op = convertStencilOperation(frontStencilOp.stencilFailOperation);
+pipelineKey.front_depth_fail_op = convertStencilOperation(frontStencilOp.depthFailOperation);
+pipelineKey.front_pass_op = convertStencilOperation(frontStencilOp.successOperation);
+// ... similar for back face
+```
+
+### Vertex Attribute Locations
+
+The pipeline manager maps engine vertex formats to shader locations following OpenGL conventions (from `VulkanPipelineManager.cpp`):
+
+| Location | Attribute | Vulkan Formats |
+|----------|-----------|----------------|
+| 0 | POSITION | `R32G32Sfloat` (2D), `R32G32B32Sfloat` (3D), `R32G32B32A32Sfloat` (4D) |
+| 1 | COLOR | `R8G8B8Unorm`, `R8G8B8A8Unorm`, `R32G32B32A32Sfloat` |
+| 2 | TEXCOORD | `R32G32Sfloat`, `R32G32B32A32Sfloat` |
+| 3 | NORMAL | `R32G32B32Sfloat` |
+| 4 | TANGENT | `R32G32B32A32Sfloat` |
+| 5 | MODEL_ID | `R32Sfloat` |
+| 6 | RADIUS | `R32Sfloat` |
+| 7 | UVEC | `R32G32B32Sfloat` |
+| 8-11 | MATRIX4 | 4 consecutive `R32G32B32A32Sfloat` |
+
+**Note**: Vulkan allows gaps in vertex attribute locations. Interface and NanoVG shaders typically use only locations 0 (position) and 2 (texcoord), with no color attribute at location 1. The pipeline manager handles this correctly.
+
+### Dynamic State for 2D
+
+Pipelines use extensive dynamic state to reduce permutations. The following states are set per-draw:
+
+**Core Dynamic State (always)**:
+- Viewport and scissor (updated on clip region changes)
+- Primitive topology (triangles, lines, etc.)
+- Cull mode and front face (typically disabled for 2D)
+- Depth test/write enable and compare op (typically disabled for 2D)
+- Stencil test enable
+
+**Extended Dynamic State 3 (optional, if supported)**:
+- Color blend enable
+- Color write mask
+- Polygon mode
+- Rasterization samples
+
+Example dynamic state setup for 2D rendering:
+
+```cpp
+cmd.setPrimitiveTopology(convertPrimitiveType(prim_type));
+cmd.setCullMode(vk::CullModeFlagBits::eNone);           // No culling for 2D
+cmd.setFrontFace(vk::FrontFace::eClockwise);
+cmd.setDepthTestEnable(VK_FALSE);                        // Disable depth for 2D overlay
+cmd.setDepthWriteEnable(VK_FALSE);
+cmd.setDepthCompareOp(vk::CompareOp::eAlways);
+cmd.setStencilTestEnable(stencilEnabled ? VK_TRUE : VK_FALSE);
+```
+
+### Pipeline Caching
+
+The pipeline manager caches pipelines by `PipelineKey`. Two draw calls with identical keys share the same `VkPipeline`, avoiding repeated pipeline creation:
+
+```cpp
+// From VulkanPipelineManager.cpp
+vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey& key,
+                                                 const ShaderModules& modules,
+                                                 const vertex_layout& layout) {
+    PipelineKey cacheKey = key;
+    cacheKey.shader_hash = hashShaderModules(modules);
+
+    std::lock_guard<std::mutex> guard(m_mutex);
+    auto it = m_pipelines.find(cacheKey);
+    if (it != m_pipelines.end()) {
+        return it->second.get();  // Return cached pipeline
+    }
+
+    // Create and cache new pipeline
+    auto pipeline = createPipeline(cacheKey, modules, layout);
+    auto handle = pipeline.get();
+    m_pipelines.emplace(cacheKey, std::move(pipeline));
+    return handle;
+}
+```
+
+Vertex input state is also cached separately by `layout_hash`, so layouts with the same hash reuse the same `VertexInputState` structure.
+
+---
+
+## 8. Integration with 3D Rendering
 
 ### Rendering Order
 
@@ -930,7 +1081,7 @@ The engine handles these differences automatically in `gr_set_2d_matrix()` and `
 
 ---
 
-## 8. Performance Considerations and Optimization
+## 9. Performance Considerations and Optimization
 
 ### 2D Buffering System
 
@@ -1072,7 +1223,7 @@ cmd.setScissor(0, 1, &scissor);
 
 ---
 
-## 9. Thread Safety and Synchronization
+## 10. Thread Safety and Synchronization
 
 ### Single-Threaded Rendering
 
@@ -1112,7 +1263,7 @@ Dynamic buffer updates (immediate buffer, uniform buffers) are designed to avoid
 
 ---
 
-## 10. Debugging and Troubleshooting
+## 11. Debugging and Troubleshooting
 
 ### Common Issues
 
@@ -1188,7 +1339,7 @@ Common validation messages and their meanings:
 
 ---
 
-## 11. File Reference
+## 12. File Reference
 
 ### Core 2D Rendering Files
 
@@ -1208,6 +1359,10 @@ Common validation messages and their meanings:
 | `code/graphics/vulkan/VulkanClip.h` | Scissor/clip computation and clamping |
 | `code/graphics/vulkan/VulkanRenderer.h` | Renderer class declaration |
 | `code/graphics/vulkan/VulkanRendererRenderState.cpp` | Render state management (viewport, scissor) |
+| `code/graphics/vulkan/VulkanPipelineManager.h` | Graphics pipeline caching and creation |
+| `code/graphics/vulkan/VulkanPipelineManager.cpp` | Pipeline manager implementation |
+| `code/graphics/vulkan/VulkanLayoutContracts.h` | Shader-to-pipeline-layout and vertex input mode mapping |
+| `code/graphics/vulkan/VulkanLayoutContracts.cpp` | Layout contracts implementation |
 
 ### Shader Files
 
@@ -1243,6 +1398,10 @@ Common validation messages and their meanings:
 | `createClipScissor()` | `VulkanGraphics.cpp` | Create scissor from clip state |
 | `applyClipToScreen()` | `VulkanClip.h` | Update gr_screen clip state |
 | `clampClipScissorToFramebuffer()` | `VulkanClip.h` | Clamp scissor to valid bounds |
+| `VulkanPipelineManager::getPipeline()` | `VulkanPipelineManager.cpp` | Get or create cached pipeline for draw call |
+| `convertVertexLayoutToVulkan()` | `VulkanPipelineManager.cpp` | Convert engine vertex_layout to Vulkan input state |
+| `getShaderLayoutSpec()` | `VulkanLayoutContracts.cpp` | Get layout contract for shader type |
+| `usesVertexPulling()` | `VulkanLayoutContracts.cpp` | Check if shader uses vertex pulling mode |
 
 ---
 

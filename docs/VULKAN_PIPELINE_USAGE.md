@@ -36,7 +36,7 @@ The pipeline system manages the creation, caching, and binding of Vulkan graphic
 - Caches pipelines in memory to avoid redundant GPU compilation
 - Validates pipeline keys against shader requirements
 - Automatically selects the correct pipeline layout based on shader type
-- Uses Vulkan 1.3 dynamic rendering (no render pass objects)
+- Uses Vulkan 1.4 dynamic rendering (no render pass objects)
 
 ### Key Concepts
 
@@ -49,7 +49,7 @@ The pipeline system manages the creation, caching, and binding of Vulkan graphic
 
 ### Thread Safety
 
-All pipeline operations occur on the main rendering thread. The pipeline cache is not thread-safe and must not be accessed concurrently.
+All public methods of `VulkanPipelineManager` are thread-safe. Internal mutable state (pipeline cache, vertex input cache) is protected by a mutex. Pipeline creation occurs under lock but is infrequent after initial warmup.
 
 ### Source Files
 
@@ -74,6 +74,7 @@ The complete `PipelineKey` structure from `VulkanPipelineManager.h`:
 struct PipelineKey {
   shader_type type = SDR_TYPE_NONE;
   uint32_t variant_flags = 0;
+  size_t shader_hash = 0;  // Computed internally by getPipeline()
   VkFormat color_format = VK_FORMAT_UNDEFINED;
   VkFormat depth_format = VK_FORMAT_UNDEFINED;
   VkSampleCountFlagBits sample_count{VK_SAMPLE_COUNT_1_BIT};
@@ -109,6 +110,7 @@ const auto& render = renderCtx; // RenderCtx from ensureRenderingStarted()
 PipelineKey key{};
 key.type = shader_type::SDR_TYPE_POST_PROCESS_BLUR;
 key.variant_flags = variantFlags;                                      // Shader-specific flags
+// Note: shader_hash is computed internally by getPipeline() - do not set it
 key.color_format = static_cast<VkFormat>(render.targetInfo.colorFormat);
 key.depth_format = static_cast<VkFormat>(render.targetInfo.depthFormat);
 key.sample_count = static_cast<VkSampleCountFlagBits>(getSampleCount());
@@ -127,6 +129,7 @@ cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 |-------|------|--------|--------------|
 | `type` | `shader_type` | Shader type enum | All pipelines |
 | `variant_flags` | `uint32_t` | Shader-specific flags | Variant shaders |
+| `shader_hash` | `size_t` | Computed by `getPipeline()` | Internal (do not set) |
 | `color_format` | `VkFormat` | `render.targetInfo.colorFormat` | All pipelines |
 | `depth_format` | `VkFormat` | `render.targetInfo.depthFormat` | Depth-enabled targets |
 | `sample_count` | `VkSampleCountFlagBits` | `getSampleCount()` | All pipelines |
@@ -135,6 +138,8 @@ cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 | `layout_hash` | `size_t` | `layout.hash()` | Vertex attribute shaders only |
 | `color_write_mask` | `uint32_t` | Color component flags | When masking output |
 | Stencil fields | Various | See Section 7 | Stencil-enabled effects |
+
+**Note**: The `shader_hash` field is computed internally by `getPipeline()` from the provided `ShaderModules`. Callers should not set this field; it will be overwritten.
 
 ### Vertex Pulling Pattern
 
@@ -157,7 +162,7 @@ vk::Pipeline pipeline = m_pipelineManager->getPipeline(key, modules, emptyLayout
 
 ### Pipeline Key Equality
 
-The `PipelineKey::operator==` compares all fields except `layout_hash` for vertex-pulling shaders. The `usesVertexPulling()` helper determines whether to ignore the layout hash:
+The `PipelineKey::operator==` compares all fields including `shader_hash`, except `layout_hash` for vertex-pulling shaders. The `usesVertexPulling()` helper determines whether to ignore the layout hash:
 
 ```cpp
 bool operator==(const PipelineKey& other) const
@@ -165,11 +170,14 @@ bool operator==(const PipelineKey& other) const
   if (type != other.type) return false;
   const bool ignoreLayout = usesVertexPulling(type);
   return variant_flags == other.variant_flags &&
+         shader_hash == other.shader_hash &&
          color_format == other.color_format &&
          // ... all other fields ...
          (ignoreLayout || layout_hash == other.layout_hash);
 }
 ```
+
+The `PipelineKeyHasher` uses boost-style hash combining (golden ratio constant `0x9e3779b9`) to produce well-distributed hash values from all fields, including `shader_hash`.
 
 ### Common Mistakes
 
@@ -182,6 +190,16 @@ key.type = shader_type::SDR_TYPE_INTERFACE;
 key.color_format = ...;
 // Missing: key.layout_hash = layout.hash();
 // Result: Runtime exception in getPipeline()
+```
+
+**Mistake 1b: Manually setting `shader_hash`**
+
+```cpp
+// WRONG: shader_hash should not be set by callers
+PipelineKey key{};
+key.type = shader_type::SDR_TYPE_INTERFACE;
+key.shader_hash = someValue;  // WRONG - will be overwritten
+// getPipeline() computes shader_hash internally from ShaderModules
 ```
 
 **Mistake 2: Stale render target info**
@@ -214,6 +232,17 @@ key.color_attachment_count = 0;
 ```
 
 The pipeline manager validates that `color_attachment_count >= 1`.
+
+**Mistake 5: Stencil test with incompatible depth format**
+
+```cpp
+// WRONG: Enabling stencil with a depth-only format
+key.depth_format = VK_FORMAT_D32_SFLOAT;  // No stencil component
+key.stencil_test_enable = true;
+// Result: std::runtime_error "Stencil test enabled but render target depth format has no stencil component."
+```
+
+Use `D32_SFLOAT_S8_UINT` or `D24_UNORM_S8_UINT` when stencil operations are needed.
 
 ---
 
@@ -623,7 +652,7 @@ Most pipelines use default stencil state (`stencil_test_enable = false`). Only s
 
 ### Core Dynamic States
 
-The following dynamic states are always enabled (Vulkan 1.3 core or Extended Dynamic State 1):
+The following dynamic states are always enabled (Vulkan 1.4 core; Extended Dynamic State 1/2 are core features):
 
 | State | Command | Notes |
 |-------|---------|-------|
@@ -713,13 +742,15 @@ Pipeline creation can fail at several points:
 |-------|------------|-------|
 | Key validation | `std::runtime_error` | `layout_hash` mismatch for vertex attribute shader |
 | Key validation | `std::runtime_error` | `color_attachment_count` is 0 |
+| Stencil validation | `std::runtime_error` | Stencil test enabled but depth format lacks stencil component |
+| Vertex input validation | `std::runtime_error` | Vertex attribute shader missing Location 0 (position) |
 | Shader loading | `std::runtime_error` | SPIR-V file not found or invalid |
 | Divisor check | `std::runtime_error` | Divisor > 1 requested but extension unavailable |
 | Pipeline creation | `std::runtime_error` | `vkCreateGraphicsPipelines()` fails |
 
 ### Validation in getPipeline()
 
-The `getPipeline()` function validates that the pipeline key's `layout_hash` matches the provided `vertex_layout` for shaders using vertex attributes:
+The `getPipeline()` function validates the pipeline key and computes internal fields before cache lookup:
 
 ```cpp
 vk::Pipeline VulkanPipelineManager::getPipeline(
@@ -727,21 +758,26 @@ vk::Pipeline VulkanPipelineManager::getPipeline(
     const ShaderModules& modules,
     const vertex_layout& layout)
 {
-  PipelineKey adjustedKey = key;
+  // Validate layout_hash for vertex attribute shaders
   const auto& layoutSpec = getShaderLayoutSpec(key.type);
-
   if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
     const size_t expectedHash = layout.hash();
-    if (adjustedKey.layout_hash != expectedHash) {
-      adjustedKey.layout_hash = expectedHash;
+    if (key.layout_hash != expectedHash) {
       throw std::runtime_error(
           "PipelineKey.layout_hash mismatches provided vertex_layout "
           "for VertexAttributes shader");
     }
   }
+
+  // Compute shader_hash internally from the provided modules
+  PipelineKey cacheKey = key;
+  cacheKey.shader_hash = hashShaderModules(modules);
+
   // ... cache lookup and creation ...
 }
 ```
+
+The `shader_hash` is computed internally by combining the vertex and fragment shader module handles using boost-style hash combining. This ensures that pipelines using different shader modules (e.g., different shader variants) are cached separately.
 
 ### Common Failure Modes
 
@@ -768,6 +804,18 @@ Verify `PipelineKey` formats match `render.targetInfo` values.
 Error: vertexAttributeInstanceRateDivisor not enabled but divisor > 1 requested in vertex layout.
 ```
 The vertex layout requires instance rate divisor > 1 but the `VK_EXT_vertex_attribute_divisor` extension is not enabled.
+
+**Stencil format mismatch**:
+```
+Error: Stencil test enabled but render target depth format has no stencil component.
+```
+The pipeline key has `stencil_test_enable = true` but the `depth_format` does not include a stencil component (e.g., `D32_SFLOAT` instead of `D32_SFLOAT_S8_UINT`).
+
+**Missing position attribute**:
+```
+Error: VertexAttributes pipeline created without Location 0 attribute.
+```
+For shaders using vertex attributes, the vertex layout must include a position attribute at Location 0 (POSITION2, POSITION3, POSITION4, or SCREEN_POS).
 
 ### Current Behavior
 
@@ -852,13 +900,14 @@ Enable `VK_LAYER_KHRONOS_validation` for detailed error messages during developm
 
 - [ ] Set `type` to the shader type
 - [ ] Set `variant_flags` if the shader supports variants
+- [ ] Do NOT set `shader_hash` (computed internally by `getPipeline()`)
 - [ ] Set `color_format` from `render.targetInfo.colorFormat`
 - [ ] Set `depth_format` from `render.targetInfo.depthFormat`
 - [ ] Set `sample_count` from `getSampleCount()`
 - [ ] Set `color_attachment_count` from `render.targetInfo.colorAttachmentCount`
 - [ ] Set `blend_mode` appropriate for the rendering pass
 - [ ] Set `layout_hash` from `layout.hash()` (vertex attribute shaders only)
-- [ ] Set stencil state fields if using stencil operations
+- [ ] Set stencil state fields if using stencil operations (ensure depth format has stencil)
 - [ ] Query `render.targetInfo` immediately before key construction
 
 ### Pipeline Binding Checklist

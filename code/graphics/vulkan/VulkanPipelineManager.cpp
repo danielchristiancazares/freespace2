@@ -1,7 +1,33 @@
+/**
+ * @file VulkanPipelineManager.cpp
+ * @brief Implementation of Vulkan graphics pipeline management.
+ *
+ * This file implements the VulkanPipelineManager class and supporting utilities
+ * for creating and caching Vulkan graphics pipelines. Key implementation details:
+ *
+ * ## Vertex Format Mapping
+ * Engine vertex formats (vertex_format_data) are mapped to Vulkan formats via
+ * VERTEX_FORMAT_MAP. Each format has an assigned shader location following OpenGL
+ * conventions for compatibility with existing shaders.
+ *
+ * ## Pipeline Creation
+ * Pipelines are created using VkGraphicsPipelineCreateInfo with:
+ * - Dynamic rendering (VK_KHR_dynamic_rendering) instead of render passes
+ * - Extensive use of dynamic state to minimize pipeline permutations
+ * - Support for both vertex attribute and vertex pulling input modes
+ *
+ * ## Thread Safety
+ * All mutable state (pipeline cache, vertex input cache) is protected by m_mutex.
+ * Pipeline creation occurs under lock but is infrequent after initial warmup.
+ *
+ * @see VulkanPipelineManager.h for public API documentation
+ */
+
 #include "VulkanPipelineManager.h"
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -9,6 +35,17 @@
 namespace graphics {
 namespace vulkan {
 
+// =============================================================================
+// Vertex Format Mapping
+// =============================================================================
+
+/**
+ * @brief Maps an engine vertex format to Vulkan format and shader location.
+ *
+ * @var format Vulkan format for the vertex attribute (e.g., eR32G32B32Sfloat)
+ * @var location Shader input location (matches OpenGL attribute locations)
+ * @var componentCount Number of components (used for documentation/debugging)
+ */
 struct VertexFormatMapping {
   vk::Format format;
   uint32_t location;
@@ -40,6 +77,66 @@ static const std::unordered_map<vertex_format_data::vertex_format, VertexFormatM
 // unused locations. Validation layer warnings about mismatched locations indicate
 // shader/layout incompatibility, not an invalid layout.
 
+// =============================================================================
+// Shader Module Hashing
+// =============================================================================
+
+/**
+ * @brief Extracts a numeric identifier from a VkShaderModule handle.
+ *
+ * On 64-bit platforms, VkShaderModule is a pointer-like opaque handle.
+ * On 32-bit platforms with non-dispatchable handles, it's a 64-bit integer.
+ * This function normalizes both cases to std::uintptr_t for hashing.
+ *
+ * @param module The Vulkan shader module handle.
+ * @return A numeric value suitable for hashing.
+ */
+static std::uintptr_t shaderModuleId(vk::ShaderModule module) {
+  const auto handle = static_cast<VkShaderModule>(module);
+#if defined(VK_USE_64_BIT_PTR_DEFINES)
+  return reinterpret_cast<std::uintptr_t>(handle);
+#else
+  return static_cast<std::uintptr_t>(handle);
+#endif
+}
+
+/**
+ * @brief Computes a hash from vertex and fragment shader module handles.
+ *
+ * Uses boost-style hash combining to produce a single hash value from both
+ * shader module handles. This hash is used as part of the PipelineKey to
+ * distinguish pipelines using different shader variants.
+ *
+ * @param modules Struct containing vertex and fragment shader modules.
+ * @return Combined hash value.
+ */
+static size_t hashShaderModules(const ShaderModules &modules) {
+  std::size_t h = shaderModuleId(modules.vert);
+  h ^= shaderModuleId(modules.frag) + 0x9e3779b9 + (h << 6) + (h >> 2);
+  return h;
+}
+
+// =============================================================================
+// Blend State Configuration
+// =============================================================================
+
+/**
+ * @brief Creates a Vulkan color blend attachment state from engine blend mode.
+ *
+ * Translates the engine's gr_alpha_blend enumeration to Vulkan blend factors
+ * and operations. Each blend mode corresponds to a specific blending equation:
+ *
+ * - ALPHA_BLEND_NONE: No blending (1*Src + 0*Dst)
+ * - ALPHA_BLEND_ADDITIVE: Pure additive (1*Src + 1*Dst)
+ * - ALPHA_BLEND_ALPHA_ADDITIVE: Alpha-weighted additive (Alpha*Src + 1*Dst)
+ * - ALPHA_BLEND_ALPHA_BLEND_ALPHA: Standard alpha blend (Alpha*Src + (1-Alpha)*Dst)
+ * - ALPHA_BLEND_ALPHA_BLEND_SRC_COLOR: Alpha + inverse source color (Alpha*Src + (1-SrcColor)*Dst)
+ * - ALPHA_BLEND_PREMULTIPLIED: Premultiplied alpha (1*Src + (1-Alpha)*Dst)
+ *
+ * @param mode Engine blend mode to translate.
+ * @param colorWriteMask Channel write mask (RGBA components).
+ * @return Configured VkPipelineColorBlendAttachmentState.
+ */
 static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend mode,
                                                                   vk::ColorComponentFlags colorWriteMask) {
   vk::PipelineColorBlendAttachmentState state{};
@@ -102,6 +199,20 @@ static vk::PipelineColorBlendAttachmentState buildBlendAttachment(gr_alpha_blend
   return state;
 }
 
+// =============================================================================
+// Format Utilities
+// =============================================================================
+
+/**
+ * @brief Checks if a Vulkan format includes a stencil component.
+ *
+ * Used to validate that stencil operations are only configured when the
+ * depth attachment format actually supports stencil. Also used to set the
+ * stencilAttachmentFormat in VkPipelineRenderingCreateInfo.
+ *
+ * @param format The depth/stencil format to check.
+ * @return True if format has stencil component (D24S8, D32S8), false otherwise.
+ */
 static bool formatHasStencil(vk::Format format) {
   switch (format) {
   case vk::Format::eD32SfloatS8Uint:
@@ -112,9 +223,15 @@ static bool formatHasStencil(vk::Format format) {
   }
 }
 
+// =============================================================================
+// Vertex Layout Conversion
+// =============================================================================
+
 VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
   VertexInputState result;
 
+  // Step 1: Group vertex components by their buffer number.
+  // Each buffer becomes a separate VkVertexInputBindingDescription.
   std::unordered_map<size_t, std::vector<const vertex_format_data *>> componentsByBuffer;
 
   for (size_t i = 0; i < layout.get_num_vertex_components(); ++i) {
@@ -122,8 +239,10 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
     componentsByBuffer[component->buffer_number].push_back(component);
   }
 
+  // Track bindings that need instance rate divisors > 1 (requires VK_EXT_vertex_attribute_divisor)
   std::unordered_map<uint32_t, uint32_t> divisorsByBinding;
 
+  // Step 2: Create binding and attribute descriptions for each buffer.
   for (const auto &[bufferNum, components] : componentsByBuffer) {
     if (components.empty()) {
       continue;
@@ -131,15 +250,19 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 
     size_t stride = layout.get_vertex_stride(bufferNum);
 
+    // Create binding description for this buffer
     vk::VertexInputBindingDescription binding{};
     binding.binding = static_cast<uint32_t>(bufferNum);
     binding.stride = static_cast<uint32_t>(stride);
     binding.inputRate = vk::VertexInputRate::eVertex;
 
+    // Check if any component in this buffer uses instancing.
+    // If so, the entire binding becomes per-instance.
     for (const auto *comp : components) {
       if (comp->divisor != 0) {
         binding.inputRate = vk::VertexInputRate::eInstance;
-        // Only divisors >1 need VK_EXT_vertex_attribute_divisor; divisor==1 is core.
+        // Divisor == 1 means "advance once per instance" which is core Vulkan.
+        // Divisor > 1 means "advance once every N instances" and requires the extension.
         if (comp->divisor > 1) {
           divisorsByBinding[binding.binding] = static_cast<uint32_t>(comp->divisor);
         }
@@ -149,6 +272,8 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 
     result.bindings.push_back(binding);
 
+    // Create attribute descriptions for each component in this buffer.
+    // Each component maps to a shader input location via VERTEX_FORMAT_MAP.
     for (const auto *component : components) {
       auto it = VERTEX_FORMAT_MAP.find(component->format_type);
       Assertion(it != VERTEX_FORMAT_MAP.end(), "Unknown vertex format type %d - add to VERTEX_FORMAT_MAP",
@@ -159,18 +284,19 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 
       const auto &mapping = it->second;
 
-      // Handle MATRIX4 specially (spans 4 locations)
+      // MATRIX4 is special: it consumes 4 consecutive shader locations (8, 9, 10, 11)
+      // since each mat4 column is passed as a separate vec4 attribute.
       if (component->format_type == vertex_format_data::MATRIX4) {
-        // Matrix4 is stored as 4 vec4s, each at 16-byte offset
         for (uint32_t row = 0; row < 4; ++row) {
           vk::VertexInputAttributeDescription attr{};
           attr.binding = static_cast<uint32_t>(component->buffer_number);
-          attr.location = mapping.location + row;
+          attr.location = mapping.location + row;  // Locations 8, 9, 10, 11
           attr.format = vk::Format::eR32G32B32A32Sfloat;
-          attr.offset = static_cast<uint32_t>(component->offset + row * 16);
+          attr.offset = static_cast<uint32_t>(component->offset + row * 16);  // 16 bytes per column
           result.attributes.push_back(attr);
         }
       } else {
+        // Standard single-location attribute
         vk::VertexInputAttributeDescription attr{};
         attr.binding = static_cast<uint32_t>(component->buffer_number);
         attr.location = mapping.location;
@@ -181,6 +307,7 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
     }
   }
 
+  // Step 3: Collect divisor descriptions for bindings that need the extension.
   for (const auto &kv : divisorsByBinding) {
     vk::VertexInputBindingDivisorDescription desc{};
     desc.binding = kv.first;
@@ -190,6 +317,10 @@ VertexInputState convertVertexLayoutToVulkan(const vertex_layout &layout) {
 
   return result;
 }
+
+// =============================================================================
+// VulkanPipelineManager Implementation
+// =============================================================================
 
 VulkanPipelineManager::VulkanPipelineManager(vk::Device device, vk::PipelineLayout pipelineLayout,
                                              vk::PipelineLayout modelPipelineLayout,
@@ -202,6 +333,8 @@ VulkanPipelineManager::VulkanPipelineManager(vk::Device device, vk::PipelineLayo
       m_supportsExtendedDynamicState3(supportsExtendedDynamicState3), m_extDyn3Caps(extDyn3Caps),
       m_supportsVertexAttributeDivisor(supportsVertexAttributeDivisor),
       m_dynamicRenderingEnabled(dynamicRenderingEnabled) {
+  // Dynamic rendering is required - we don't support traditional render passes.
+  // This allows pipelines to be created without knowing the render pass ahead of time.
   if (!m_dynamicRenderingEnabled) {
     throw std::runtime_error("Vulkan dynamicRendering feature must be enabled when using renderPass=VK_NULL_HANDLE.");
   }
@@ -248,16 +381,19 @@ vk::Pipeline VulkanPipelineManager::getPipeline(const PipelineKey &key, const Sh
     }
   }
 
+  PipelineKey cacheKey = key;
+  cacheKey.shader_hash = hashShaderModules(modules);
+
   // Pipelines are cached by PipelineKey.
   std::lock_guard<std::mutex> guard(m_mutex);
-  auto it = m_pipelines.find(key);
+  auto it = m_pipelines.find(cacheKey);
   if (it != m_pipelines.end()) {
     return it->second.get();
   }
 
-  auto pipeline = createPipeline(key, modules, layout);
+  auto pipeline = createPipeline(cacheKey, modules, layout);
   auto handle = pipeline.get();
-  m_pipelines.emplace(key, std::move(pipeline));
+  m_pipelines.emplace(cacheKey, std::move(pipeline));
   return handle;
 }
 
@@ -275,6 +411,9 @@ const VertexInputState &VulkanPipelineManager::getVertexInputState(const vertex_
 
 vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key, const ShaderModules &modules,
                                                          const vertex_layout &layout) {
+  // -------------------------------------------------------------------------
+  // Shader Stages
+  // -------------------------------------------------------------------------
   std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages{};
   shaderStages[0].stage = vk::ShaderStageFlagBits::eVertex;
   shaderStages[0].module = modules.vert;
@@ -284,8 +423,12 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
   shaderStages[1].module = modules.frag;
   shaderStages[1].pName = "main";
 
-  // Vertex input state: VertexPulling types use no vertex attributes,
-  // all other shader types use traditional vertex attributes from the layout.
+  // -------------------------------------------------------------------------
+  // Vertex Input State
+  // -------------------------------------------------------------------------
+  // Two modes:
+  // - VertexPulling: Empty vertex input; shader fetches from storage buffer via gl_VertexIndex
+  // - VertexAttributes: Traditional vertex input with bindings and attributes from layout
   vk::PipelineVertexInputStateCreateInfo vertexInput{};
   vk::PipelineVertexInputDivisorStateCreateInfo divisorInfo{};
   const auto &layoutSpec = getShaderLayoutSpec(key.type);
@@ -316,14 +459,27 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Input Assembly State
+  // -------------------------------------------------------------------------
+  // Topology is set dynamically via vkCmdSetPrimitiveTopology, but we need a default.
   vk::PipelineInputAssemblyStateCreateInfo inputAssembly{};
   inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
   inputAssembly.primitiveRestartEnable = VK_FALSE;
 
+  // -------------------------------------------------------------------------
+  // Viewport State
+  // -------------------------------------------------------------------------
+  // Viewport and scissor are dynamic state, so we only specify counts here.
   vk::PipelineViewportStateCreateInfo viewportState{};
   viewportState.viewportCount = 1;
   viewportState.scissorCount = 1;
 
+  // -------------------------------------------------------------------------
+  // Rasterization State
+  // -------------------------------------------------------------------------
+  // Cull mode, front face, polygon mode, and line width are dynamic state.
+  // These are default values that may be overridden at draw time.
   vk::PipelineRasterizationStateCreateInfo rasterizer{};
   rasterizer.depthClampEnable = VK_FALSE;
   rasterizer.rasterizerDiscardEnable = VK_FALSE;
@@ -333,10 +489,16 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
   rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
   rasterizer.depthBiasEnable = VK_FALSE;
 
+  // -------------------------------------------------------------------------
+  // Multisample State
+  // -------------------------------------------------------------------------
   vk::PipelineMultisampleStateCreateInfo multisampling{};
   multisampling.sampleShadingEnable = VK_FALSE;
   multisampling.rasterizationSamples = static_cast<vk::SampleCountFlagBits>(key.sample_count);
 
+  // -------------------------------------------------------------------------
+  // Color Blend State
+  // -------------------------------------------------------------------------
   if (key.color_attachment_count == 0) {
     throw std::runtime_error("PipelineKey.color_attachment_count must be at least 1.");
   }
@@ -344,6 +506,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
   auto colorWriteMask = static_cast<vk::ColorComponentFlags>(key.color_write_mask);
   auto colorBlendAttachment = buildBlendAttachment(key.blend_mode, colorWriteMask);
 
+  // Replicate the same blend state for all color attachments (MRT)
   std::vector<vk::PipelineColorBlendAttachmentState> attachments(key.color_attachment_count, colorBlendAttachment);
 
   vk::PipelineColorBlendStateCreateInfo colorBlending{};
@@ -351,17 +514,26 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
   colorBlending.attachmentCount = static_cast<uint32_t>(attachments.size());
   colorBlending.pAttachments = attachments.data();
 
+  // -------------------------------------------------------------------------
+  // Dynamic State
+  // -------------------------------------------------------------------------
+  // Dynamic state reduces pipeline permutations by deferring state to command buffer.
   auto dynamicStates = BuildDynamicStateList(m_supportsExtendedDynamicState3, m_extDyn3Caps);
 
   vk::PipelineDynamicStateCreateInfo dynamicState{};
   dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
   dynamicState.pDynamicStates = dynamicStates.data();
 
+  // -------------------------------------------------------------------------
+  // Render Target Formats (Dynamic Rendering)
+  // -------------------------------------------------------------------------
   vk::Format colorFormat = static_cast<vk::Format>(key.color_format);
   vk::Format depthFormat = static_cast<vk::Format>(key.depth_format);
   std::vector<vk::Format> colorFormats(key.color_attachment_count, colorFormat);
 
-  // Fail-fast: pipeline color attachment count/formats must match the creation request
+  // -------------------------------------------------------------------------
+  // Validation
+  // -------------------------------------------------------------------------
   Assertion(!colorFormats.empty(), "colorFormats must not be empty");
   if (layoutSpec.vertexInput == VertexInputMode::VertexAttributes) {
     // When using vertex attributes, require Location 0 (position). Other locations are shader-dependent
@@ -378,6 +550,11 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Depth/Stencil State
+  // -------------------------------------------------------------------------
+  // Depth test/write enable and compare op are dynamic state in EDS1.
+  // Stencil operations are baked into the pipeline from PipelineKey.
   vk::PipelineDepthStencilStateCreateInfo depthStencil{};
   if (key.stencil_test_enable && !formatHasStencil(depthFormat)) {
     throw std::runtime_error("Stencil test enabled but render target depth format has no stencil component.");
@@ -408,12 +585,20 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
   depthStencil.back.depthFailOp = static_cast<vk::StencilOp>(key.back_depth_fail_op);
   depthStencil.back.passOp = static_cast<vk::StencilOp>(key.back_pass_op);
 
+  // -------------------------------------------------------------------------
+  // Dynamic Rendering Info (VK_KHR_dynamic_rendering)
+  // -------------------------------------------------------------------------
+  // Instead of a VkRenderPass, we specify attachment formats directly.
+  // This allows pipeline creation without knowing the render pass ahead of time.
   vk::PipelineRenderingCreateInfo renderingInfo{};
   renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorFormats.size());
   renderingInfo.pColorAttachmentFormats = colorFormats.data();
   renderingInfo.depthAttachmentFormat = depthFormat;
   renderingInfo.stencilAttachmentFormat = formatHasStencil(depthFormat) ? depthFormat : vk::Format::eUndefined;
 
+  // -------------------------------------------------------------------------
+  // Pipeline Assembly
+  // -------------------------------------------------------------------------
   vk::GraphicsPipelineCreateInfo pipelineInfo{};
   pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
   pipelineInfo.pStages = shaderStages.data();
@@ -426,6 +611,7 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
   pipelineInfo.pColorBlendState = &colorBlending;
   pipelineInfo.pDynamicState = &dynamicState;
 
+  // Select pipeline layout based on shader type's layout contract
   switch (layoutSpec.pipelineLayout) {
   case PipelineLayoutKind::Model:
     pipelineInfo.layout = m_modelPipelineLayout;
@@ -438,9 +624,13 @@ vk::UniquePipeline VulkanPipelineManager::createPipeline(const PipelineKey &key,
     break;
   }
 
+  // Use dynamic rendering (no render pass)
   pipelineInfo.renderPass = VK_NULL_HANDLE;
   pipelineInfo.pNext = &renderingInfo;
 
+  // -------------------------------------------------------------------------
+  // Pipeline Creation
+  // -------------------------------------------------------------------------
   auto pipelineResult = m_device.createGraphicsPipelineUnique(m_pipelineCache, pipelineInfo);
   if (pipelineResult.result != vk::Result::eSuccess) {
     throw std::runtime_error("Failed to create Vulkan graphics pipeline.");

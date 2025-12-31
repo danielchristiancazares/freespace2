@@ -824,9 +824,11 @@ vk::UniqueShaderModule VulkanShaderManager::loadModule(const SCP_string& path) {
 
 ## 11. Pipeline Layout Contracts
 
+This section describes how shader types map to pipeline layouts and how `VulkanPipelineManager` creates and caches graphics pipelines based on the descriptor layout contracts.
+
 ### 11.1 Layout Specification
 
-Each shader type has a fixed contract (`VulkanLayoutContracts.cpp`):
+Each shader type has a fixed contract defined in `VulkanLayoutContracts.cpp`:
 
 ```cpp
 constexpr std::array<ShaderLayoutSpec, NUM_SHADER_TYPES> buildSpecs() {
@@ -842,12 +844,16 @@ constexpr std::array<ShaderLayoutSpec, NUM_SHADER_TYPES> buildSpecs() {
 }
 ```
 
+Helper functions for runtime queries:
+```cpp
+const ShaderLayoutSpec& getShaderLayoutSpec(shader_type type);
+bool usesVertexPulling(shader_type type);
+PipelineLayoutKind pipelineLayoutForShader(shader_type type);
+```
+
 ### 11.2 Vertex Input Mode
 
-Two modes are supported (`VulkanLayoutContracts.h`):
-
-- **VertexAttributes**: Traditional vertex input via `VkPipelineVertexInputStateCreateInfo`
-- **VertexPulling**: No vertex attributes; data fetched from SSBO in vertex shader
+Two vertex input modes are supported (`VulkanLayoutContracts.h`):
 
 ```cpp
 enum class VertexInputMode {
@@ -856,7 +862,44 @@ enum class VertexInputMode {
 };
 ```
 
-### 11.3 Complete Shader Layout Table
+- **VertexAttributes**: Traditional vertex input via `VkPipelineVertexInputStateCreateInfo`. Vertex data flows through buffer bindings and attributes derived from `vertex_layout`.
+- **VertexPulling**: No vertex input attributes. The vertex shader fetches data from a storage buffer using `gl_VertexIndex`. Used by model shaders for bindless rendering.
+
+### 11.3 Pipeline Layout to Descriptor Set Mapping
+
+Each pipeline layout kind composes descriptor set layouts differently:
+
+| Layout Kind | Set 0 | Set 1 | Push Constants |
+|-------------|-------|-------|----------------|
+| **Standard** | Per-draw push descriptors (6 bindings) | Global G-buffer set (6 bindings) | None |
+| **Model** | Model bindless set (4 bindings) | N/A | 64-byte `ModelPushConstants` |
+| **Deferred** | Deferred push descriptors (2 bindings) | Global G-buffer set (6 bindings) | None |
+
+This mapping is implemented in `VulkanDescriptorLayouts.cpp`:
+
+```cpp
+// Standard layout: push descriptors + global
+std::array<vk::DescriptorSetLayout, 2> setLayouts = {
+    m_perDrawPushLayout.get(),  // Set 0: push descriptors
+    m_globalLayout.get(),        // Set 1: global G-buffer
+};
+m_pipelineLayout = m_device.createPipelineLayoutUnique(...);
+
+// Model layout: single set + push constants
+modelPipelineLayoutInfo.setLayoutCount = 1;
+modelPipelineLayoutInfo.pSetLayouts = &m_modelSetLayout.get();
+modelPipelineLayoutInfo.pushConstantRangeCount = 1;
+m_modelPipelineLayout = m_device.createPipelineLayoutUnique(...);
+
+// Deferred layout: deferred push descriptors + global
+std::array<vk::DescriptorSetLayout, 2> deferredSetLayouts = {
+    m_deferredPushLayout.get(),  // Set 0: matrix + light UBOs
+    m_globalLayout.get(),         // Set 1: global G-buffer
+};
+m_deferredPipelineLayout = m_device.createPipelineLayoutUnique(...);
+```
+
+### 11.4 Complete Shader Layout Table
 
 | Shader Type | Pipeline Layout | Vertex Input |
 |-------------|-----------------|--------------|
@@ -894,10 +937,14 @@ enum class VertexInputMode {
 | `SDR_TYPE_IRRADIANCE_MAP_GEN` | Standard | VertexAttributes |
 | `SDR_TYPE_FLAT_COLOR` | Standard | VertexAttributes |
 
-### 11.4 Pipeline Creation
+### 11.5 Pipeline Creation and Caching
 
-The pipeline manager selects the correct layout based on shader type:
+`VulkanPipelineManager` creates and caches graphics pipelines based on a composite key (`PipelineKey`). Pipelines are created on-demand and cached for subsequent draws with matching state.
+
+**Pipeline Selection** (`VulkanPipelineManager.cpp`):
 ```cpp
+const auto& layoutSpec = getShaderLayoutSpec(key.type);
+
 switch (layoutSpec.pipelineLayout) {
 case PipelineLayoutKind::Model:
     pipelineInfo.layout = m_modelPipelineLayout;
@@ -910,6 +957,117 @@ case PipelineLayoutKind::Deferred:
     break;
 }
 ```
+
+**PipelineKey Structure** (`VulkanPipelineManager.h`):
+
+The `PipelineKey` captures all pipeline state that is not set dynamically:
+
+| Field | Purpose |
+|-------|---------|
+| `type` | Shader type (determines pipeline layout) |
+| `variant_flags` | Shader compile-time permutation flags |
+| `shader_hash` | Hash of vertex + fragment modules (computed internally) |
+| `color_format` | Color attachment format for dynamic rendering |
+| `depth_format` | Depth/stencil attachment format |
+| `sample_count` | MSAA sample count |
+| `color_attachment_count` | Number of color attachments (1 for forward, 3+ for G-buffer) |
+| `blend_mode` | Alpha blending mode (`gr_alpha_blend`) |
+| `color_write_mask` | RGBA channel write mask |
+| `layout_hash` | Vertex layout hash (ignored for vertex pulling shaders) |
+| `stencil_*` | Stencil test configuration (compare op, masks, reference, ops) |
+
+**Key Comparison**: For shaders using vertex pulling, the `layout_hash` field is excluded from comparison and hashing since these shaders do not use vertex attributes.
+
+### 11.6 Dynamic State Configuration
+
+The renderer uses dynamic state extensively to reduce pipeline permutations. This allows state changes without pipeline switches.
+
+**Core Dynamic States** (Vulkan 1.4 / Extended Dynamic State 1+2, always available):
+| State | Command |
+|-------|---------|
+| Viewport | `vkCmdSetViewport` |
+| Scissor | `vkCmdSetScissor` |
+| Line Width | `vkCmdSetLineWidth` |
+| Cull Mode | `vkCmdSetCullMode` |
+| Front Face | `vkCmdSetFrontFace` |
+| Primitive Topology | `vkCmdSetPrimitiveTopology` |
+| Depth Test Enable | `vkCmdSetDepthTestEnable` |
+| Depth Write Enable | `vkCmdSetDepthWriteEnable` |
+| Depth Compare Op | `vkCmdSetDepthCompareOp` |
+| Stencil Test Enable | `vkCmdSetStencilTestEnable` |
+
+**Extended Dynamic State 3** (optional, capability-gated):
+| State | Capability Flag | Command |
+|-------|----------------|---------|
+| Color Blend Enable | `extDyn3Caps.colorBlendEnable` | `vkCmdSetColorBlendEnableEXT` |
+| Color Write Mask | `extDyn3Caps.colorWriteMask` | `vkCmdSetColorWriteMaskEXT` |
+| Polygon Mode | `extDyn3Caps.polygonMode` | `vkCmdSetPolygonModeEXT` |
+| Rasterization Samples | `extDyn3Caps.rasterizationSamples` | `vkCmdSetRasterizationSamplesEXT` |
+
+Implementation (`VulkanPipelineManager.cpp`):
+```cpp
+std::vector<vk::DynamicState> VulkanPipelineManager::BuildDynamicStateList(
+    bool supportsExtendedDynamicState3, const ExtendedDynamicState3Caps& caps)
+{
+    std::vector<vk::DynamicState> dynamicStates = {
+        vk::DynamicState::eViewport,          vk::DynamicState::eScissor,
+        vk::DynamicState::eLineWidth,         vk::DynamicState::eCullMode,
+        vk::DynamicState::eFrontFace,         vk::DynamicState::ePrimitiveTopology,
+        vk::DynamicState::eDepthTestEnable,   vk::DynamicState::eDepthWriteEnable,
+        vk::DynamicState::eDepthCompareOp,    vk::DynamicState::eStencilTestEnable,
+    };
+
+    if (supportsExtendedDynamicState3) {
+        if (caps.colorBlendEnable)       dynamicStates.push_back(vk::DynamicState::eColorBlendEnableEXT);
+        if (caps.colorWriteMask)         dynamicStates.push_back(vk::DynamicState::eColorWriteMaskEXT);
+        if (caps.polygonMode)            dynamicStates.push_back(vk::DynamicState::ePolygonModeEXT);
+        if (caps.rasterizationSamples)   dynamicStates.push_back(vk::DynamicState::eRasterizationSamplesEXT);
+    }
+    return dynamicStates;
+}
+```
+
+### 11.7 Vertex Layout Conversion
+
+For shaders using `VertexInputMode::VertexAttributes`, the engine's `vertex_layout` is converted to Vulkan vertex input state:
+
+```cpp
+VertexInputState convertVertexLayoutToVulkan(const vertex_layout& layout);
+```
+
+**Vertex Attribute Locations** (OpenGL convention for shader compatibility):
+| Location | Attribute Types |
+|----------|-----------------|
+| 0 | POSITION (POSITION2, POSITION3, POSITION4, SCREEN_POS) |
+| 1 | COLOR (COLOR3, COLOR4, COLOR4F) |
+| 2 | TEXCOORD (TEX_COORD2, TEX_COORD4) |
+| 3 | NORMAL |
+| 4 | TANGENT |
+| 5 | MODEL_ID |
+| 6 | RADIUS |
+| 7 | UVEC |
+| 8-11 | MATRIX4 (4 consecutive vec4 locations) |
+
+**Special Cases**:
+- **MATRIX4**: Spans 4 consecutive shader locations (8, 9, 10, 11) since each mat4 column is a separate vec4 attribute
+- **Instance Divisors**: Bindings with `divisor > 0` use `VK_VERTEX_INPUT_RATE_INSTANCE`; divisors > 1 require `VK_EXT_vertex_attribute_divisor`
+
+### 11.8 Dynamic Rendering
+
+The pipeline manager targets Vulkan 1.4 and uses dynamic rendering (`VK_KHR_dynamic_rendering`) exclusively. Pipelines are created without a `VkRenderPass`:
+
+```cpp
+vk::PipelineRenderingCreateInfo renderingInfo{};
+renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorFormats.size());
+renderingInfo.pColorAttachmentFormats = colorFormats.data();
+renderingInfo.depthAttachmentFormat = depthFormat;
+renderingInfo.stencilAttachmentFormat = formatHasStencil(depthFormat) ? depthFormat : vk::Format::eUndefined;
+
+pipelineInfo.renderPass = VK_NULL_HANDLE;
+pipelineInfo.pNext = &renderingInfo;
+```
+
+This allows pipeline creation without knowing the render pass ahead of time, enabling more flexible rendering paths.
 
 ---
 
